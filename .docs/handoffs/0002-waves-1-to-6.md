@@ -8,8 +8,8 @@
 
 Build the R package `rcs` as the plan describes. Wave 0 (skeleton, contracts, test and benchmark infrastructure) is done and pushed. This session orchestrates waves 1 to 6 and writes no package code itself.
 
-- **Done:** work package 0. The package installs and checks clean with every cross-package function present as a documented stub. `devtools::test()`: 617 expectations, 0 failed, 0 skipped. `devtools::check()`: 0 errors, 0 warnings, 0 notes. Coverage 99.3%.
-- **In progress:** nothing. The project owner reviews the contracts before wave 1 starts; do not start before they say so, and apply what they change first (see "Open points").
+- **Done:** work package 0. The package installs and checks clean with every cross-package function present as a documented stub. `devtools::test()`: 619 expectations, 0 failed, 0 skipped. `devtools::check()`: 0 errors, 0 warnings, 0 notes. Coverage 99.3%.
+- **In progress:** nothing. The project owner reviewed the contracts on 2026-11-20 and decided the four open points (see below). The changes that apply those decisions are verified but may still be uncommitted in the working tree (`R/schema.R`, `R/utils.R`, `R/hooks.R`, two test files, the plan, this handoff); worktrees start from the last commit, so they must be committed before wave 1.
 - **Not started:** work packages A to M (waves 1 to 6).
 
 ## Files touched
@@ -75,7 +75,7 @@ Rules for stubs:
 
 ## Decisions taken in wave 0
 
-Where the plan left a signature or a shape open. All are for the project owner to confirm or change before wave 1.
+Where the plan left a signature or a shape open. Reviewed by the project owner on 2026-11-20.
 
 Catalog and files:
 
@@ -131,14 +131,14 @@ Simulated data and tests:
 35. Test level when `RCS_TEST_LEVEL` is unset: `cran` on CRAN and under `R CMD check` (`testthat::is_checking()`), else `default`. `property_cases()` gives the number of cases of a property test per level.
 36. `DESCRIPTION`: `Depends: R (>= 4.4.0)`; no `VignetteBuilder` yet (K adds it with the first vignette). `dplyr` and `tidyselect` are imported but not yet called; `ignore_unused_imports()` in `R/rcs-package.R` names them, and the package that first uses one removes its line.
 
-## Open points for the project owner
+## Open points, decided by the project owner on 2026-11-20
 
-Found in the plan while writing the contracts; each needs a decision before the package named.
+All four are applied to the plan, the code and the tests; nothing is open.
 
-1. **Empty geometries and `partition = "h3"` (B, C, E).** An empty geometry has no cell, so `h3` is `NA`; the plan says partition columns may not contain `NA`; the simulated polygons hold an empty geometry and are to be partitioned by `h3`. Proposal: rows without a cell go to one partition of their own with the value `null`.
-2. **Reproducible file MD5s (C).** The embedded `rcs` metadata follows the plan and leaves out `version`, the totals, `writer`, `created`, `updated`. It still holds `r_version`, `rcs_version`, `history` and the dataset's `bbox`. So the same data written after an upgrade of R or of the package, or after switching the dataset's history setting, gets new MD5s and a new version instead of "unchanged"; and in `update` the kept partitions carry the old extent. Proposal: leave these four out as well (one line in `entry_not_embedded`, `R/schema.R`).
-3. **"NA in every column" of `rcs_sim_table()`.** Not done for the key and partition columns, see decision 32.
-4. **Which columns a read drops (F).** The plan drops `.rcs_id`; it does not say whether `h3`, `bbox` and `h3_p<r>` are returned.
+1. **Empty geometries and `partition = "h3"` (B, C, E).** Rows without a cell (`h3` NA) form one partition of their own; its value is `null` in `partition_values` and in the path (`h3_p2=null`). `partition_values_json()` and `data_file_path()` do this already.
+2. **Reproducible file MD5s (C).** The embedded `rcs` metadata also leaves out `bbox`, `history`, `r_version` and `rcs_version` (`entry_not_embedded`, `R/schema.R`).
+3. **`rcs_sim_table()`.** No missing value in `shop_id`, `date`, `product` and `year`; confirmed.
+4. **Columns a read returns (F).** `.rcs_id` is dropped; `h3`, `bbox` and `h3_p<r>` are returned.
 
 ## How to verify
 
@@ -146,19 +146,19 @@ In an R session of your own (see the `run-r` skill), from the project folder:
 
 ```r
 devtools::document()
-devtools::test()     # 617 expectations, 0 failed, 0 skipped
+devtools::test()     # 619 expectations, 0 failed, 0 skipped
 devtools::check()    # 0 errors, 0 warnings, 0 notes
 ```
 
 ```
-git status           # clean
+git status           # clean, or only the decision changes named above
 git log --oneline    # the wave 0 commit on main, pushed
 ```
 
 ## Next steps
 
 1. Read `CLAUDE.md`, the whole plan, this handoff, and the header comments of `R/schema.R`, `R/backend.R`, `R/hooks.R` and `R/trace.R`.
-2. Confirm with the project owner that the contracts are approved, and apply their answers to the open points to the plan and the code (run the verification, commit, push) before launching anything.
+2. Run the verification above; it must pass before anything is launched. If `git status` shows the uncommitted changes named under "Where things stand", commit them with explicit paths and push; this is approved by the project owner.
 3. Run waves 1 to 6 by the procedure below.
 
 Orchestration procedure:

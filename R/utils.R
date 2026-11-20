@@ -182,7 +182,8 @@ lock_dir <- "_lock"
 #'   values, in the order of the `partition` columns; `NULL` or empty for a
 #'   one-file dataset. Factors and dates are written as strings, `integer64`
 #'   as strings (an int64 does not fit a JSON number), numbers with full
-#'   precision.
+#'   precision. `NA` is written as `null`; it occurs only in an `h3_p<r>`
+#'   partition, for the rows without a cell (empty geometries).
 #' @return One string: a JSON object, `"{}"` when there are no values.
 #' @noRd
 partition_values_json <- function(values = NULL) {
@@ -203,7 +204,8 @@ partition_values_json <- function(values = NULL) {
 #'
 #' `<dataset>/part-<version>.<ext>` for a one-file dataset,
 #' `<dataset>/<col>=<value>[/<col>=<value>]/part-<version>.<ext>` otherwise,
-#' values URL-encoded. Paths are never parsed for values.
+#' values URL-encoded, `NA` written as `null`. Paths are never parsed for
+#' values.
 #'
 #' @param dataset Full dataset name (one string).
 #' @param version The dataset version at which the file is created.
@@ -217,7 +219,7 @@ data_file_path <- function(dataset, version, values = NULL, ext = "parquet") {
   parts <- if (length(values) > 0) {
     encoded <- vapply(
       values,
-      function(v) utils::URLencode(as.character(v), reserved = TRUE),
+      function(v) if (is.na(v)) "null" else utils::URLencode(as.character(v), reserved = TRUE),
       character(1)
     )
     paste0(names(values), "=", encoded, collapse = "/")

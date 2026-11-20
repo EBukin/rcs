@@ -590,14 +590,17 @@ rows_from_list <- function(items, which) {
 # Metadata embedded in data files ---------------------------------------------
 
 entry_not_embedded <- c(
-  "version", "n_files", "rows", "bytes", "writer", "created", "updated"
+  "version", "n_files", "rows", "bytes", "bbox", "history",
+  "writer", "r_version", "rcs_version", "created", "updated"
 )
 
 #' The `rcs` key-value metadata of a Parquet data file
 #'
 #' The JSON of the catalog entry without `version`, the totals (`n_files`,
-#' `rows`, `bytes`), `writer`, `created` and `updated`: nothing that changes
-#' when the same data are written again, so that file MD5s are reproducible.
+#' `rows`, `bytes`), the dataset's `bbox`, `history`, `writer`, `r_version`,
+#' `rcs_version`, `created` and `updated`: nothing that changes when the same
+#' data are written again, by any version of R or of the package and under
+#' any history setting, so that file MD5s are reproducible.
 #' `entry_from_metadata_json()` parses it back; the left-out columns are `NA`
 #' (`version` is `NA` too, so the result does not pass `schema_validate()`
 #' until `store_rebuild()` has filled it).

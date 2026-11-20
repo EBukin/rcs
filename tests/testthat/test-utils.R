@@ -101,6 +101,10 @@ test_that("partition values have one canonical JSON form", {
   )
   expect_identical(partition_values_json(list(x = 0.1)), "{\"x\":0.1}")
   expect_identical(
+    partition_values_json(list(h3_p2 = bit64::NA_integer64_)),
+    "{\"h3_p2\":null}"
+  )
+  expect_identical(
     partition_values_json(tibble::tibble(year = 2024L, shop = "a")),
     "{\"year\":2024,\"shop\":\"a\"}"
   )
@@ -117,6 +121,10 @@ test_that("data file and manifest paths follow the plan", {
   expect_identical(
     data_file_path("sales/daily", version, list(year = 2024L, shop = "a b/c")),
     "sales/daily/year=2024/shop=a%20b%2Fc/part-0123456789abcdef.parquet"
+  )
+  expect_identical(
+    data_file_path("polygons", version, list(h3_p2 = bit64::NA_integer64_)),
+    "polygons/h3_p2=null/part-0123456789abcdef.parquet"
   )
   expect_identical(
     data_file_path("height", version, ext = "tif"),

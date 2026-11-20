@@ -250,21 +250,28 @@ test_that("the embedded metadata leaves out what changes between writes", {
   entry <- example_entry()
   json <- entry_metadata_json(entry)
   parsed <- jsonlite::fromJSON(json, simplifyVector = FALSE)
-  expect_false(any(c("version", "n_files", "rows", "bytes", "writer", "created", "updated") %in% names(parsed)))
+  left_out <- c(
+    "version", "n_files", "rows", "bytes", "bbox", "history",
+    "writer", "r_version", "rcs_version", "created", "updated"
+  )
+  expect_false(any(left_out %in% names(parsed)))
   expect_identical(parsed$dataset, "shapes/polygons")
   expect_identical(parsed$key, list("id"))
-  expect_identical(parsed$bbox$xmin, -30L)
+  expect_identical(parsed$h3_res, 5L)
 
   later <- example_entry(
     version = "fedcba9876543210", rows = 99, n_files = 7, bytes = 1,
+    history = FALSE, bbox = c(xmin = -29, ymin = 7, xmax = -25, ymax = 8),
     created = as.POSIXct("2027-01-01", tz = "UTC")
   )
+  later$r_version <- "9.9.9"
+  later$rcs_version <- "9.9.9"
   expect_identical(entry_metadata_json(later), json)
   expect_false(identical(entry_metadata_json(example_entry(title = "Other")), json))
 
   back <- entry_from_metadata_json(json)
   expect_identical(names(back), names(entry))
-  kept <- setdiff(names(entry), c("version", "n_files", "rows", "bytes", "writer", "created", "updated"))
+  kept <- setdiff(names(entry), left_out)
   expect_identical(back[kept], entry[kept])
   expect_true(is.na(back$version))
   expect_true(is.na(back$rows))

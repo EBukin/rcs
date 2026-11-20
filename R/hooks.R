@@ -84,7 +84,9 @@ h3_parent <- function(cells, res) {
 #'     order: by `h3`, then the key columns, ties in the order of `x`; with
 #'     `geocode = FALSE` by the key columns, or as in `x` without a key.
 #'     `.rcs_id` is `id_start`, `id_start + 1`, ... in that order. An empty
-#'     geometry has `h3 = NA`, an all-`NA` `bbox`, and sorts last.
+#'     geometry has `h3 = NA`, an all-`NA` `bbox`, and sorts last; with
+#'     `partition = "h3"` such rows form one partition of their own, whose
+#'     value is `NA` (`null` in `partition_values` and in the path).
 #'   * `index`: the rows of the index table for the crossing rows, a tibble
 #'     with `.rcs_id`, `h3` (every cell the row touches), `h3_main` (the
 #'     row's `h3`) (all `integer64`) and `share` (double: fraction of the
@@ -112,7 +114,8 @@ geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
 #' @param data A data frame with a WKB column `geometry` (a list of raw
 #'   vectors, as written by `geo_encode()` and as Arrow returns a `binary`
 #'   column). All other columns are kept as they are, including `.rcs_id`,
-#'   `h3` and `bbox` when present; dropping them is the caller's business.
+#'   `h3` and `bbox` when present. A read drops `.rcs_id` (unless asked for)
+#'   and returns `h3`, `bbox` and `h3_p<r>`; that is the caller's business.
 #' @param crs The dataset's CRS: one PROJJSON string (`entry$crs`).
 #' @return An `sf` object (a tibble) with the same rows in the same order
 #'   and the geometry column `geometry` as its last column, in `crs`. Aborts
