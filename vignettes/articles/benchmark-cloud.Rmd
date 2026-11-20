@@ -1,0 +1,174 @@
+---
+title: "Benchmark: a store in the cloud against a local copy"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
+results <- function(name) {
+  path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
+  tibble::as_tibble(arrow::read_parquet(path))
+}
+cloud <- results("cloud")
+counters <- results("cloud-counters")
+knitr::read_chunk(file.path("..", "..", "bench", "cloud.R"))
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+med <- function(case, expression) cloud$median_s[cloud$case == case & cloud$expression == expression]
+```
+
+This article reads stored results; it does not run the benchmark. The script
+is `bench/cloud.R`; its code is shown below as it was run.
+
+## Question
+
+A store kept in Google Cloud Storage is read by streaming: Arrow fetches the
+byte ranges it needs from the bucket. How does that compare with
+downloading whole files first, and with reading a local copy of the same
+store? What does a first connection cost (new credentials and file system)
+against a later one, and what does MD5 verification cost when the bucket
+reports the MD5 of each object? The cost of `store_sync()` is not measured
+(see Limits).
+
+## Setup
+
+```{r}
+env <- cloud[1, grep("^env_", names(cloud))]
+knitr::kable(data.frame(
+  item = sub("^env_", "", names(env)),
+  value = vapply(env, function(v) as.character(v[[1]]), character(1)),
+  row.names = NULL
+))
+```
+
+One store of `r cloud$datasets[[1]]` catalog entries (98 small tables, a
+table of 1e6 rows partitioned by year in `r cloud$sales_files[[1]]` files of
+`r round(cloud$sales_bytes[[1]] / 1e6, 1)` MB together, 1e5 polygons and
+their index table; `r cloud$store_objects[[1]]` files,
+`r round(cloud$store_bytes[[1]] / 1e6, 1)` MB) is written to a local folder
+and its files are copied unchanged under a random prefix of a test bucket,
+removed at the end. Each measure is timed with `bench_run()` (five
+repetitions, median reported).
+
+- Connect: `store_connect()` to the local copy; to the bucket cold (the Arrow
+  file system and the access token created again before every repetition,
+  as in a new R session) and warm.
+- Reads: `store_read()` streaming from the bucket; the dataset's files
+  downloaded whole (`be_get()`) into an empty folder; `store_read()` of the
+  local copy. Download-then-read is the sum of the last two.
+- MD5: `be_md5()` of the table's files (object metadata on the bucket,
+  hashing the files on the local copy), and `store_check()` without `x`
+  (MD5, rows and schema from the Parquet footers).
+
+```{r setup, eval = FALSE}
+```
+
+```{r data, eval = FALSE}
+```
+
+```{r connect, eval = FALSE}
+```
+
+```{r reads, eval = FALSE}
+```
+
+```{r md5, eval = FALSE}
+```
+
+```{r run, eval = FALSE}
+```
+
+## Results
+
+```{r}
+shown <- cloud[c("case", "expression", "run", "median_s", "min_s", "max_s")]
+shown[4:6] <- lapply(shown[4:6], signif, 3)
+knitr::kable(shown)
+```
+
+Streaming against download, in seconds:
+
+```{r}
+cases <- c("sales full", "sales year and columns", "polygons full")
+compare <- data.frame(
+  case = cases,
+  stream = sapply(cases, med, "stream"),
+  download = sapply(cases, med, "download"),
+  local_read = sapply(cases, med, "local")
+)
+compare$download_then_read <- compare$download + compare$local_read
+compare$stream_over_local <- compare$stream / compare$local_read
+compare[-1] <- lapply(compare[-1], signif, 3)
+knitr::kable(compare, row.names = FALSE)
+```
+
+For "sales year and columns" the download is of the one file of that year,
+which the catalog names; streaming fetches only the three columns of it.
+
+```{r, eval = has_ggplot, fig.width = 7, fig.height = 3.5, fig.alt = "Grouped horizontal bars of median seconds for three reads: the full table, one year and three columns of the table, and the full polygons; bars for streaming from the bucket, download then local read, and local read only."}
+library(ggplot2)
+long <- data.frame(
+  case = rep(compare$case, 3),
+  method = rep(c("stream from bucket", "download, then read", "local copy"), each = nrow(compare)),
+  seconds = c(compare$stream, compare$download_then_read, compare$local_read)
+)
+ggplot(long, aes(x = seconds, y = case, fill = method)) +
+  geom_col(position = "dodge") +
+  labs(x = "Median seconds", y = NULL, fill = NULL) +
+  theme_minimal()
+```
+
+Work counters (backend calls and catalog files read):
+
+```{r}
+shown <- counters[counters$counter %in% c("backend_call", "catalog_read", "file_open", "bytes_down"), ]
+shown <- stats::aggregate(n ~ case + expression + counter, data = shown, FUN = sum)
+wide <- stats::reshape(shown, idvar = c("case", "expression"), timevar = "counter", direction = "wide")
+names(wide) <- sub("^n\\.", "", names(wide))
+wide[is.na(wide)] <- 0
+knitr::kable(wide, row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+## Verdict
+
+- Connect to the bucket: `r signif(med("connect", "connect_gcs_cold"), 2)` s
+  cold, `r signif(med("connect", "connect_gcs_warm"), 2)` s warm, against
+  `r signif(med("connect", "connect_local"), 2)` s for the local copy, with a
+  catalog of `r cloud$datasets[[1]]` entries. A connection reads two catalog
+  files and the store's settings, so its cost is a few round trips, not the
+  size of the store.
+- Full reads: streaming takes `r signif(med("sales full", "stream") / med("sales full", "local"), 2)`
+  times as long as reading the local copy for the table, and
+  `r signif(med("sales full", "stream") / (med("sales full", "download") + med("sales full", "local")), 2)`
+  times as long as downloading the files first and reading them.
+  The decoding of the rows in R costs the same on both sides, so streaming
+  adds little to a full read.
+- Filtered reads: one year and three columns streamed in
+  `r signif(med("sales year and columns", "stream"), 2)` s, against
+  `r signif(med("sales year and columns", "download") + med("sales year and columns", "local"), 2)` s
+  to download that year's file and read it locally. Streaming is slower
+  here because `store_read()` first opens an Arrow dataset over all
+  `r cloud$sales_files[[1]]` files of the version (Arrow asks the bucket for
+  each file's information and reads the first file's footer), and only then
+  prunes the partitions and opens the remaining file again. On a 2-file copy
+  of the table, opening the list took 0.36 s against 0.11 s when the schema
+  was given; pruning on the catalog before the first open, and passing a
+  schema, would remove most of this cost.
+- MD5 verification on the bucket reads object metadata: `be_md5()` of
+  `r cloud$sales_files[[1]]` files takes `r signif(med("md5 of sales files", "gcs"), 2)` s
+  (`r signif(med("md5 of sales files", "local"), 2)` s to hash the local
+  files); the whole integrity check takes
+  `r signif(med("check sales", "gcs"), 2)` s on the bucket against
+  `r signif(med("check sales", "local"), 2)` s locally, because it reads the
+  Parquet footer of each file, one file after the other, over the network.
+  MD5 verification itself is cheap on the bucket; the footers are the cost.
+
+## Limits
+
+- One machine and one network connection; its bandwidth to the bucket bounds
+  every cloud number. Two other agents ran tests and rendered documents on
+  the machine meanwhile.
+- The cost of `store_sync()` is not measured: the function did not exist
+  when this benchmark was written (work package G). Its transfers are those
+  of a write's upload and verification, measured in `benchmark-write.Rmd`.
+- "Cold" means a new Arrow file system and a new access token in the same R
+  session; the time to start R and load the package is not included.
+- Spatial queries on the bucket are measured in `benchmark-spatial.Rmd`.

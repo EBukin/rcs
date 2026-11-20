@@ -1,0 +1,164 @@
+---
+title: "Benchmark: how writes grow with the data"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
+results <- function(name) {
+  path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
+  tibble::as_tibble(arrow::read_parquet(path))
+}
+scale <- results("scale")
+knitr::read_chunk(file.path("..", "..", "bench", "scale.R"))
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+gb <- function(x) round(x / 1024^3, 2)
+by_size <- do.call(rbind, lapply(split(scale, paste(scale$kind, scale$rows)), function(d) {
+  data.frame(
+    kind = d$kind[[1]], rows = d$rows[[1]], reps = nrow(d),
+    median_s = stats::median(d$seconds), min_s = min(d$seconds), max_s = max(d$seconds),
+    s_per_1e6 = stats::median(d$seconds_per_1e6_rows),
+    geocode_s = stats::median(d$step_geocode_s), sort_s = stats::median(d$step_sort_s),
+    serialise_s = stats::median(d$step_serialise_s), check_s = stats::median(d$step_check_s),
+    x_gb = gb(d$x_bytes[[1]]), sim_peak_gb = gb(d$sim_peak_rss_bytes[[1]]),
+    rss_before_gb = gb(d$rss_before_bytes[d$rep == 1]),
+    peak_gb = gb(d$peak_rss_bytes[d$rep == 1]), increase_gb = gb(d$rss_increase_bytes[d$rep == 1]),
+    memory_over_x = d$memory_over_x[d$rep == 1], peak_any_gb = gb(max(d$peak_rss_bytes)),
+    staging_gb = gb(max(d$staging_peak_bytes)), store_gb = gb(d$store_bytes[[1]]),
+    files = d$files[[1]], sim_s = d$sim_s[[1]]
+  )
+}))
+by_size <- by_size[order(by_size$kind, by_size$rows), ]
+```
+
+This article reads stored results; it does not run the benchmark. The script
+is `bench/scale.R`; its code is shown below as it was run.
+
+## Question
+
+How do the time, the memory and the staging disk of `store_write()` grow
+with the number of rows, from 1e5 to 5e6 polygons? Tables are measured
+alongside for comparison.
+
+## Setup
+
+```{r}
+env <- scale[1, grep("^env_", names(scale))]
+knitr::kable(data.frame(
+  item = sub("^env_", "", names(env)),
+  value = vapply(env, function(v) as.character(v[[1]]), character(1)),
+  row.names = NULL
+))
+```
+
+`rcs_sim_polygons()` written with `partition = "h3"` and `rcs_sim_table()`
+written with its key and `partition = "year"`, into a new local store for
+every repetition, one geocoding worker. Each size runs in its own R process
+(a mirai daemon) that makes the data and writes it; the benchmark's own
+process samples the daemon's resident memory and the size of the staging
+folder every 0.2 s during each write. Memory is reported as the increase of
+resident memory during the write over the memory held just before it (the
+data `x` and the loaded packages), and against the size of `x` in memory
+(`object.size()`). Steps are timed as in `benchmark-write.Rmd`.
+
+```{r setup, eval = FALSE}
+```
+
+```{r worker, eval = FALSE}
+```
+
+```{r watch, eval = FALSE}
+```
+
+```{r run, eval = FALSE}
+```
+
+## Results
+
+```{r}
+knitr::kable(
+  by_size[c("kind", "rows", "reps", "median_s", "min_s", "max_s", "s_per_1e6", "geocode_s", "sort_s", "serialise_s", "check_s")],
+  row.names = FALSE, digits = 1, format.args = list(big.mark = ",")
+)
+```
+
+`s_per_1e6` is the median time per million rows; constant values mean
+linear growth.
+
+```{r}
+knitr::kable(
+  by_size[c("kind", "rows", "x_gb", "sim_peak_gb", "rss_before_gb", "peak_gb", "increase_gb", "memory_over_x", "peak_any_gb", "staging_gb", "store_gb", "files")],
+  row.names = FALSE, digits = 2, format.args = list(big.mark = ",")
+)
+```
+
+Sizes in GiB. Memory columns are those of the first repetition, which
+starts in a process that has only made the data: `rss_before_gb` is the
+resident memory just before the write, `peak_gb` the largest resident memory
+during it, `increase_gb` the difference and `memory_over_x` that difference
+divided by `x_gb`. `peak_any_gb` is the largest resident memory over all
+repetitions (R keeps freed memory, so later repetitions start higher), and
+`sim_peak_gb` that of making the data with `rcs_sim_*()`. `staging_gb` is
+the largest size of the staging folder during a write, `store_gb` the size
+of the written files.
+
+```{r, eval = has_ggplot, fig.width = 7, fig.height = 4, fig.alt = "Two log-log line charts against the number of rows, for polygons and tables: the median write time in seconds, and the peak increase of memory in GiB. Both grow roughly in proportion to the number of rows."}
+library(ggplot2)
+long <- rbind(
+  data.frame(kind = by_size$kind, rows = by_size$rows, measure = "write time, s", value = by_size$median_s),
+  data.frame(kind = by_size$kind, rows = by_size$rows, measure = "memory increase, GiB", value = by_size$increase_gb)
+)
+ggplot(long, aes(x = rows, y = value, colour = kind)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~measure, scales = "free_y") +
+  scale_x_log10() +
+  scale_y_log10() +
+  labs(x = "Rows (log scale)", y = NULL, colour = NULL) +
+  theme_minimal()
+```
+
+## Verdict
+
+```{r, include = FALSE}
+poly <- by_size[by_size$kind == "polygons", ]
+tab <- by_size[by_size$kind == "table", ]
+largest <- poly[which.max(poly$rows), ]
+```
+
+- Time grows about linearly: from
+  `r round(poly$s_per_1e6[[1]])` to `r round(largest$s_per_1e6)` seconds per
+  million polygons between `r format(min(poly$rows), big.mark = ",", scientific = FALSE)`
+  and `r format(largest$rows, big.mark = ",", scientific = FALSE)` rows;
+  geocoding stays the largest part
+  (`r round(100 * largest$geocode_s / largest$median_s)`% at
+  `r format(largest$rows, big.mark = ",", scientific = FALSE)` rows), then
+  the choice of the H3 partition resolution, counted in "sort"
+  (`r round(100 * largest$sort_s / largest$median_s)`%).
+- Tables grow linearly too, but the serialization check grows with the
+  number of files, because it restores a whole row group of every file:
+  `r round(100 * tab$check_s[which.max(tab$rows)] / tab$median_s[which.max(tab$rows)])`%
+  of the write of `r format(max(tab$rows), big.mark = ",", scientific = FALSE)`
+  rows in `r tab$files[which.max(tab$rows)]` files (see
+  `benchmark-write.Rmd` for the cause and a remedy).
+- Memory: from 1e6 rows on, a polygon write needs at most
+  `r sprintf("%.2f", max(poly$memory_over_x[poly$rows >= 1e6]))` times the size of
+  `x` on top of `x` itself (`r largest$increase_gb` GiB for
+  `r format(largest$rows, big.mark = ",", scientific = FALSE)` polygons of
+  `r largest$x_gb` GiB), and a table write at most
+  `r sprintf("%.2f", max(tab$memory_over_x[tab$rows >= 1e6]))` times. Small writes
+  show larger ratios (up to `r round(max(by_size$memory_over_x), 1)`)
+  because fixed costs (Arrow buffers, loaded code) weigh more.
+- Staging disk is about the size of the written files (the largest staging
+  folder was `r largest$staging_gb` GiB for files of `r largest$store_gb` GiB):
+  the files are staged once and copied.
+
+## Limits
+
+- One machine with `r env$env_ram_gb` GB of RAM; two other agents ran tests
+  and rendered documents on it meanwhile. Fewer repetitions were run for the
+  largest sizes (column `reps`) because one repetition takes minutes.
+- Resident memory is sampled every 0.2 s, so a peak shorter than that can be
+  missed; R also returns freed memory to the system late, so the
+  "before" level of later repetitions is higher than that of the first.
+- Local store only; the upload to a cloud bucket adds time but no memory
+  (files are streamed from the staging folder).
