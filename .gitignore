@@ -1,0 +1,23 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+renv/library/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code: per-user settings stay out of the repo
+.claude/settings.local.json
+
+# R package build products
+*.Rcheck/
+*.tar.gz
+inst/doc
+/docs/

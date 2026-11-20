@@ -1,0 +1,39 @@
+---
+output: github_document
+---
+
+<!-- README.md is generated from README.Rmd. Please edit that file -->
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# rcs
+
+rcs (R Cloud Storage) stores tabular, geospatial vector and raster data from
+R in one store, mainly as Parquet files. A store is kept in one primary
+location and any number of secondary ones, local folders or cloud buckets.
+Every operation starts from the catalog of the store.
+
+The package is under construction: this version holds the foundations
+(catalog schema, simulated data, work counters) and no storage functions yet.
+
+## Installation
+
+``` r
+# install.packages("pak")
+pak::pak("EBukin/rcs")
+```
+
+## Simulated data
+
+The package is developed and tested on simulated data only. The generators
+are exported for examples:
+
+```{r}
+library(rcs)
+rcs_sim_table(5)
+```

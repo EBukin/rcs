@@ -1,0 +1,46 @@
+Package: rcs
+Title: Catalog-First Cloud and Local Storage of Tabular and Geospatial Data
+Version: 0.0.0.9000
+Authors@R:
+    person("Eduard", "Bukin", , "edwardbukin@gmail.com", role = c("aut", "cre", "cph"))
+Description: Stores tabular, geospatial vector and raster data in one store
+    that is kept in a primary location and any number of secondary ones,
+    local folders or cloud buckets, mainly as 'Parquet' files. Every
+    operation starts from the catalog of the store: datasets are inspected,
+    streamed, sampled and written through it, and every write lands in all
+    locations with verified checksums.
+License: MIT + file LICENSE
+URL: https://github.com/EBukin/rcs
+BugReports: https://github.com/EBukin/rcs/issues
+Depends:
+    R (>= 4.4.0)
+Imports:
+    arrow,
+    bit64,
+    cli,
+    digest,
+    dplyr,
+    jsonlite,
+    rlang,
+    sf,
+    tibble,
+    tidyselect,
+    vctrs,
+    withr,
+    wk
+Suggests:
+    bench,
+    covr,
+    duckdb,
+    googleCloudStorageR,
+    h3jsr,
+    h3o,
+    knitr,
+    mirai,
+    rmarkdown,
+    terra,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Config/roxygen2/version: 8.1.1
