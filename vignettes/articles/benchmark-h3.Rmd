@@ -1,0 +1,143 @@
+---
+title: "Benchmark: H3 package and the cost of geocoding"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
+results <- function(name) {
+  path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
+  tibble::as_tibble(arrow::read_parquet(path))
+}
+backends <- results("h3-backends")
+inside <- results("h3-inside-rows")
+knitr::read_chunk(file.path("..", "..", "bench", "h3-backends.R"))
+```
+
+This article reads stored results; it does not run the benchmark. The script
+is `bench/h3-backends.R`; its code is shown below as it was run.
+
+## Question
+
+The geospatial encoding needs, for every row, the H3 cells of the four
+corners of its bounding box, and for the rows that cross cell edges the
+cells whose centre lies inside the polygon and the cell polygons. Two R
+packages offer these operations: `h3o` (Rust) and `h3jsr` (JavaScript through
+V8). Which is faster on the package's own workload, do they agree, and what
+does geocoding cost per row once one is chosen?
+
+A second question comes from the plan's open points: a row whose four box
+corners fall in one cell is treated as lying inside that cell. Box edges
+along parallels are not great circles, so how often does such a row reach
+into another cell, by row size and latitude?
+
+## Setup
+
+```{r}
+env <- backends[1, grep("^env_", names(backends))]
+knitr::kable(data.frame(
+  item = sub("^env_", "", names(env)),
+  value = vapply(env, function(v) as.character(v[[1]]), character(1)),
+  row.names = NULL
+))
+```
+
+Simulated polygons (`rcs_sim_polygons()`, open ocean, 10% built across cell
+edges), resolution 5. Each operation is timed with `bench_run()` (at least
+five repetitions, median reported).
+
+```{r setup, eval = FALSE}
+```
+
+```{r data, eval = FALSE}
+```
+
+```{r corners, eval = FALSE}
+```
+
+```{r polyfill, eval = FALSE}
+```
+
+```{r boundaries, eval = FALSE}
+```
+
+```{r encode, eval = FALSE}
+```
+
+```{r run, eval = FALSE}
+```
+
+## Results
+
+```{r}
+shown <- backends[c("case", "expression", "points", "median_s", "min_s", "max_s", "us_per_item")]
+shown$median_s <- signif(shown$median_s, 3)
+shown$min_s <- signif(shown$min_s, 3)
+shown$max_s <- signif(shown$max_s, 3)
+shown$us_per_item <- signif(shown$us_per_item, 3)
+knitr::kable(shown)
+```
+
+`points` counts the items of each operation: box corners, crossing polygons,
+distinct cells, or rows for `encode_h3o`. Both packages return the same cell
+for every corner: `corners_agree` is `r all(backends$corners_agree)` in every
+case.
+
+```{r}
+ratio <- function(case, op) {
+  rows <- backends[backends$case == case, ]
+  rows$median_s[rows$expression == paste0(op, "_h3jsr")] /
+    rows$median_s[rows$expression == paste0(op, "_h3o")]
+}
+speedup <- expand.grid(case = unique(backends$case), operation = c("corners", "polyfill", "boundaries"),
+  stringsAsFactors = FALSE)
+speedup$h3jsr_over_h3o <- round(mapply(ratio, speedup$case, speedup$operation), 1)
+knitr::kable(speedup)
+```
+
+Inside rows, before and after the remedy:
+
+```{r}
+knitr::kable(inside[c("lat", "width_km", "boxes", "inside", "violations", "inside_after_remedy", "violations_after_remedy")])
+```
+
+```{r inside-rows, eval = FALSE}
+```
+
+## Verdict
+
+```{r, include = FALSE}
+largest <- backends[backends$rows == max(backends$rows), ]
+per_row_us <- 1e6 * largest$median_s[largest$expression == "encode_h3o"] / max(backends$rows)
+```
+
+- `h3o` is the H3 package of `rcs`. It is faster than `h3jsr` on every
+  operation measured, by the factors in the table above, and gives the same
+  cells. `h3jsr` is not needed.
+- Geocoding costs about `r round(per_row_us, 1)` microseconds per row on
+  `r format(max(backends$rows), big.mark = ",", scientific = FALSE)` polygons
+  (whole `geo_encode()`, one worker). The corner cells take
+  `r round(100 * largest$median_s[largest$expression == "corners_h3o"] / largest$median_s[largest$expression == "encode_h3o"])`%
+  of it; most of the rest goes to the crossing rows (about 15% of the
+  simulated rows): candidate cells, the spherical intersection test and the
+  intersection areas.
+- Inside rows: `r sum(inside$violations)` of `r format(sum(inside$inside), big.mark = ",")`
+  inside rows had a boundary point in another cell. The package nevertheless
+  tests extra points along the edge nearest the equator when the bend of
+  that parallel could exceed 1 cm (`geo_edge_points()`); a box that fails
+  becomes a crossing row.
+
+## Limits
+
+- One machine, local disk, one worker; `rcs.workers > 1` is not measured
+  here.
+- `h3o`'s `"intersect"` mode, which would give the cells a polygon touches in
+  one call, misses the cell of a polygon lying inside one cell, and returns
+  too few cells for a polygon around a pole (71 of 338 at resolution 5 for
+  the simulated pole row; for the antimeridian row 403 of 404, with or
+  without splitting the shape at 180 degrees). The package therefore finds touched cells from
+  boundary points, their first ring and the cells whose centre is inside,
+  tests each candidate on the sphere with `s2`, and descends the H3
+  hierarchy for shapes across the antimeridian or around a pole. These steps
+  are part of `encode_h3o`, but not of the per-package comparison.
+- The inside-row measure samples box edges at 64 points; a reach shorter
+  than that spacing between two sample points would go unseen.
