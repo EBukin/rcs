@@ -1,0 +1,541 @@
+# Lazy queries: `store_open()`, the `rcs_query` methods of the dplyr verbs,
+# partition pruning, and the conversion of collected rows to R types.
+#
+# Shape of `q$query` (see `new_query()`): the user's dplyr verbs applied by
+# Arrow on top of one "bottom" `arrow_dplyr_query` whose `.data` is the
+# source: a `FileSystemDataset` opened from the explicit file list of
+# `q$files`, or an `InMemoryDataset` (no file left after pruning, or after
+# `compute()`). The bottom query's `filtered_rows` is an Arrow expression in
+# terms of the source's columns. Two things are done to the bottom query
+# only, and only through `query_bottom_edit()`:
+#
+#   * the source is replaced by one opened from fewer files (partition and
+#     spatial pruning), so that only those files are opened;
+#   * the spatial filter's candidate predicate is added to its rows filter,
+#     so that it applies to the rows of the dataset, before the other verbs.
+#
+# `q$files` always lists exactly the files of the source.
+
+# Opening ---------------------------------------------------------------------
+
+#' Open a dataset as a lazy query
+#'
+#' Builds a lazy query on one dataset of a store, from the files its catalog
+#' names (the folder is never listed). The query is transformed with the
+#' dplyr verbs `filter()`, `select()`, `mutate()`, `rename()`, `arrange()`,
+#' `distinct()`, `head()`, and run with `collect()` (an R data frame),
+#' `compute()` (rows kept in memory as Arrow data), `pull()` or `glimpse()`.
+#' Arrow pushes filters and column selection into the scan, so only the
+#' needed files, row groups and columns are read.
+#'
+#' * A filter whose columns are all partition columns is first evaluated on
+#'   the partition values recorded in the catalog: only the files of the
+#'   matching partitions are opened.
+#' * [store_intersects()] adds a spatial filter.
+#' * `collect()` returns a tibble, or an `sf` object for a geospatial
+#'   dataset whose geometry is read, with the catalog's coordinate reference
+#'   system. It restores the R types Arrow does not restore by itself
+#'   (difftime units, `bit64::integer64`, factor levels, plain list columns)
+#'   and drops the row identifier `.rcs_id` that the package adds to
+#'   geospatial data; the columns `h3`, `bbox` and `h3_p<r>` are returned.
+#'
+#' The query reads from the location chosen as for [store_read()], with the
+#' catalogs held by the connection.
+#'
+#' @param st A store connection made by [store_connect()].
+#' @param dataset Name of the dataset: the full name, or its last part when
+#'   that is unique in the store.
+#' @param version `NULL` for the current version, or the 16 hex characters of
+#'   an earlier version kept in the history (see `store_history()`).
+#' @return A lazy query of class `rcs_query`. Print it to see the dataset,
+#'   the files left after pruning and the columns.
+#' @seealso [store_read()], [store_intersects()].
+#' @export
+#' @examples
+#' location <- file.path(tempdir(), "rcs-example-open")
+#' st <- store_connect(location, create = TRUE)
+#' store_write(st, rcs_sim_table(500), "sales/daily",
+#'   title = "Daily sales", description = "Simulated daily sales.",
+#'   key = c("shop_id", "date", "product"), partition = "year"
+#' )
+#' q <- store_open(st, "daily")
+#' q
+#' q |>
+#'   dplyr::filter(year == 2024, qty > 40) |>
+#'   dplyr::select(shop_id, date, qty) |>
+#'   dplyr::collect()
+#' unlink(location, recursive = TRUE)
+store_open <- function(st, dataset, version = NULL) {
+  validate_store(st)
+  local_trace("store_open")
+  call <- rlang::current_env()
+  target <- read_target(st, dataset, version, call = call)
+  if (identical(target$entry$kind, "raster")) {
+    abort_raster_verb("store_open", call = call)
+  }
+  query_new(st, target)
+}
+
+abort_raster_verb <- function(fn, call = caller_env()) {
+  cli::cli_abort(
+    c(
+      "{.fn {fn}} does not apply to rasters.",
+      i = "Read a raster with {.fn store_read}, which returns a {.cls SpatRaster}."
+    ),
+    class = "rcs_error_argument", call = call
+  )
+}
+
+# The `rcs_query` of a read target (`read_target()`).
+query_new <- function(st, target) {
+  source <- query_open_files(target$location, target$files$path)
+  new_query(
+    store = st,
+    entry = target$entry,
+    location = target$location,
+    files = target$files,
+    query = dplyr::select(source, dplyr::everything())
+  )
+}
+
+#' An Arrow dataset from an explicit file list
+#'
+#' @param location The `rcs_location` the files are read from.
+#' @param paths Relative paths of Parquet files (at least one, unless
+#'   `schema` is given).
+#' @param schema `NULL`, or the Arrow schema of the files; given, the files
+#'   are not inspected when the dataset is built, and zero paths give an
+#'   empty in-memory dataset with that schema.
+#' @return An Arrow `Dataset`.
+#' @noRd
+query_open_files <- function(location, paths, schema = NULL) {
+  if (length(paths) == 0) {
+    return(arrow::InMemoryDataset$create(arrow::Table$create(schema = schema)))
+  }
+  fs <- be_arrow_fs(location$backend)
+  full <- paste0(fs$path, "/", paths)
+  tryCatch(
+    if (is.null(schema)) {
+      arrow::open_dataset(full, filesystem = fs$fs, format = "parquet")
+    } else {
+      arrow::open_dataset(full, schema = schema, filesystem = fs$fs, format = "parquet")
+    },
+    error = function(e) {
+      uri <- location$uri
+      cli::cli_abort(
+        c("Cannot open the data files in {.path {uri}}.", be_auth_hint_safe(location$backend)),
+        class = "rcs_error_backend", parent = e, call = NULL
+      )
+    }
+  )
+}
+
+# Shape of the Arrow query ----------------------------------------------------
+
+# The source at the bottom of an Arrow query.
+query_source <- function(query) {
+  while (inherits(query, "arrow_dplyr_query")) {
+    query <- query$.data
+  }
+  query
+}
+
+# Apply `fn` to the bottom `arrow_dplyr_query` (the one whose `.data` is the
+# source) and put the result back in place.
+query_bottom_edit <- function(query, fn) {
+  if (inherits(query$.data, "arrow_dplyr_query")) {
+    query$.data <- query_bottom_edit(query$.data, fn)
+    return(query)
+  }
+  fn(query)
+}
+
+# Replace the source of `q` by the files of `files` (a subset of `q$files`).
+query_set_files <- function(q, files) {
+  source <- query_source(q$query)
+  if (!inherits(source, "FileSystemDataset")) {
+    return(q)
+  }
+  new_source <- query_open_files(q$location, files$path, schema = source$schema)
+  q$query <- query_bottom_edit(q$query, function(bottom) {
+    bottom$.data <- new_source
+    bottom
+  })
+  q$files <- files
+  q
+}
+
+# Add a rows filter, an Arrow expression on the source's columns, to the
+# bottom query: it applies to the rows of the dataset, before the other
+# verbs.
+query_bottom_filter <- function(q, predicate) {
+  q$query <- query_bottom_edit(q$query, function(bottom) {
+    bottom$filtered_rows <- if (isTRUE(bottom$filtered_rows)) {
+      predicate
+    } else {
+      bottom$filtered_rows & predicate
+    }
+    bottom
+  })
+  q
+}
+
+# Partition pruning -----------------------------------------------------------
+
+#' Partition pruning
+#'
+#' Of the filter expressions `quos`, those whose column symbols are all
+#' partition columns are evaluated by Arrow on a small table of the
+#' partition values recorded in `q$files$partition_values` (cast to the
+#' types of the data), and the source is replaced by the files whose values
+#' pass. The expressions are still applied to the rows afterwards, so the
+#' pruning only saves work: whenever it cannot be done safely (the query is
+#' no longer a single filter-and-select step over the source, a partition
+#' column was renamed or recomputed, a value cannot be cast), no file is
+#' dropped.
+#'
+#' @param q An `rcs_query`.
+#' @param quos A list of quosures, as given to `filter()`.
+#' @return `q`, with fewer files when some were pruned.
+#' @noRd
+query_prune_partitions <- function(q, quos) {
+  partition <- q$entry$partition[[1]]
+  query <- q$query
+  if (length(partition) == 0 || length(quos) == 0 || nrow(q$files) == 0 ||
+    !inherits(query, "arrow_dplyr_query") || inherits(query$.data, "arrow_dplyr_query") ||
+    !inherits(query$.data, "FileSystemDataset")) {
+    return(q)
+  }
+  selected <- query$selected_columns
+  plain <- function(column) {
+    expr <- selected[[column]]
+    !is.null(expr) && isTRUE(tryCatch(expr$field_name == column, error = function(e) FALSE))
+  }
+  use <- Filter(function(quo) {
+    refs <- intersect(all.vars(rlang::quo_get_expr(quo)), names(selected))
+    length(refs) > 0 && all(refs %in% partition) && all(vapply(refs, plain, logical(1)))
+  }, quos)
+  if (length(use) == 0) {
+    return(q)
+  }
+  keep <- tryCatch(
+    partition_keep(q$files, partition, query$.data$schema, use),
+    error = function(e) NULL
+  )
+  if (is.null(keep) || all(keep)) {
+    return(q)
+  }
+  query_set_files(q, q$files[keep, ])
+}
+
+# Which file rows pass the partition-only filters `quos`.
+partition_keep <- function(files, partition, schema, quos) {
+  values <- lapply(files$partition_values, jsonlite::fromJSON, simplifyVector = FALSE)
+  columns <- lapply(stats::setNames(partition, partition), function(p) {
+    v <- lapply(values, function(x) x[[p]] %||% NA)
+    v <- unlist(v, use.names = FALSE)
+    array <- arrow::Array$create(v)
+    type <- schema[[p]]$type
+    if (inherits(type, "DictionaryType")) {
+      type <- type$value_type
+    }
+    if (!array$type$Equals(type)) {
+      array <- array$cast(type)
+    }
+    array
+  })
+  table <- arrow::arrow_table(!!!columns, .rcs_file = seq_len(nrow(files)))
+  kept <- dplyr::collect(dplyr::select(dplyr::filter(table, !!!quos), ".rcs_file"))
+  seq_len(nrow(files)) %in% kept$.rcs_file
+}
+
+# Filtering -------------------------------------------------------------------
+
+query_filter <- function(q, quos) {
+  q <- query_prune_partitions(q, quos)
+  q$query <- dplyr::filter(q$query, !!!quos)
+  q
+}
+
+# Collecting ------------------------------------------------------------------
+
+#' Run a query and return R data
+#'
+#' Drops `.rcs_id` (unless `keep_id`) and, with `q$geometry = FALSE`, the
+#' WKB column before the scan; counts the files and row groups scanned;
+#' collects with `arrow.int64_downcast = FALSE`; applies the exact test of a
+#' pending spatial filter; restores R types and decodes the geometry.
+#'
+#' @param q An `rcs_query`.
+#' @param keep_id Keep `.rcs_id`.
+#' @return A tibble, or an `sf` object for geospatial rows with geometry.
+#' @noRd
+query_collect <- function(q, keep_id = FALSE) {
+  withr::local_options(arrow.int64_downcast = FALSE)
+  query <- q$query
+  present <- names(query)
+  drop <- c(
+    if (!keep_id && ".rcs_id" %in% present) ".rcs_id",
+    if (!q$geometry && "geometry" %in% present) "geometry"
+  )
+  if (length(drop) > 0) {
+    query <- dplyr::select(query, -dplyr::all_of(drop))
+  }
+  # a pending exact test needs the geometry, even when the query selected it
+  # away; it is dropped again after the test
+  borrowed <- FALSE
+  if (spatial_needs_geometry(q) && !"geometry" %in% names(query)) {
+    query <- query_borrow_geometry(query)
+    borrowed <- "geometry" %in% names(query)
+  }
+  query_count_scan(q)
+  data <- dplyr::collect(query)
+  data <- rows_finish(data, q$entry)
+  data <- spatial_exact(q, data)
+  if (borrowed) {
+    data <- tibble::as_tibble(sf::st_drop_geometry(data))
+  }
+  trace_count("rows_returned", nrow(data), location = q$location$uri)
+  data
+}
+
+# Count the files and row groups a scan of `q` reads (when tracing).
+query_count_scan <- function(q) {
+  if (!trace_on()) {
+    return(invisible())
+  }
+  source <- query_source(q$query)
+  if (!inherits(source, "FileSystemDataset") || nrow(q$files) == 0) {
+    return(invisible())
+  }
+  uri <- q$location$uri
+  for (path in q$files$path) {
+    trace_count("file_open", 1, location = uri, detail = path)
+  }
+  groups <- files_row_group_counts(q$location$backend, q$files$path)
+  trace_count("row_groups_total", sum(groups), location = uri)
+  if (!is.null(q$spatial)) {
+    trace_count("row_groups_overlap", spatial_row_groups_overlap(q), location = uri)
+  }
+  invisible()
+}
+
+# Number of row groups of each file, from the footers, without counting the
+# files as opened (they are counted by the scan that reads them).
+files_row_group_counts <- function(be, paths) {
+  fs <- be_arrow_fs(be)
+  vapply(paths, function(p) {
+    file <- fs$fs$OpenInputFile(paste0(fs$path, "/", p))
+    on.exit(file$close())
+    as.double(arrow::ParquetFileReader$create(file)$num_row_groups)
+  }, numeric(1), USE.NAMES = FALSE)
+}
+
+#' Turn collected rows into the R data a read returns
+#'
+#' Restores the R types recorded in the entry's `columns` (`r_type`) for the
+#' columns that still carry their stored name and a compatible type, and
+#' decodes a WKB `geometry` column of a geospatial dataset into `sf` with
+#' the entry's CRS.
+#'
+#' @param data A data frame collected from Arrow (with
+#'   `arrow.int64_downcast = FALSE`).
+#' @param entry The dataset's entry.
+#' @return A tibble or an `sf` object.
+#' @noRd
+rows_finish <- function(data, entry) {
+  data <- tibble::as_tibble(data)
+  data <- restore_types(data, columns_from_json(entry$columns))
+  if (identical(entry$kind, "geospatial") && "geometry" %in% names(data) && is.list(data$geometry)) {
+    data <- geo_decode(data, entry$crs)
+  }
+  data
+}
+
+restore_types <- function(data, spec) {
+  for (i in seq_len(nrow(spec))) {
+    name <- spec$name[[i]]
+    r_type <- spec$r_type[[i]]
+    if (is.null(r_type) || !name %in% names(data)) {
+      next
+    }
+    x <- data[[name]]
+    data[[name]] <- switch(
+      r_type$class,
+      difftime = restore_difftime(x, r_type$units),
+      integer64 = if (is.numeric(x) && !inherits(x, "integer64")) bit64::as.integer64(x) else x,
+      factor = if (is.factor(x) || is.character(x)) {
+        factor(as.character(x), levels = r_type$levels, ordered = isTRUE(r_type$ordered))
+      } else {
+        x
+      },
+      list = restore_list(x),
+      x
+    )
+  }
+  data
+}
+
+restore_difftime <- function(x, units) {
+  if (!inherits(x, "difftime") || is.null(units)) {
+    return(x)
+  }
+  units(x) <- units
+  x
+}
+
+restore_list <- function(x) {
+  if (!is.list(x) || is.data.frame(x)) {
+    return(x)
+  }
+  out <- lapply(seq_along(x), function(i) x[[i]])
+  out
+}
+
+# dplyr methods ---------------------------------------------------------------
+
+#' dplyr verbs for lazy queries
+#'
+#' Methods of the dplyr generics for queries made by [store_open()]. The
+#' verbs are applied by Arrow when the query runs; `collect()` returns R
+#' data (see [store_open()]), `compute()` keeps the rows in memory as Arrow
+#' data and returns a query on them, `pull()` collects one column, and
+#' `glimpse()` collects the first rows and shows them.
+#'
+#' A filter on partition columns opens only the files of the matching
+#' partitions when it comes before any other verb that changes those
+#' columns. A pending spatial filter ([store_intersects()]) applies to the
+#' rows of the dataset; its exact test runs in `collect()` on the rows the
+#' query returns, so a `head()` before `collect()` may give fewer rows than
+#' asked for.
+#'
+#' @param .data,x A query made by [store_open()].
+#' @param ... Arguments of the dplyr verb.
+#' @param .by,.preserve,.by_group,.keep_all,width,var,name,n As in dplyr.
+#' @return `collect()`: a tibble or an `sf` object. `pull()`: a vector.
+#'   `glimpse()`: `x`, invisibly. Every other verb: an `rcs_query`.
+#' @name rcs_query-dplyr
+NULL
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::filter
+filter.rcs_query <- function(.data, ..., .by = NULL, .preserve = FALSE) {
+  if (!rlang::quo_is_null(rlang::enquo(.by))) {
+    cli::cli_abort("{.arg .by} is not supported for {.cls rcs_query}.", class = "rcs_error_argument")
+  }
+  query_filter(.data, rlang::enquos(...))
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::select
+select.rcs_query <- function(.data, ...) {
+  .data$query <- dplyr::select(.data$query, ...)
+  .data
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::mutate
+mutate.rcs_query <- function(.data, ...) {
+  .data$query <- dplyr::mutate(.data$query, ...)
+  .data
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::rename
+rename.rcs_query <- function(.data, ...) {
+  .data$query <- dplyr::rename(.data$query, ...)
+  .data
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::arrange
+arrange.rcs_query <- function(.data, ..., .by_group = FALSE) {
+  .data$query <- dplyr::arrange(.data$query, ..., .by_group = .by_group)
+  .data
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::distinct
+distinct.rcs_query <- function(.data, ..., .keep_all = FALSE) {
+  .data$query <- dplyr::distinct(.data$query, ..., .keep_all = .keep_all)
+  .data
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method utils::head
+head.rcs_query <- function(x, n = 6L, ...) {
+  x$query <- utils::head(x$query, n)
+  x
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::collect
+collect.rcs_query <- function(x, ...) {
+  local_trace("collect")
+  query_collect(x)
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::compute
+compute.rcs_query <- function(x, ...) {
+  local_trace("compute")
+  withr::local_options(arrow.int64_downcast = FALSE)
+  query_count_scan(x)
+  table <- dplyr::compute(x$query)
+  x$query <- dplyr::select(arrow::InMemoryDataset$create(table), dplyr::everything())
+  x
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::pull
+pull.rcs_query <- function(.data, var = -1, name = NULL, ...) {
+  local_trace("pull")
+  data <- query_collect(.data)
+  if (inherits(data, "sf")) {
+    data <- tibble::as_tibble(data)
+  }
+  dplyr::pull(data, {{ var }}, {{ name }})
+}
+
+#' @rdname rcs_query-dplyr
+#' @exportS3Method dplyr::glimpse
+glimpse.rcs_query <- function(x, width = NULL, ...) {
+  local_trace("glimpse")
+  data <- query_collect(head.rcs_query(x, 10L))
+  if (inherits(data, "sf")) {
+    data <- tibble::as_tibble(data)
+  }
+  dplyr::glimpse(data, width = width)
+  invisible(x)
+}
+
+# Printing --------------------------------------------------------------------
+
+#' @export
+print.rcs_query <- function(x, ...) {
+  entry <- x$entry
+  role <- query_location_role(x)
+  total <- as.numeric(entry$n_files)
+  current <- x$location$catalog$version[x$location$catalog$dataset == entry$dataset]
+  version <- if (length(current) == 1 && identical(current, entry$version)) "current" else "earlier version"
+  lines <- c(
+    paste0("<rcs_query> ", entry$dataset, " (", entry$kind, ", ", version, ")"),
+    paste0("Location: ", role),
+    paste0("Files:    ", nrow(x$files), " of ", format_count(total))
+  )
+  if (!is.null(x$spatial)) {
+    lines <- c(lines, paste0("Spatial:  ", spatial_describe(x$spatial)))
+  }
+  if (!x$geometry) {
+    lines <- c(lines, "Geometry: dropped before collecting")
+  }
+  columns <- setdiff(names(x$query), ".rcs_id")
+  lines <- c(lines, paste0("Columns:  ", paste(columns, collapse = ", ")))
+  cli::cat_line(lines)
+  invisible(x)
+}
+
+query_location_role <- function(q) {
+  i <- match(q$location$uri, store_uris(q$store))
+  if (identical(i, 1L)) "primary" else paste0("secondary ", i - 1L)
+}
