@@ -1,3 +1,5 @@
 # Shell hooks must be checked out with LF endings. core.autocrlf=true would
 # otherwise give them CRLF, and sh chokes on the trailing \r.
 *.sh text eol=lf
+# testthat writes snapshots with LF endings; keep them so on every checkout.
+tests/testthat/_snaps/** text eol=lf
