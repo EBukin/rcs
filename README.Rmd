@@ -5,21 +5,55 @@ output: github_document
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
 ```{r, include = FALSE}
-knitr::opts_chunk$set(
-  collapse = TRUE,
-  comment = "#>"
-)
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+# Show stores below the temporary folder as `<tempdir>/...` and use UTC, so
+# that the output is the same on every machine.
+local({
+  dirs <- unique(c(
+    normalizePath(tempdir(), winslash = "/", mustWork = FALSE),
+    normalizePath(tempdir(), winslash = "\\", mustWork = FALSE),
+    tempdir()
+  ))
+  hide <- function(x) {
+    for (d in dirs) x <- gsub(d, "<tempdir>", x, fixed = TRUE)
+    x
+  }
+  for (h in c("output", "message", "warning", "error")) {
+    old <- knitr::knit_hooks$get(h)
+    knitr::knit_hooks$set(stats::setNames(
+      list(local({
+        old <- old
+        function(x, options) old(hide(x), options)
+      })),
+      h
+    ))
+  }
+})
+old_options <- options(width = 80, cli.width = 120, cli.hyperlink = FALSE)
+old_tz <- Sys.getenv("TZ", unset = NA)
+Sys.setenv(TZ = "UTC")
 ```
 
 # rcs
 
-rcs (R Cloud Storage) stores tabular, geospatial vector and raster data from
-R in one store, mainly as Parquet files. A store is kept in one primary
-location and any number of secondary ones, local folders or cloud buckets.
-Every operation starts from the catalog of the store.
+rcs (R Cloud Storage) keeps tabular data, geospatial vector data (`sf`) and
+rasters (`terra`) from R in one *store*, mostly as Parquet files. A store is
+kept in one *primary* location and any number of *secondary* ones: local
+folders or Google Cloud Storage buckets.
 
-The package is under construction: this version holds the foundations
-(catalog schema, simulated data, work counters) and no storage functions yet.
+- **Catalog first.** Each location holds a small catalog of its datasets
+  and files. Every function starts from it: listing a store, describing a
+  dataset or finding the files a filter needs reads no data file.
+- **Every write lands everywhere, verified.** A write goes to the primary
+  and to every secondary, each file is checked by its MD5 checksum, and the
+  catalog is switched last, so readers see the old or the new version,
+  never a mixture.
+- **Reads fetch only what they need.** Filters and column selections are
+  passed to the Parquet reader. Spatial filters use H3 cells and bounding
+  boxes stored with the data, so an area is read without scanning every
+  geometry.
+- **Same data, same version.** Writing identical data again changes
+  nothing and copies nothing.
 
 ## Installation
 
@@ -28,12 +62,59 @@ The package is under construction: this version holds the foundations
 pak::pak("EBukin/rcs")
 ```
 
-## Simulated data
+Geospatial datasets need the package h3o, rasters need terra, and Google
+Cloud Storage needs gargle and httr2 and an arrow build with GCS support.
 
-The package is developed and tested on simulated data only. The generators
-are exported for examples:
+## Example
+
+Create a store in a folder, here a temporary one, and write a table. The
+data are simulated by `rcs_sim_table()`.
 
 ```{r}
 library(rcs)
-rcs_sim_table(5)
+
+st <- store_connect(file.path(tempdir(), "my-store"), create = TRUE)
+
+store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year"
+)
+```
+
+See what the store holds:
+
+```{r}
+st
+```
+
+Read part of a dataset. Only the file of the year 2024 is opened.
+
+```{r}
+store_read(st, "sales/daily", year == 2024, qty > 45,
+  columns = c(shop_id, date, product, qty)
+)
+```
+
+Keep the same store in a bucket and in a local copy; writes reach both and
+reads use the local copy:
+
+```{r, eval = FALSE}
+st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
+```
+
+## Learn more
+
+- `vignette("rcs")`: getting started with a local store.
+- `vignette("locations")`: primary and secondary locations, environment
+  variables, cloud credentials.
+- `vignette("geospatial")`: `sf` objects, spatial filters, rasters.
+
+The package is developed and tested on simulated data only.
+
+```{r, include = FALSE}
+unlink(file.path(tempdir(), "my-store"), recursive = TRUE)
+options(old_options)
+if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)
 ```
