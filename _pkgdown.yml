@@ -1,0 +1,73 @@
+template:
+  bootstrap: 5
+
+reference:
+  - title: Connect to a store
+    desc: Create a store and connect to its primary and secondary locations.
+    contents:
+      - store_connect
+      - store_create
+      - store_refresh
+  - title: See what a store holds
+    desc: These functions read the catalog only; they open no data file.
+    contents:
+      - print.rcs_store
+      - store_datasets
+      - store_describe
+      - store_status
+      - store_history
+  - title: Write
+    contents:
+      - store_write
+  - title: Read
+    contents:
+      - store_read
+      - store_open
+      - store_intersects
+      - store_sample
+      - store_glimpse
+      - store_h3_hex
+      - rcs_query-dplyr
+  - title: Check and maintain
+    desc: Verify stored files, keep secondary locations up to date, remove old versions.
+    contents:
+      - store_check
+      - store_sync
+      - store_copy
+      - store_delete
+      - store_rebuild
+      - store_prune
+  - title: Simulated data
+    desc: Generators of the simulated data used in examples, vignettes and tests.
+    contents:
+      - rcs_sim_table
+      - rcs_sim_polygons
+  - title: Work counters
+    contents:
+      - rcs_trace
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, github]
+
+articles:
+  - title: Using rcs
+    navbar: ~
+    contents:
+      - rcs
+      - locations
+      - geospatial
+  - title: Performance
+    navbar: Performance
+    contents:
+      - articles/benchmark-h3
+      - articles/benchmark-write
+      - articles/benchmark-read
+      - articles/benchmark-cloud
+      - articles/benchmark-scale
+      - articles/benchmark-spatial
+  - title: Development
+    navbar: Development
+    contents:
+      - articles/testing

@@ -1,0 +1,327 @@
+---
+title: "Getting started with rcs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting started with rcs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+# Show stores below the temporary folder as `<tempdir>/...`, use UTC and a
+# fixed width so that the output is the same on every machine.
+local({
+  dirs <- unique(c(
+    normalizePath(tempdir(), winslash = "/", mustWork = FALSE),
+    normalizePath(tempdir(), winslash = "\\", mustWork = FALSE),
+    tempdir()
+  ))
+  hide <- function(x) {
+    for (d in dirs) x <- gsub(d, "<tempdir>", x, fixed = TRUE)
+    x
+  }
+  for (h in c("output", "message", "warning", "error")) {
+    old <- knitr::knit_hooks$get(h)
+    knitr::knit_hooks$set(stats::setNames(
+      list(local({
+        old <- old
+        function(x, options) old(hide(x), options)
+      })),
+      h
+    ))
+  }
+})
+old_options <- options(width = 80, cli.width = 120, cli.hyperlink = FALSE)
+old_tz <- Sys.getenv("TZ", unset = NA)
+Sys.setenv(TZ = "UTC")
+```
+
+rcs keeps tabular, geospatial vector and raster data in a *store*: a named
+collection of *datasets*, written mostly as Parquet files. This vignette
+works with a store in one local folder. It shows how to create the store,
+write a table, see what the store holds, read data back with filters, and
+keep earlier versions.
+
+Two other vignettes go further: `vignette("locations")` keeps the same store
+in several places, local folders or cloud buckets, and
+`vignette("geospatial")` writes `sf` objects and rasters.
+
+```{r setup}
+library(rcs)
+```
+
+## Words used here
+
+- A **store** is a collection of datasets, whatever the place it is kept in.
+- A **location** is one place that holds a copy of a store: a local folder,
+  or a Google Cloud Storage address such as `gs://my-bucket/store`.
+- The **catalog** is a set of three small Parquet files at the root of each
+  location. It lists every dataset and every data file, with checksums.
+  Every function starts from the catalog; folders are never searched for
+  files.
+- A **dataset** is one logical table, named like a path: `sales/daily`. It
+  is stored as one file, or as one file per *partition* (for example one per
+  year).
+- A **version** is a 16-character code computed from the content of a
+  dataset's files. The same data always give the same version.
+
+## Create a store
+
+`store_connect()` connects to a store and returns a connection object.
+With `create = TRUE`, a folder that holds no store yet is set up with empty
+catalogs. Here the store lives in the session's temporary folder.
+
+```{r}
+path <- file.path(tempdir(), "my-store")
+st <- store_connect(path, create = TRUE)
+st
+```
+
+`store_create(path)` does the same set-up without connecting. Use it once,
+when a store is new; connect with `store_connect(path)` afterwards.
+
+## Write a table
+
+The package ships generators of simulated data for examples.
+`rcs_sim_table()` returns a panel of invented daily sales, with a column of
+almost every R type: integers, doubles, dates, factors, 64-bit integers,
+time differences, text with accents, list columns and times.
+
+```{r}
+sales <- rcs_sim_table(300, seed = 1)
+sales
+```
+
+`store_write()` writes a data frame as one dataset. A title and a
+description are required. `key` names the columns that identify a row: their
+values must be unique together, and the write stops if they are not.
+`partition` writes one file per value of the named columns.
+
+```{r}
+store_write(st, sales, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year"
+)
+```
+
+The summary says what was written and where. Before anything is copied to
+the store, the files are written to a local staging folder and a sample of
+their rows is compared with `sales`. After the copy, the checksum (MD5) of
+every file in the store is compared with the staged one. Only then is the
+catalog switched to the new version, so a reader never sees a half-written
+dataset.
+
+Writing the same data again changes nothing. The version is computed from
+the content, so the package sees that the store already holds it. A
+dataset that exists can only be written again with `mode = "replace"` or
+`mode = "update"`:
+
+```{r}
+store_write(st, sales, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+```
+
+## See what the store holds
+
+Printing the connection lists its locations and its datasets, grouped by
+folder.
+
+```{r}
+st
+```
+
+`store_datasets()` returns the same list as a tibble, one row per dataset.
+
+```{r}
+datasets <- store_datasets(st)
+datasets
+datasets$title
+```
+
+`store_describe()` shows everything the catalog knows about one dataset:
+title, description, key, partition, the columns with their types, and the
+files of the current version.
+
+```{r}
+store_describe(st, "sales/daily")
+```
+
+These three functions read only the catalog that the connection holds. They
+open no data file, so they are fast also for a store in a cloud bucket.
+
+A dataset can be named by the last part of its name when that is unique in
+the store: `"daily"` stands for `"sales/daily"` below.
+
+## Read data
+
+`store_read()` reads a dataset into R. Filters are written as in
+`dplyr::filter()`, and `columns` selects columns as in `dplyr::select()`.
+
+```{r}
+store_read(st, "daily", year == 2024, product == "p07",
+  columns = c(shop_id, date, qty)
+)
+```
+
+Filters and the column selection are passed to the Parquet reader, so only
+the needed files, blocks of rows and columns are read. A filter on the
+partition columns alone is first applied to the catalog, and only the files
+of the matching partitions are opened. The work counters show it: with
+`options(rcs.trace = TRUE)`, `rcs_trace()` reports the work done by the last
+call.
+
+```{r}
+options(rcs.trace = TRUE)
+x <- store_read(st, "daily", year == 2023)
+rcs_trace()[c("counter", "detail", "n")]
+options(rcs.trace = FALSE)
+```
+
+One of the two files was opened.
+
+The types of the columns come back as they were written: factor levels,
+64-bit integers, time differences with their units, list columns and time
+zones included. Rows come back sorted by the key within each partition,
+so both sides are sorted before they are compared.
+
+```{r}
+back <- store_read(st, "daily")
+identical(
+  dplyr::arrange(sales, shop_id, date, product),
+  dplyr::arrange(back, shop_id, date, product)
+)
+```
+
+Two functions give a first look without reading a whole dataset.
+`store_glimpse()` prints the catalog facts and the first rows of one file.
+`store_sample()` draws rows from a few randomly chosen blocks of rows. It is
+a quick way to look at the data, not a simple random sample: rows of one
+block are alike, because rows are stored sorted.
+
+```{r}
+store_glimpse(st, "daily")
+store_sample(st, "daily", n = 5, qty > 40, columns = c(shop_id, date, qty),
+  seed = 42
+)
+```
+
+## Lazy queries
+
+`store_open()` returns a lazy query. It is changed with the dplyr verbs
+`filter()`, `select()`, `mutate()`, `rename()`, `arrange()`, `distinct()`
+and `head()`, and nothing is read until `collect()`.
+
+```{r}
+q <- store_open(st, "daily")
+q
+
+q |>
+  dplyr::filter(year == 2024, qty > 45) |>
+  dplyr::mutate(revenue = qty * price) |>
+  dplyr::select(shop_id, date, qty, revenue) |>
+  dplyr::arrange(dplyr::desc(qty)) |>
+  dplyr::collect()
+```
+
+## Update some partitions
+
+With `mode = "update"`, only the partitions whose values occur in the new
+data are replaced; the other partitions stay as they are. Here the rows of
+2024 are written again with corrected quantities. The key, the partition
+columns and the column types come from the stored dataset and must match.
+
+```{r}
+fix <- sales[sales$year == 2024, ]
+fix$qty <- fix$qty + 1L
+store_write(st, fix, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  mode = "update"
+)
+```
+
+The message lists every replaced partition with its old and new number of
+rows. Check it: a row of a replaced partition that is missing from the new
+data is gone after the update.
+
+## Keep earlier versions
+
+By default a store keeps only the current version of each dataset: the
+files of a replaced version are deleted once the catalog points to the new
+ones. A store created with `history = TRUE` keeps them. The setting can
+also be given for one connection (`store_connect(history = )`) or one
+dataset (`store_write(history = )`); the dataset's setting wins over the
+connection's, and the connection's over the store's.
+
+```{r}
+path_h <- file.path(tempdir(), "store-with-history")
+store_create(path_h, history = TRUE)
+sth <- store_connect(path_h)
+
+store_write(sth, sales, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year"
+)
+store_write(sth, fix, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  mode = "update"
+)
+```
+
+`store_history()` lists the versions, the current one first.
+
+```{r}
+versions <- store_history(sth, "daily")
+versions[c("version", "current", "n_files", "rows", "complete")]
+```
+
+An earlier version is read by its code:
+
+```{r}
+first <- versions$version[!versions$current][1]
+store_read(sth, "daily", year == 2024, columns = c(shop_id, date, qty),
+  version = first
+) |>
+  head(3)
+```
+
+Old versions stay until `store_prune()` removes them. `keep` is the number
+of earlier versions to keep; `dry_run = TRUE` only reports. Files that the
+current version still uses are never deleted.
+
+```{r}
+store_prune(sth, keep = 0, dry_run = TRUE)
+store_prune(sth, keep = 0)
+```
+
+## Check a dataset
+
+`store_check()` without data checks the integrity of a stored dataset:
+every file exists with the checksum and the number of rows its catalog
+records, and the catalog agrees with itself. Given the data the dataset was
+written from, it compares a sample of stored rows with them.
+
+```{r}
+store_check(st, "daily")
+store_check(sth, "daily", x = rbind(sales[sales$year != 2024, ], fix))
+```
+
+Both return a tibble of results invisibly, and stop with an error when a
+check fails (`error = FALSE` only reports).
+
+```{r, include = FALSE}
+unlink(c(path, path_h), recursive = TRUE)
+options(old_options)
+if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)
+```
