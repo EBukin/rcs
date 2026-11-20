@@ -652,49 +652,6 @@ read_stored <- function(be, path, columns = NULL) {
   tibble::as_tibble(as.data.frame(table))
 }
 
-#' Restore the R types of rows read from a data file
-#'
-#' Arrow restores most types; the `columns` specification records the rest
-#' (see the plan, "Types"): difftime units, `integer64`, factor levels
-#' (zero-row files) and plain list columns. The WKB `geometry` becomes a bare
-#' list of raw vectors.
-#'
-#' @param data A data frame read with `arrow.int64_downcast = FALSE`.
-#' @param spec The `columns` specification (`columns_from_json()`).
-#' @return A tibble with the same columns.
-#' @noRd
-restore_types <- function(data, spec) {
-  data <- tibble::as_tibble(data)
-  for (name in names(data)) {
-    v <- data[[name]]
-    i <- match(name, spec$name)
-    r_type <- if (!is.na(i)) spec$r_type[[i]]
-    cls <- r_type$class %||% ""
-    if (name == "geometry" || cls == "list") {
-      v <- as.list(v)
-      v <- lapply(v, function(e) {
-        if (!is.null(e) && name != "geometry") attributes(e) <- NULL
-        e
-      })
-      attributes(v) <- NULL
-    } else if (cls == "integer64") {
-      v <- bit64::as.integer64(v)
-    } else if (cls == "difftime") {
-      secs <- if (inherits(v, "difftime")) as.numeric(v, units = "secs") else as.numeric(v)
-      v <- as.difftime(secs, units = "secs")
-      units(v) <- r_type$units
-    } else if (cls == "factor") {
-      if (!is.factor(v) || !identical(levels(v), r_type$levels) || !identical(is.ordered(v), isTRUE(r_type$ordered))) {
-        v <- factor(as.character(v), levels = r_type$levels, ordered = isTRUE(r_type$ordered))
-      }
-    } else if (is.data.frame(v)) {
-      v <- tibble::as_tibble(v)
-    }
-    data[[name]] <- v
-  }
-  data
-}
-
 # Columns and types of the rows of an update must equal the stored ones.
 # Returns `data` with its columns in the stored order.
 check_update_columns <- function(data, spec_old, exclude, dataset, call) {

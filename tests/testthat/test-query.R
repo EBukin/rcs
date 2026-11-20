@@ -1,16 +1,3 @@
-# TEMPORARY: register the S3 methods of `rcs_query` while NAMESPACE lacks
-# them (work package F before the merge). Remove this block once
-# `devtools::document()` has written the registrations.
-local({
-  ns <- asNamespace("rcs")
-  for (m in c("filter", "select", "mutate", "rename", "arrange", "distinct", "collect", "compute", "pull", "glimpse")) {
-    registerS3method(m, "rcs_query", get(paste0(m, ".rcs_query"), envir = ns), envir = asNamespace("dplyr"))
-  }
-  registerS3method("head", "rcs_query", get("head.rcs_query", envir = ns), envir = asNamespace("utils"))
-  registerS3method("print", "rcs_query", get("print.rcs_query", envir = ns), envir = baseenv())
-})
-# End of the temporary block.
-
 plain_tibble <- function(x, key = NULL) {
   x <- tibble::as_tibble(x)
   if (length(key) > 0 && nrow(x) > 1) {

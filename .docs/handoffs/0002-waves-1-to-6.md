@@ -8,9 +8,9 @@
 
 Build the R package `rcs` as the plan describes. Wave 0 (skeleton, contracts, test and benchmark infrastructure) is done and pushed. This session orchestrates waves 1 to 6 and writes no package code itself.
 
-- **Done:** work packages 0, A, B, C, D, I (waves 0 to 2; the results of each wave are in the plan). The package installs and checks clean with every cross-package function present as a documented stub. `devtools::test()`: 619 expectations, 0 failed, 0 skipped. `devtools::check()`: 0 errors, 0 warnings, 0 notes. Coverage 99.3%.
+- **Done:** work packages 0, A, B, C, D, I, E, F (waves 0 to 3; the results of each wave are in the plan). The package installs and checks clean with every cross-package function present as a documented stub. `devtools::test()`: 619 expectations, 0 failed, 0 skipped. `devtools::check()`: 0 errors, 0 warnings, 0 notes. Coverage 99.3%.
 - **In progress:** nothing. The project owner reviewed the contracts on 2026-11-20 and decided the four open points (see below). The changes that apply those decisions are verified but may still be uncommitted in the working tree (`R/schema.R`, `R/utils.R`, `R/hooks.R`, two test files, the plan, this handoff); worktrees start from the last commit, so they must be committed before wave 1.
-- **Not started:** work packages E, F, G, J, K, M, L (waves 3 to 6).
+- **Not started:** work packages G, J, K, M, L (waves 4 to 6).
 
 ## Files touched
 

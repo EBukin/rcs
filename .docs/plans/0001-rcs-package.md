@@ -447,10 +447,25 @@ Wave 2, two agents in parallel (after wave 1):
 - [x] **D. Connect and inspect.** Owns `R/connect.R`, `R/inspect.R`, `tests/testthat/test-connect.R`, `tests/testthat/test-inspect.R`, `tests/testthat/_snaps/connect.md`, `tests/testthat/_snaps/inspect.md`. `store_connect()`, `store_create()`, `store_refresh()`, `print.rcs_store()`, `store_datasets()`, `store_describe()`, `store_status()`.
 - [x] **I. Rasters.** Owns `R/raster.R`, `tests/testthat/test-raster.R`. `raster_stage()` (COG in the staging folder, entry, file row) and `raster_open()` (through `be_gdal_path()`, cropping by `intersects`), tested on local paths without `store_write()`.
 
+Results of wave 3 (2026-11-20). They add to this plan and correct it where they differ:
+
+- F, correction to step 4 of the spatial filter and to the completeness argument: in a geographic CRS a row or a file whose box spans 180° of longitude or more always passes the bounding-box test. Its plain box (for example −179 to 179 for a row across the antimeridian) does not describe where it lies, and the test as written would drop it for a query at longitude 179.5. Such rows are crossing rows and are found through the index table.
+- F: a spatial read of an earlier version uses the bounding-box test only, because a manifest does not name the index table of its version; the result is complete, with more candidate rows.
+- F: with `sf::sf_use_s2(FALSE)` antimeridian and pole rows and queries are not guaranteed complete; they are defined on the sphere.
+- F: `row_groups_overlap` is counted for spatial queries only, from row-group ranges of `h3`, `.rcs_id` and `bbox` that the package computes while tracing; Arrow's R interface exposes no row-group statistics.
+- F: the spatial filter applies to the dataset's rows before the other verbs; a `head()` before `collect()` may return fewer rows than asked; a geometry selected away is read for the exact test and dropped afterwards. `store_h3_hex(x, columns = NULL)` is exported.
+- E: `replace` on a dataset that does not exist creates it. In `update`, `key`, `partition`, `h3_res` and `geocode` come from the stored entry, and arguments that disagree abort. `columns = NULL` keeps the stored descriptions. Rasters cannot be updated.
+- E: when a write gives the same version but another entry (title, history setting), only the entry changes, and the manifest of that version is written again; this is the one case in which a manifest is not immutable.
+- E: the local lock is held around each location's catalog switch and deletions, not for the whole write.
+- E: `store_history()` reads `_history.parquet` and checks that files exist, so it makes backend calls; the counter rule "no backend call after connecting" holds for `print()`, `store_datasets()`, `store_describe()` and `store_status()` only.
+- E: in `store_prune()`, `keep` counts history versions, the current one not included, and `before` is compared with the time a version was replaced. An update of a geospatial dataset stages the whole index table again.
+- E: transfers wait 1 and 4 seconds between the three attempts. New condition classes: `rcs_error_dataset_exists`, `rcs_error_conflict`, `rcs_error_write`, `rcs_error_md5`, `rcs_error_check`, `rcs_error_prune`, `rcs_warning_secondary_behind`, `rcs_warning_delete`.
+- Types: Arrow stores a difftime as whole seconds and truncates. The package writes a difftime as a double in its own units, recorded in `r_type`, and restores it on read; the catalog shows the type `double`. A filter on such a column compares with the value in the recorded units (`wait > 10` means 10 hours for a column in hours).
+
 Wave 3, two agents in parallel (after wave 2):
 
-- [ ] **E. Write pipeline.** Owns `R/write.R`, `R/check.R`, `R/history.R`, `tests/testthat/test-write.R`, `tests/testthat/test-check.R`, `tests/testthat/test-history.R`. `store_write()` (all modes and kinds, staging, upload to every location with progress and retries, MD5 verification, write guard), `store_check()`, `store_history()`, `store_prune()`.
-- [ ] **F. Read pipeline.** Owns `R/read.R`, `R/query.R`, `R/intersects.R`, `tests/testthat/test-read.R`, `tests/testthat/test-query.R`, `tests/testthat/test-intersects.R`. `store_open()`, `rcs_query` dplyr methods and `collect()` with type restoring, `store_read()` (all kinds), `store_sample()`, `store_glimpse()`, `store_intersects()`, partition pruning, spatial filter, property test of spatial correctness. Uses the fixture store of `helper-store.R`, so it does not depend on E.
+- [x] **E. Write pipeline.** Owns `R/write.R`, `R/check.R`, `R/history.R`, `tests/testthat/test-write.R`, `tests/testthat/test-check.R`, `tests/testthat/test-history.R`. `store_write()` (all modes and kinds, staging, upload to every location with progress and retries, MD5 verification, write guard), `store_check()`, `store_history()`, `store_prune()`.
+- [x] **F. Read pipeline.** Owns `R/read.R`, `R/query.R`, `R/intersects.R`, `tests/testthat/test-read.R`, `tests/testthat/test-query.R`, `tests/testthat/test-intersects.R`. `store_open()`, `rcs_query` dplyr methods and `collect()` with type restoring, `store_read()` (all kinds), `store_sample()`, `store_glimpse()`, `store_intersects()`, partition pruning, spatial filter, property test of spatial correctness. Uses the fixture store of `helper-store.R`, so it does not depend on E.
 
 Wave 4, three agents in parallel (after wave 3):
 

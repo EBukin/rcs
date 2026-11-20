@@ -46,7 +46,11 @@ connection; no data file is opened.
 \examples{
 root <- file.path(tempdir(), "rcs-example-describe")
 st <- store_connect(file.path(root, "primary"), create = TRUE)
-try(store_describe(st, "sales/daily")) # an empty store has no datasets
+store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+  title = "Daily sales", description = "Simulated daily sales.",
+  key = c("shop_id", "date", "product"), partition = "year"
+)
+store_describe(st, "sales/daily")
 unlink(root, recursive = TRUE)
 }
 \seealso{

@@ -352,46 +352,6 @@ rows_finish <- function(data, entry) {
   data
 }
 
-restore_types <- function(data, spec) {
-  for (i in seq_len(nrow(spec))) {
-    name <- spec$name[[i]]
-    r_type <- spec$r_type[[i]]
-    if (is.null(r_type) || !name %in% names(data)) {
-      next
-    }
-    x <- data[[name]]
-    data[[name]] <- switch(
-      r_type$class,
-      difftime = restore_difftime(x, r_type$units),
-      integer64 = if (is.numeric(x) && !inherits(x, "integer64")) bit64::as.integer64(x) else x,
-      factor = if (is.factor(x) || is.character(x)) {
-        factor(as.character(x), levels = r_type$levels, ordered = isTRUE(r_type$ordered))
-      } else {
-        x
-      },
-      list = restore_list(x),
-      x
-    )
-  }
-  data
-}
-
-restore_difftime <- function(x, units) {
-  if (!inherits(x, "difftime") || is.null(units)) {
-    return(x)
-  }
-  units(x) <- units
-  x
-}
-
-restore_list <- function(x) {
-  if (!is.list(x) || is.data.frame(x)) {
-    return(x)
-  }
-  out <- lapply(seq_along(x), function(i) x[[i]])
-  out
-}
-
 # dplyr methods ---------------------------------------------------------------
 
 #' dplyr verbs for lazy queries

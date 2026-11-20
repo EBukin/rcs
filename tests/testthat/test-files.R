@@ -154,6 +154,66 @@ test_that("files_columns_spec() records the R types Arrow does not restore", {
   expect_identical(files_arrow_schema(g[0, ])$geometry$type$ToString(), "binary")
 })
 
+# Stage `x` as one file, read it back and restore the recorded types.
+stage_and_restore <- function(x) {
+  out <- stage_table(x, rows_per_group = 3)
+  back <- read_parquet64(out$staged$local)
+  list(out = out, back = restore_types(back, columns_from_json(out$entry$columns)))
+}
+
+test_that("a difftime of any units and fractional value survives a round trip exactly", {
+  values <- c(66.85, 0.1, NA, -3.333333333333, 1e-9, 12345.678901234)
+  for (units in c("secs", "mins", "hours", "days", "weeks")) {
+    x <- tibble::tibble(id = seq_along(values), wait = as.difftime(values, units = units))
+    got <- stage_and_restore(x)
+    expect_identical(got$back$wait, x$wait, info = units)
+    spec <- columns_from_json(got$out$entry$columns)
+    expect_identical(spec$type[spec$name == "wait"], "double")
+    expect_identical(spec$r_type[[match("wait", spec$name)]], list(class = "difftime", units = units))
+    # writing is deterministic
+    expect_identical(stage_table(x, rows_per_group = 3)$files$md5, got$out$files$md5)
+  }
+  zero <- tibble::tibble(id = integer(), wait = as.difftime(numeric(), units = "mins"))
+  expect_identical(stage_and_restore(zero)$back$wait, zero$wait)
+  only_na <- tibble::tibble(id = 1:2, wait = as.difftime(c(NA_real_, NA_real_), units = "days"))
+  expect_identical(stage_and_restore(only_na)$back$wait, only_na$wait)
+})
+
+test_that("restore_types() restores every recorded type and leaves changed columns alone", {
+  x <- sim_table()
+  got <- stage_and_restore(x[0, ])$back
+  expect_identical(levels(got$product), levels(x$product))
+  expect_true(is.ordered(got$grade))
+  expect_s3_class(got$big, "integer64")
+  expect_s3_class(got$wait, "difftime")
+
+  back <- read_parquet64(stage_table(x)$staged$local)
+  spec <- columns_from_json(stage_table(x)$entry$columns)
+  restored <- restore_types(back, spec)
+  expect_null(attributes(restored$tags))
+  expect_identical(restored$tags, lapply(sort_rows(x, NULL)$tags, function(e) {
+    if (!is.null(e)) attributes(e) <- NULL
+    e
+  }))
+  # a column that a query turned into another type keeps that type
+  changed <- back
+  changed$big <- as.character(changed$big)
+  changed$product <- as.integer(changed$product)
+  changed$wait <- "later"
+  kept <- restore_types(changed, spec)
+  expect_identical(kept$big, changed$big)
+  expect_identical(kept$product, changed$product)
+  expect_identical(kept$wait, changed$wait)
+  # geometry becomes a bare list of raw vectors, a struct a tibble
+  g <- fake_geo()
+  local_geo_mocks()
+  geo <- stage_table(g, kind = "geospatial", crs = "{}")
+  rows <- restore_types(read_parquet64(geo$staged$local), columns_from_json(geo$entry$columns))
+  expect_null(attributes(rows$geometry))
+  expect_identical(rows$geometry, g$geometry)
+  expect_s3_class(rows$bbox, "tbl_df")
+})
+
 test_that("files_stage() writes a one-file table with entry, file row and manifest", {
   x <- sim_table()
   dir <- withr::local_tempdir()

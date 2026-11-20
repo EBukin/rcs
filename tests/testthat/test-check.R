@@ -1,13 +1,6 @@
 # store_check(): integrity (catalogs against stored files) and serialization
 # (stored rows against the data they were written from).
 
-# Test-side work-around for a defect in R/files.R (see test-write.R):
-# difftime is truncated to whole seconds; whole hours survive exactly.
-whole_hours <- function(x) {
-  x$wait <- as.difftime(round(as.numeric(x$wait, units = "hours")), units = "hours")
-  x
-}
-
 local_snapshot_output <- function(frame = parent.frame()) {
   withr::local_options(cli.width = 250, width = 250, .local_envir = frame)
 }
@@ -25,7 +18,7 @@ local_written_store <- function(secondaries = 1L, frame = parent.frame()) {
   root <- withr::local_tempdir(.local_envir = frame)
   paths <- file.path(root, c("primary", sprintf("secondary%d", seq_len(secondaries))))
   st <- suppressMessages(suppressWarnings(store_connect(paths[[1]], secondary = paths[-1], create = TRUE)))
-  x <- whole_hours(rcs_sim_table(120, seed = 1))
+  x <- rcs_sim_table(120, seed = 1)
   suppressMessages(store_write(st, x, "sales/daily",
     title = "Daily sales", description = "Simulated daily sales.",
     key = c("shop_id", "date", "product"), partition = "year"

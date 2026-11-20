@@ -1,13 +1,6 @@
 # History: the three levels of the setting, store_history(), store_prune(),
 # and readers that connected before a write.
 
-# Test-side work-around for a defect in R/files.R (see test-write.R):
-# difftime is truncated to whole seconds; whole hours survive exactly.
-whole_hours <- function(x) {
-  x$wait <- as.difftime(round(as.numeric(x$wait, units = "hours")), units = "hours")
-  x
-}
-
 sales_key <- c("shop_id", "date", "product")
 
 local_snapshot_output <- function(frame = parent.frame()) {
@@ -45,7 +38,7 @@ current_version <- function(st, dataset) {
 
 test_that("history follows the dataset's setting, else the connection's, else the store's", {
   skip_below_level("default")
-  x1 <- whole_hours(rcs_sim_table(40, seed = 1))
+  x1 <- rcs_sim_table(40, seed = 1)
   x2 <- x1
   x2$qty <- x2$qty + 1L
   levels <- list(NULL, TRUE, FALSE)
@@ -83,7 +76,7 @@ test_that("store_history() lists the versions and whether their files are presen
   skip_below_level("default")
   primary <- local_paths(history = TRUE)
   st <- store_connect(primary)
-  x <- whole_hours(rcs_sim_table(120, seed = 1))
+  x <- rcs_sim_table(120, seed = 1)
   write_q(st, x, "sales/daily")
   v1 <- current_version(st, "sales/daily")
   y <- x[x$year == 2024, ]
@@ -114,7 +107,7 @@ test_that("store_history() lists the versions and whether their files are presen
 
 test_that("a reader connected before a write finds the old version with history, a clear error without", {
   skip_below_level("default")
-  x <- whole_hours(rcs_sim_table(80, seed = 1))
+  x <- rcs_sim_table(80, seed = 1)
   y <- x
   y$qty <- y$qty + 1L
   for (history in c(TRUE, FALSE)) {
@@ -145,7 +138,7 @@ test_that("store_prune() removes history beyond keep, never a file a kept versio
   skip_below_level("default")
   paths <- local_paths(n = 2L, history = TRUE)
   st <- store_connect(paths[[1]], secondary = paths[[2]])
-  x <- whole_hours(rcs_sim_table(120, seed = 1))
+  x <- rcs_sim_table(120, seed = 1)
   write_q(st, x, "sales/daily")
   v1 <- current_version(st, "sales/daily")
   y <- x[x$year == 2024, ]
@@ -187,7 +180,7 @@ test_that("store_prune(before = ) removes versions replaced before a time", {
   skip_below_level("default")
   primary <- local_paths(history = TRUE)
   st <- store_connect(primary)
-  x <- whole_hours(rcs_sim_table(40, seed = 1))
+  x <- rcs_sim_table(40, seed = 1)
   for (i in 1:3) {
     x$qty <- x$qty + 1L
     write_q(st, x, "sales/daily", mode = "replace")
@@ -209,7 +202,7 @@ test_that("store_prune() removes old orphans in every location and keeps young o
   skip_below_level("default")
   paths <- local_paths(n = 2L)
   st <- store_connect(paths[[1]], secondary = paths[[2]])
-  write_q(st, whole_hours(rcs_sim_table(40, seed = 1)), "sales/daily")
+  write_q(st, rcs_sim_table(40, seed = 1), "sales/daily")
   old <- c(
     file.path(paths[[1]], "sales/daily/year=2023/part-0000000000000000.parquet"),
     file.path(paths[[2]], "sales/daily/._part.parquet.tmp-abc"),

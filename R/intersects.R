@@ -364,20 +364,13 @@ row_group_overlaps <- function(test, stats) {
     if (all(is.na(box$xmin))) {
       return(FALSE)
     }
-    group_box <- bbox_df(
-      min(box$xmin, na.rm = TRUE), min(box$ymin, na.rm = TRUE),
-      max(box$xmax, na.rm = TRUE), max(box$ymax, na.rm = TRUE)
-    )
+    group_box <- bbox_extent(box)
     wide <- test$geographic && any(box$xmax - box$xmin >= 180, na.rm = TRUE)
     ok <- wide || box_overlaps(group_box, test$bbox, test$geographic)
   }
   if (ok && !is.null(test$cells)) {
-    range_of <- function(x) {
-      x <- x[!is.na(x)]
-      if (length(x) == 0) list(bit64::NA_integer64_, bit64::NA_integer64_) else list(min(x), max(x))
-    }
-    h3 <- range_of(stats$h3)
-    id <- range_of(stats$.rcs_id)
+    h3 <- cell_range(stats$h3)
+    id <- cell_range(stats$.rcs_id)
     ok <- cells_in_ranges(test$cells, h3[[1]], h3[[2]]) ||
       cells_in_ranges(test$ids, id[[1]], id[[2]])
   }

@@ -234,9 +234,12 @@ sort_rows <- function(data, key = NULL) {
 # Schema and columns ----------------------------------------------------------
 
 # The Arrow schema of the whole data, inferred once so that every partition
-# file has the same schema; a `geometry` column is always `binary`.
+# file has the same schema; a `geometry` column is always `binary`, and a
+# difftime column is `double`: its value in its own units, which the
+# `columns` specification records (Arrow's `duration` has whole units only
+# and would truncate). `files_arrow_values()` converts the data to match.
 files_arrow_schema <- function(data) {
-  schema <- arrow::infer_schema(data)
+  schema <- arrow::infer_schema(files_arrow_values(data))
   if ("geometry" %in% names(data)) {
     fields <- schema$fields
     i <- match("geometry", names(schema))
@@ -244,6 +247,18 @@ files_arrow_schema <- function(data) {
     schema <- arrow::schema(!!!fields)
   }
   schema
+}
+
+# The data as written: every difftime column as a plain double in its own
+# units (restored by `restore_types()` from `r_type`).
+files_arrow_values <- function(data) {
+  data <- tibble::as_tibble(data)
+  for (name in names(data)) {
+    if (inherits(data[[name]], "difftime")) {
+      data[[name]] <- as.double(unclass(data[[name]]))
+    }
+  }
+  data
 }
 
 #' The `columns` specification of the data to write
@@ -342,7 +357,7 @@ cell_range <- function(cells) {
 #' @return `path`, invisibly.
 #' @noRd
 files_write_parquet <- function(data, path, schema, rcs, geo = NULL, rows_per_group = 50000L) {
-  table <- arrow::arrow_table(tibble::as_tibble(data), schema = schema)
+  table <- arrow::arrow_table(files_arrow_values(data), schema = schema)
   table$metadata$rcs <- rcs
   if (!is.null(geo)) {
     table$metadata$geo <- geo
@@ -552,6 +567,86 @@ files_stage <- function(data, dataset, title, description,
     manifest_local = manifest_local,
     partition = plan$partition
   )
+}
+
+# Restoring R types -----------------------------------------------------------
+
+#' Restore the R types of rows read from data files
+#'
+#' Arrow restores most types; the `columns` specification records the rest
+#' (see the plan, "Types"), and this is the one place that restores them,
+#' for every read path (`rows_finish()`, the serialization check of
+#' `store_check()`, the rows `store_write()` reads back):
+#'
+#' * difftime: stored as a double in the recorded units (see
+#'   `files_arrow_schema()`), restored with those units; a column Arrow
+#'   returns as difftime gets the recorded units;
+#' * `integer64`: a numeric column becomes `bit64::integer64`;
+#' * factor: a factor or character column gets the recorded levels and
+#'   order (zero-row files lose them);
+#' * plain list: a bare list, the attributes of its elements dropped;
+#' * the WKB `geometry` (no `r_type`): a bare list of raw vectors;
+#' * a struct column (`bbox`): a tibble.
+#'
+#' A column is restored only when it still has its stored name and a
+#' compatible type, so the rows of a query whose verbs changed a column are
+#' left as they are.
+#'
+#' @param data A data frame read with `arrow.int64_downcast = FALSE`.
+#' @param spec The `columns` specification (`columns_from_json()`).
+#' @return A tibble with the same columns.
+#' @noRd
+restore_types <- function(data, spec) {
+  data <- tibble::as_tibble(data)
+  for (name in names(data)) {
+    v <- data[[name]]
+    i <- match(name, spec$name)
+    r_type <- if (!is.na(i)) spec$r_type[[i]]
+    cls <- r_type$class %||% ""
+    if (cls == "list" || (name == "geometry" && is.list(v) && !is.data.frame(v))) {
+      v <- restore_list(v, strip = name != "geometry")
+    } else if (cls == "integer64") {
+      if (is.numeric(v) && !inherits(v, "integer64")) v <- bit64::as.integer64(v)
+    } else if (cls == "difftime") {
+      v <- restore_difftime(v, r_type$units)
+    } else if (cls == "factor") {
+      if ((is.factor(v) || is.character(v)) &&
+        (!is.factor(v) || !identical(levels(v), r_type$levels) ||
+          !identical(is.ordered(v), isTRUE(r_type$ordered)))) {
+        v <- factor(as.character(v), levels = r_type$levels, ordered = isTRUE(r_type$ordered))
+      }
+    } else if (is.data.frame(v)) {
+      v <- tibble::as_tibble(v)
+    }
+    data[[name]] <- v
+  }
+  data
+}
+
+restore_difftime <- function(x, units) {
+  if (is.null(units)) {
+    return(x)
+  }
+  if (inherits(x, "difftime")) {
+    units(x) <- units
+    return(x)
+  }
+  if (is.double(x) || is.integer(x)) {
+    return(as.difftime(as.double(x), units = units))
+  }
+  x
+}
+
+restore_list <- function(x, strip = TRUE) {
+  if (!is.list(x) || is.data.frame(x)) {
+    return(x)
+  }
+  out <- lapply(seq_along(x), function(i) {
+    e <- x[[i]]
+    if (strip && !is.null(e)) attributes(e) <- NULL
+    e
+  })
+  out
 }
 
 # Reading row groups ----------------------------------------------------------

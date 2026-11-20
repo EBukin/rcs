@@ -333,10 +333,11 @@ check_serialization <- function(be, entry, files, x, n = 20L, columns = NULL) {
     by_partition <- stats::setNames(groups$loc, pv)
   }
 
+  spec <- columns_from_json(entry$columns)
   rows <- lapply(seq_len(nrow(files)), function(i) {
     path <- files$path[[i]]
     problem <- tryCatch(
-      check_file_rows(be, path, files$partition_values[[i]], ref, ref_keys, match_by, key, by_partition, n, columns),
+      check_file_rows(be, path, files$partition_values[[i]], spec, ref, ref_keys, match_by, key, by_partition, n, columns),
       rcs_error_backend = function(e) paste("it cannot be read:", first_line(conditionMessage(e)))
     )
     if (is.na(problem)) {
@@ -373,7 +374,7 @@ serialization_reference <- function(x, entry) {
 }
 
 # Problems of one file, or NA.
-check_file_rows <- function(be, path, pv, ref, ref_keys, match_by, key, by_partition, n, columns) {
+check_file_rows <- function(be, path, pv, spec, ref, ref_keys, match_by, key, by_partition, n, columns) {
   groups <- files_row_groups(be, path)
   if (nrow(groups) == 0 || sum(groups$rows) == 0) {
     return(NA_character_)
@@ -384,8 +385,8 @@ check_file_rows <- function(be, path, pv, ref, ref_keys, match_by, key, by_parti
     list(g = g, take = take)
   })
   offset <- sum(groups$rows[seq_len(pick$g - 1L)])
-  data <- tibble::as_tibble(as.data.frame(files_read_row_groups(be, path, groups$row_group[[pick$g]])))
-  data <- data[pick$take, ]
+  data <- as.data.frame(files_read_row_groups(be, path, groups$row_group[[pick$g]]))
+  data <- restore_types(data, spec)[pick$take, ]
   idx <- switch(match_by,
     key = vctrs::vec_match(key_frame(data, key), ref_keys),
     id = vctrs::vec_match(key_frame(data, ".rcs_id"), ref_keys),

@@ -4,17 +4,8 @@
 
 # Helpers -----------------------------------------------------------------------
 
-# Test-side work-around for a defect in R/files.R: Arrow writes difftime as
-# duration[s] and truncates the seconds, so 66.85 hours are stored as
-# 240659 s instead of 240660 s and the serialization check rightly fails.
-# Whole hours survive exactly. Remove when files.R rounds before writing.
-whole_hours <- function(x) {
-  x$wait <- as.difftime(round(as.numeric(x$wait, units = "hours")), units = "hours")
-  x
-}
-
 sales_data <- function(n = 120, seed = 1) {
-  whole_hours(rcs_sim_table(n, seed = seed))
+  rcs_sim_table(n, seed = seed)
 }
 
 sales_key <- c("shop_id", "date", "product")
@@ -63,12 +54,12 @@ stored_rows <- function(location, dataset) {
   restore_types(vctrs::vec_rbind(!!!rows), columns_from_json(entry$columns))
 }
 
-expect_rows_equal <- function(stored, x, key, exclude = character()) {
+expect_rows_equal <- function(stored, x, key) {
   x <- tibble::as_tibble(x)
   stored <- stored[vctrs::vec_order(key_frame(stored, key)), ]
   x <- x[vctrs::vec_order(key_frame(x, key)), ]
   expect_identical(nrow(stored), nrow(x))
-  for (col in setdiff(names(x), exclude)) {
+  for (col in names(x)) {
     expect_identical(normalise_values(stored[[col]]), normalise_values(x[[col]]), label = col)
   }
 }
@@ -286,7 +277,7 @@ test_that("update brings a secondary that missed a write up to date", {
   st <- fx$st
   before <- st$secondary[[2]]$catalog$version[st$secondary[[2]]$catalog$dataset == "sales/daily"]
   expect_false(identical(before, st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"]))
-  x <- whole_hours(fx$data[["sales/daily"]])
+  x <- fx$data[["sales/daily"]]
   y <- x[x$year == min(x$year), ]
   out <- write_sales(st, y, mode = "update")
   expect_identical(out$status, rep("written", 3))
@@ -294,9 +285,7 @@ test_that("update brings a secondary that missed a write up to date", {
   expect_identical(length(unique(versions)), 1L)
   expect_store_valid(st)
   expected <- rbind(fx$data[["sales/daily"]][fx$data[["sales/daily"]]$year != min(x$year), ], y)
-  # The fixture staged `wait` in fractional hours, which files.R truncates
-  # (see `whole_hours()`), so it is not compared for the kept rows.
-  expect_rows_equal(stored_rows(st$secondary[[2]], "sales/daily"), expected, sales_key, exclude = "wait")
+  expect_rows_equal(stored_rows(st$secondary[[2]], "sales/daily"), expected, sales_key)
 })
 
 # Geospatial --------------------------------------------------------------------

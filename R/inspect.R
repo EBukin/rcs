@@ -105,6 +105,10 @@ is_index_entry <- function(catalog) {
 #'   secondary = file.path(root, "copy"),
 #'   create = TRUE
 #' )
+#' store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+#'   title = "Daily sales", description = "Simulated daily sales.",
+#'   key = c("shop_id", "date", "product"), partition = "year"
+#' )
 #' store_status(st)
 #' unlink(root, recursive = TRUE)
 store_status <- function(st) {
@@ -150,6 +154,10 @@ store_status <- function(st) {
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-datasets")
 #' st <- store_connect(file.path(root, "primary"), create = TRUE)
+#' store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+#'   title = "Daily sales", description = "Simulated daily sales.",
+#'   key = c("shop_id", "date", "product"), partition = "year"
+#' )
 #' store_datasets(st)
 #' store_datasets(st, pattern = "^sales/", kind = "table")
 #' unlink(root, recursive = TRUE)
@@ -223,6 +231,10 @@ store_datasets <- function(st, pattern = NULL, kind = NULL, index = FALSE) {
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-print")
 #' st <- store_connect(file.path(root, "primary"), create = TRUE)
+#' store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+#'   title = "Daily sales", description = "Simulated daily sales.",
+#'   key = c("shop_id", "date", "product"), partition = "year"
+#' )
 #' print(st)
 #' unlink(root, recursive = TRUE)
 print.rcs_store <- function(x, index = FALSE, n = 50, ...) {
@@ -398,7 +410,11 @@ text_table <- function(cols, align = rep("left", length(cols)), indent = 0) {
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-describe")
 #' st <- store_connect(file.path(root, "primary"), create = TRUE)
-#' try(store_describe(st, "sales/daily")) # an empty store has no datasets
+#' store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+#'   title = "Daily sales", description = "Simulated daily sales.",
+#'   key = c("shop_id", "date", "product"), partition = "year"
+#' )
+#' store_describe(st, "sales/daily")
 #' unlink(root, recursive = TRUE)
 store_describe <- function(st, dataset) {
   validate_store(st)

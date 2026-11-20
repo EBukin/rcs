@@ -38,18 +38,3 @@ test_that("hooks keep their defaults", {
   expect_false(formals(resolve_dataset)$index)
   expect_null(formals(choose_location)$version)
 })
-
-test_that("a hook that is still a stub says so", {
-  is_stub <- function(fn) {
-    any(grepl("abort_not_implemented", deparse(body(fn)), fixed = TRUE))
-  }
-  for (name in names(hook_signatures)) {
-    fn <- get(name, envir = asNamespace("rcs"))
-    if (is_stub(fn)) {
-      args <- stats::setNames(
-        rep(list(NULL), length(hook_signatures[[name]])), hook_signatures[[name]]
-      )
-      expect_error(do.call(fn, args), name, class = "rcs_error_not_implemented")
-    }
-  }
-})

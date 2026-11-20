@@ -1,16 +1,3 @@
-# TEMPORARY: register the S3 methods of `rcs_query` while NAMESPACE lacks
-# them (work package F before the merge). Remove this block once
-# `devtools::document()` has written the registrations.
-local({
-  ns <- asNamespace("rcs")
-  for (m in c("filter", "select", "mutate", "rename", "arrange", "distinct", "collect", "compute", "pull", "glimpse")) {
-    registerS3method(m, "rcs_query", get(paste0(m, ".rcs_query"), envir = ns), envir = asNamespace("dplyr"))
-  }
-  registerS3method("head", "rcs_query", get("head.rcs_query", envir = ns), envir = asNamespace("utils"))
-  registerS3method("print", "rcs_query", get("print.rcs_query", envir = ns), envir = baseenv())
-})
-# End of the temporary block.
-
 # Normalisation for round trips: a tibble in key order (or as it is), row
 # names reset, and POSIXct without a `tzone` attribute given the session's
 # zone `""`, as Arrow returns it.
@@ -28,23 +15,13 @@ normalise <- function(x, key = NULL) {
   x
 }
 
-# Every column identical, except `wait` (difftime): Arrow stores difftime as
-# `duration[s]` and truncates fractions of a second when it writes (a defect
-# of the write side, reported to the orchestrator), so `wait` is compared to
-# within one second.
+# Every column identical.
 expect_same_table <- function(got, expected, key = NULL) {
   got <- normalise(got, key)
   expected <- normalise(expected, key)
   expect_identical(names(got), names(expected))
-  for (name in setdiff(names(expected), "wait")) {
+  for (name in names(expected)) {
     expect_identical(got[[name]], expected[[name]], info = name)
-  }
-  if ("wait" %in% names(expected)) {
-    expect_s3_class(got$wait, "difftime")
-    expect_identical(units(got$wait), units(expected$wait))
-    expect_identical(is.na(got$wait), is.na(expected$wait))
-    diff <- abs(as.numeric(got$wait, units = "secs") - as.numeric(expected$wait, units = "secs"))
-    expect_true(all(diff[!is.na(diff)] < 1))
   }
 }
 
@@ -351,4 +328,96 @@ test_that("rasters are read as SpatRaster, cropped by intersects, and refuse tab
   expect_s4_class(shown, "SpatRaster")
   expect_identical(sum(rcs_trace()$counter == "file_open"), 1L)
   expect_match(out[[1]], "grids/sim (raster)", fixed = TRUE)
+})
+
+# Through the public functions only --------------------------------------------
+
+test_that("a difftime of any units and fractional value survives store_write() and store_read()", {
+  root <- withr::local_tempdir()
+  st <- suppressMessages(store_connect(file.path(root, "primary"), create = TRUE))
+  values <- c(66.85, 0.125, NA, -3.333333333333, 1e-9, 12345.678901234)
+  x <- tibble::tibble(id = seq_along(values))
+  for (units in c("secs", "mins", "hours", "days", "weeks")) {
+    x[[paste0("wait_", units)]] <- as.difftime(values, units = units)
+  }
+  suppressMessages(store_write(st, x, "waits", title = "Waits", description = "Fractional difftimes.", key = "id"))
+  expect_identical(store_read(st, "waits"), x)
+  suppressMessages(store_write(st, x[0, ], "waits_none", title = "None", description = "Zero rows."))
+  expect_identical(store_read(st, "waits_none"), x[0, ])
+  suppressMessages(store_check(st, "waits", x = x))
+  expect_store_valid(st)
+})
+
+test_that("tables, geospatial data and rasters go through the public functions end to end", {
+  skip_below_level("default")
+  skip_if_no_h3()
+  skip_if_not_installed("terra")
+  root <- withr::local_tempdir()
+  paths <- file.path(root, c("primary", "copy1", "copy2"))
+  st <- suppressMessages(store_connect(paths[[1]], secondary = paths[-1], create = TRUE, history = TRUE))
+  expect_store_valid(st)
+  write <- function(x, dataset, ...) {
+    suppressMessages(store_write(st, x, dataset, title = "Simulated", description = "Simulated data.", ...))
+  }
+  read <- function(...) suppressMessages(store_read(st, ...))
+
+  # a partitioned table with a key
+  sales <- rcs_sim_table(300, seed = 3)
+  write(sales, "sales/daily", key = daily_key, partition = "year")
+  expect_store_valid(st)
+  expect_same_table(read("sales/daily"), sales, daily_key)
+
+  # polygons, with the antimeridian and pole rows, partitioned by cell
+  pol <- rcs_sim_polygons(40, seed = 2, special = TRUE)
+  write(pol, "shapes/polygons", partition = "h3")
+  expect_store_valid(st)
+  got <- read("shapes/polygons")
+  expect_s3_class(got, "sf")
+  expect_true(sf::st_crs(got) == sf::st_crs(pol))
+  expect_true(all(c("h3", "bbox") %in% names(got)))
+  expect_true(any(grepl("^h3_p[0-9]+$", names(got))))
+  expect_false(".rcs_id" %in% names(got))
+  got <- got[order(got$id), ]
+  ref <- pol[order(pol$id), ]
+  expect_identical(
+    sf::st_as_binary(sf::st_geometry(got), EWKB = FALSE),
+    sf::st_as_binary(sf::st_geometry(ref), EWKB = FALSE)
+  )
+  attrs <- setdiff(names(pol), "geometry")
+  expect_identical(
+    normalise(sf::st_drop_geometry(got)[attrs]),
+    normalise(sf::st_drop_geometry(ref)[attrs])
+  )
+
+  # a small raster
+  r <- rcs_sim_raster(seed = 4, nrow = 30, ncol = 40)
+  write(r, "grids/small")
+  expect_store_valid(st)
+  grid <- read("grids/small")
+  expect_s4_class(grid, "SpatRaster")
+  expect_identical(names(grid), names(r))
+  expect_equal(terra::values(grid), terra::values(r))
+
+  # an update of one partition; the old version stays readable
+  old <- st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"]
+  y <- sales[sales$year == max(sales$year), ]
+  y$qty <- y$qty + 1L
+  write(y, "sales/daily", mode = "update")
+  expect_store_valid(st)
+  current <- rbind(sales[sales$year != max(sales$year), ], y)
+  expect_same_table(read("sales/daily"), current, daily_key)
+  expect_false(identical(st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"], old))
+  expect_same_table(read("sales/daily", version = old), sales, daily_key)
+  expect_store_valid(st)
+
+  # both checks, in every location
+  integrity <- suppressMessages(store_check(st, "sales/daily"))
+  expect_true(all(integrity$status == "ok"))
+  expect_setequal(unique(integrity$location), store_uris(st))
+  serial <- suppressMessages(store_check(st, "sales/daily", x = current))
+  expect_true(all(serial$status == "ok"))
+  expect_true(all(suppressMessages(store_check(st, "shapes/polygons", x = pol))$status == "ok"))
+  expect_true(all(suppressMessages(store_check(st, "shapes/polygons"))$status == "ok"))
+  expect_true(all(suppressMessages(store_check(st, "grids/small", x = r))$status == "ok"))
+  expect_store_valid(st)
 })

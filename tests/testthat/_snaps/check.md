@@ -12,7 +12,7 @@
     Condition
       Error in `store_check()`:
       ! `store_check()` found 1 problem.
-      x sales/daily/year=2023/part-<version>.parquet: its MD5 <md5> differs from the catalog's <md5> [<root>]
+      x sales/daily/year=2023/part-<version>.parquet: its MD5 <md5> differs from the catalog's <md5>; it is not a readable Parquet file [<root>]
 
 # a missing data file is named
 

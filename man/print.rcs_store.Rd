@@ -29,6 +29,10 @@ the catalogs held by the connection.
 \examples{
 root <- file.path(tempdir(), "rcs-example-print")
 st <- store_connect(file.path(root, "primary"), create = TRUE)
+store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+  title = "Daily sales", description = "Simulated daily sales.",
+  key = c("shop_id", "date", "product"), partition = "year"
+)
 print(st)
 unlink(root, recursive = TRUE)
 }

@@ -28,6 +28,10 @@ already holds catalogs is left unchanged and the call aborts.
 location <- file.path(tempdir(), "rcs-example-create")
 store_create(location, history = TRUE)
 st <- store_connect(location)
+store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+  title = "Daily sales", description = "Simulated daily sales.",
+  key = c("shop_id", "date", "product"), partition = "year"
+)
 st
 unlink(location, recursive = TRUE)
 }

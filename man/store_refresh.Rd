@@ -22,6 +22,10 @@ they touch by themselves.
 \examples{
 primary <- file.path(tempdir(), "rcs-example-refresh")
 st <- store_connect(primary, create = TRUE)
+store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+  title = "Daily sales", description = "Simulated daily sales.",
+  key = c("shop_id", "date", "product"), partition = "year"
+)
 store_refresh(st)
 unlink(primary, recursive = TRUE)
 }

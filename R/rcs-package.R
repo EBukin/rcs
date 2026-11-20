@@ -25,13 +25,3 @@
 #' @importFrom rlang %||% caller_env
 ## usethis namespace: end
 NULL
-
-# Packages listed in Imports for the later work packages and not called by the
-# code of wave 0. Naming one object of each keeps `R CMD check` from reporting
-# an unused import. A work package that starts to use one of them removes its
-# line; delete the function when it is empty.
-ignore_unused_imports <- function() {
-  dplyr::collect
-  tidyselect::eval_select
-  invisible()
-}

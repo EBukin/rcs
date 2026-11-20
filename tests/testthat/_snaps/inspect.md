@@ -155,7 +155,7 @@
         grade      dictionary<values=string, indices=int8, ordered>  ordered factor (3 levels)
         delivered  date32[day]
         big        int64                                             integer64
-        wait       duration[s]                                       difftime (hours)
+        wait       double                                            difftime (hours)
         note       string
         tags       list<item: string>                                list
         ts         timestamp[us, tz=UTC]
@@ -207,7 +207,7 @@
         grade      dictionary<values=string, indices=int8, ordered>  ordered factor (3 levels)
         delivered  date32[day]
         big        int64                                             integer64
-        wait       duration[s]                                       difftime (hours)
+        wait       double                                            difftime (hours)
         note       string
         tags       list<item: string>                                list
         ts         timestamp[us, tz=UTC]

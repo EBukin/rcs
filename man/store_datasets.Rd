@@ -35,6 +35,10 @@ secondary location. Works from the catalogs held by the connection.
 \examples{
 root <- file.path(tempdir(), "rcs-example-datasets")
 st <- store_connect(file.path(root, "primary"), create = TRUE)
+store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
+  title = "Daily sales", description = "Simulated daily sales.",
+  key = c("shop_id", "date", "product"), partition = "year"
+)
 store_datasets(st)
 store_datasets(st, pattern = "^sales/", kind = "table")
 unlink(root, recursive = TRUE)
