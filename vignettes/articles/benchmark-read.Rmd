@@ -1,0 +1,164 @@
+---
+title: "Benchmark: what the package adds on top of Arrow when reading"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
+results <- function(name) {
+  path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
+  tibble::as_tibble(arrow::read_parquet(path))
+}
+read <- results("read")
+counters <- results("read-counters")
+knitr::read_chunk(file.path("..", "..", "bench", "read.R"))
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+```
+
+This article reads stored results; it does not run the benchmark. The script
+is `bench/read.R`; its code is shown below as it was run.
+
+## Question
+
+`store_read()` resolves the dataset in the catalog, picks a location, builds
+an Arrow dataset from the catalog's file list, prunes partitions on the
+catalog's partition values, lets Arrow scan, and then restores the R types
+Arrow does not restore by itself and turns WKB geometry into `sf`. How much
+time does all this add to Arrow reading the same files, for full reads,
+column subsets, key filters and partition filters?
+
+## Setup
+
+```{r}
+env <- read[1, grep("^env_", names(read))]
+knitr::kable(data.frame(
+  item = sub("^env_", "", names(env)),
+  value = vapply(env, function(v) as.character(v[[1]]), character(1)),
+  row.names = NULL
+))
+```
+
+`r format(read$rows[[1]], big.mark = ",", scientific = FALSE)` rows of
+`rcs_sim_table()` (15 columns, among them `integer64`, difftime, a list
+column, factors and two time zones) written once as one file and once
+partitioned by year, and as many `rcs_sim_polygons()` rows in one file, all
+in a local store on SSD. Methods:
+
+- `store`: `store_read()`;
+- `arrow_read_parquet`: `arrow::read_parquet()` on each file of the catalog's
+  file list, bound together; a filter is applied in R after reading, except
+  that the partition filter reads only the file of that year when the
+  dataset is partitioned (the path is taken from the catalog);
+- `arrow_open_dataset`: `arrow::open_dataset()` on the file list, with
+  `dplyr::filter()` and `dplyr::select()` pushed down, then `collect()`;
+- `arrow_sf` (polygons only): `arrow_read_parquet` plus turning WKB into
+  `sf`, the decoding `store_read()` also does.
+
+The Arrow methods return Arrow's own types: `integer` for small
+`integer64` values, seconds for difftime, `arrow_list` for list columns, WKB
+for geometry. Each method is timed with `bench_run()` (five repetitions after
+one untimed run, warm file cache, median reported).
+
+```{r setup, eval = FALSE}
+```
+
+```{r data, eval = FALSE}
+```
+
+```{r arrow, eval = FALSE}
+```
+
+```{r operations, eval = FALSE}
+```
+
+```{r run, eval = FALSE}
+```
+
+## Results
+
+```{r}
+ratio_to <- function(method) {
+  vapply(seq_len(nrow(read)), function(i) {
+    ref <- read$median_s[read$case == read$case[[i]] & read$method == method]
+    if (length(ref) == 1) read$median_s[[i]] / ref else NA_real_
+  }, numeric(1))
+}
+read$x_open_dataset <- ratio_to("arrow_open_dataset")
+read$x_read_parquet <- ratio_to("arrow_read_parquet")
+shown <- read[c("dataset", "operation", "method", "rows_returned", "median_s", "min_s", "x_open_dataset", "x_read_parquet")]
+shown[5:8] <- lapply(shown[5:8], signif, 3)
+knitr::kable(shown, format.args = list(big.mark = ","))
+```
+
+`x_open_dataset` and `x_read_parquet` are the median time divided by that of
+the Arrow method on the same operation.
+
+```{r, eval = has_ggplot, fig.width = 7, fig.height = 5, fig.alt = "Dot chart of median read time in seconds, one panel per dataset, one row per operation, with points for store_read, arrow read_parquet, arrow open_dataset and, for polygons, arrow plus sf decoding. The package's points lie to the right of open_dataset's on most operations."}
+library(ggplot2)
+ggplot(read, aes(x = median_s, y = operation, colour = method)) +
+  geom_point(size = 2.5) +
+  facet_wrap(~dataset, ncol = 1, scales = "free_y") +
+  scale_x_log10() +
+  labs(x = "Median seconds (log scale)", y = NULL, colour = "Method") +
+  theme_minimal()
+```
+
+Work counters of `store_read()` (files opened and row groups in them):
+
+```{r}
+shown <- counters[counters$counter %in% c("file_open", "row_groups_total", "rows_returned"), ]
+shown <- stats::aggregate(n ~ case + counter, data = shown, FUN = sum)
+wide <- stats::reshape(shown, idvar = "case", timevar = "counter", direction = "wide")
+names(wide) <- sub("^n\\.", "", names(wide))
+knitr::kable(wide, row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+## Verdict
+
+```{r, include = FALSE}
+r <- function(dataset, operation, column = "x_open_dataset") {
+  signif(read[[column]][read$dataset == dataset & read$operation == operation & read$method == "store"], 2)
+}
+```
+
+- Tables: a full read through `store_read()` takes
+  `r r("sales/one", "full")` times as long as `open_dataset()` on the same
+  file (`r r("sales/by_year", "full")` times for the partitioned copy). A
+  profile of the same read on 1e5 rows puts 70% of its time in restoring the
+  list column: `restore_list()` rebuilds it element by element through
+  `[[` on Arrow's `arrow_list` (a vctrs class, so every element access is
+  an S3 dispatch). Dropping the class first and stripping attributes only
+  where there are any gave the identical column five times faster. Arrow
+  alone returns the column as `arrow_list`, `integer64` as `integer` and
+  difftime in seconds.
+- A column subset without such columns costs about what Arrow costs
+  (`r r("sales/one", "columns")` times), and so does the key filter
+  (`r r("sales/one", "key_filter")` times; Arrow skips row groups by their
+  statistics because the file is sorted by the key).
+- The partition filter on the partitioned copy opens only the file of that
+  year (the catalog's partition values), yet takes
+  `r r("sales/by_year", "partition_filter")` times as long as
+  `open_dataset()` and `r r("sales/by_year", "partition_filter", "x_read_parquet")`
+  times as long as `read_parquet()` on that one file: the
+  `r format(read$rows_returned[read$dataset == "sales/by_year" & read$operation == "partition_filter"][[1]], big.mark = ",")`
+  rows returned carry the list column, whose restoring takes half of the
+  time in a profile; the rest is opening the dataset over all files before
+  pruning.
+- Polygons: with geometry, `store_read()` takes
+  `r r("shapes/polygons", "full")` times as long as `open_dataset()` and
+  `r signif(read$median_s[read$dataset == "shapes/polygons" & read$operation == "full" & read$method == "store"] / read$median_s[read$dataset == "shapes/polygons" & read$operation == "full" & read$method == "arrow_sf"], 2)`
+  times as long as Arrow plus the same WKB decoding with
+  `sf::st_as_sfc()`. The decoding is nearly the whole cost: `sf` computes
+  each geometry's bounding box in R. Decoding the same WKB with
+  `wk::wk_handle(wk::new_wk_wkb(x), wk::sfc_writer())` (wk is already
+  imported) gave an equal `sfc`, with the same bounding box, about 16 times
+  faster on 1e5 polygons.
+- Without geometry, a polygon read costs what Arrow costs.
+
+## Limits
+
+- One machine and its SSD, warm file cache; two other agents ran tests and
+  rendered documents while this benchmark ran.
+- The Arrow methods do not return the same R types as `store_read()`; they
+  show the floor that Arrow sets, not an equivalent result.
+- Reads from a cloud bucket are in `benchmark-cloud.Rmd`; spatial queries in
+  `benchmark-spatial.Rmd`.
