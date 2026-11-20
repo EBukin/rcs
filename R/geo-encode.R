@@ -704,7 +704,10 @@ geo_metadata <- function(data, crs) {
     xmax = c("bbox", "xmax"), ymax = c("bbox", "ymax")
   ))
   geo <- list(version = "1.1.0", primary_column = "geometry", columns = list(geometry = column))
-  as.character(jsonlite::toJSON(geo, auto_unbox = TRUE, digits = NA, null = "null"))
+  as.character(jsonlite::toJSON(
+    json_exact_doubles(geo),
+    auto_unbox = TRUE, digits = NA, null = "null", json_verbatim = TRUE
+  ))
 }
 
 # Covering --------------------------------------------------------------------

@@ -100,12 +100,31 @@ history_schema <- function() {
 
 #' @noRd
 schema_get <- function(which = c("catalog", "files", "history")) {
-  switch(
-    rlang::arg_match(which),
-    catalog = catalog_schema(),
-    files = files_schema(),
-    history = history_schema()
-  )
+  schema_cached(rlang::arg_match(which))$schema
+}
+
+# Building a schema and its kinds takes tens of milliseconds and they never
+# change in a session, so each is built once per `which` and kept here.
+schema_cache <- new.env(parent = emptyenv())
+
+schema_cached <- function(which) {
+  cached <- schema_cache[[which]]
+  if (is.null(cached)) {
+    schema <- switch(
+      which,
+      catalog = catalog_schema(),
+      files = files_schema(),
+      history = history_schema()
+    )
+    cached <- list(schema = schema, kinds = schema_field_kinds(schema))
+    assign(which, cached, envir = schema_cache)
+  }
+  cached
+}
+
+# Field kinds of `schema_get(which)`, from the cache.
+schema_kinds <- function(which = c("catalog", "files", "history")) {
+  schema_cached(rlang::arg_match(which))$kinds
 }
 
 dataset_kinds <- c("table", "geospatial", "raster")
@@ -184,7 +203,7 @@ history_empty <- function() {
 }
 
 schema_empty <- function(which) {
-  kinds <- schema_field_kinds(schema_get(which))
+  kinds <- schema_kinds(which)
   tibble::as_tibble(lapply(kinds, empty_column))
 }
 
@@ -209,7 +228,7 @@ schema_as_arrow <- function(x, which = c("catalog", "files", "history")) {
 #' @noRd
 schema_as_tibble <- function(x, which = c("catalog", "files", "history")) {
   which <- rlang::arg_match(which)
-  kinds <- schema_field_kinds(schema_get(which))
+  kinds <- schema_kinds(which)
   withr::local_options(arrow.int64_downcast = FALSE)
   x <- tibble::as_tibble(as.data.frame(x))
   missing <- setdiff(names(kinds), names(x))
@@ -250,7 +269,7 @@ schema_as_tibble <- function(x, which = c("catalog", "files", "history")) {
 schema_validate <- function(x, which = c("catalog", "files", "history"),
                             call = caller_env()) {
   which <- rlang::arg_match(which)
-  kinds <- schema_field_kinds(schema_get(which))
+  kinds <- schema_kinds(which)
   fail <- function(problems) {
     cli::cli_abort(
       c("Invalid {which} table.", rlang::set_names(problems, "x")),
@@ -543,7 +562,10 @@ columns_from_json <- function(json) {
 # JSON of catalog rows --------------------------------------------------------
 
 to_json <- function(x) {
-  as.character(jsonlite::toJSON(x, auto_unbox = TRUE, digits = NA, null = "null", na = "null"))
+  as.character(jsonlite::toJSON(
+    json_exact_doubles(x),
+    auto_unbox = TRUE, digits = NA, null = "null", na = "null", json_verbatim = TRUE
+  ))
 }
 
 # One row of a catalog file as a list ready for JSON: `int64` as strings (an
@@ -582,7 +604,7 @@ row_from_list <- function(item, kinds) {
 }
 
 rows_from_list <- function(items, which) {
-  kinds <- schema_field_kinds(schema_get(which))
+  kinds <- schema_kinds(which)
   rows <- lapply(items, row_from_list, kinds = kinds)
   vctrs::vec_rbind(schema_empty(which), !!!rows)
 }
@@ -612,14 +634,14 @@ entry_not_embedded <- c(
 #'   with the columns of `catalog_schema()`.
 #' @noRd
 entry_metadata_json <- function(entry) {
-  kinds <- schema_field_kinds(catalog_schema())
+  kinds <- schema_kinds("catalog")
   to_json(row_to_list(entry, kinds[setdiff(names(kinds), entry_not_embedded)]))
 }
 
 #' @noRd
 entry_from_metadata_json <- function(json) {
   item <- jsonlite::fromJSON(json, simplifyVector = FALSE)
-  row_from_list(item, schema_field_kinds(catalog_schema()))
+  row_from_list(item, schema_kinds("catalog"))
 }
 
 # Manifest --------------------------------------------------------------------
@@ -668,8 +690,8 @@ new_manifest <- function(entry, files, written = now_utc()) {
 
 #' @noRd
 manifest_to_json <- function(manifest) {
-  entry_kinds <- schema_field_kinds(catalog_schema())
-  file_kinds <- schema_field_kinds(files_schema())
+  entry_kinds <- schema_kinds("catalog")
+  file_kinds <- schema_kinds("files")
   to_json(list(
     entry = row_to_list(manifest$entry, entry_kinds),
     files = lapply(

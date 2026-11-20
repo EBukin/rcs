@@ -90,7 +90,7 @@ check_count <- function(x, arg = rlang::caller_arg(x), call = caller_env()) {
 #' * `partition = c("col", ...)`: one file per combination of values of those
 #'   columns; the columns must exist, be atomic and hold no `NA`.
 #' * `partition = "h3"` (data with an `integer64` column `h3`): one file per
-#'   H3 parent of `h3` at the finest resolution `r <= h3_max_res` whose
+#'   H3 parent of `h3` at the finest resolution `r` (at most `h3_max_res`) whose
 #'   number of groups is at most `max_files`, written as the column
 #'   `h3_p<r>` (an `integer64` column placed right after `h3`). Rows with
 #'   `h3 = NA` (empty geometries) form one group of their own, with the value

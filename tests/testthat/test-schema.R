@@ -295,6 +295,29 @@ test_that("a manifest round-trips through JSON", {
   expect_type(parsed$entry$columns, "character")
 })
 
+test_that("doubles of a manifest round-trip exactly", {
+  # 15 significant digits do not give back these doubles
+  box <- c(xmin = -29.815337945564668, ymin = 6 + 1 / 3, xmax = -24.1 - 0.2, ymax = 9 + 2^-40)
+  entry <- example_entry(bbox = box)
+  files <- example_files()
+  files$bbox <- bbox_df(box[[1]] + c(0, 1 / 7), box[[2]] + c(0, 1 / 9), box[[3]] - c(1 / 7, 0), box[[4]] - c(1 / 9, 0))
+  manifest <- new_manifest(entry, files, written = as.POSIXct("2026-03-04 05:06:07", tz = "UTC"))
+  back <- manifest_from_json(manifest_to_json(manifest))
+  expect_identical(back, manifest)
+  expect_identical(unlist(back$entry$bbox), unlist(manifest$entry$bbox))
+  expect_identical(back$files$bbox, manifest$files$bbox)
+})
+
+test_that("doubles of the columns JSON round-trip exactly", {
+  spec <- columns_spec(
+    "band", "raster",
+    r_type = list(list(class = "SpatRaster", resolution = c(1 / 3, 0.1 + 0.2), dim = c(3L, 4L)))
+  )
+  back <- columns_from_json(columns_to_json(spec))
+  expect_identical(back, spec)
+  expect_identical(back$r_type[[1]]$resolution, c(1 / 3, 0.1 + 0.2))
+})
+
 test_that("a manifest keeps missing values", {
   entry <- example_entry("sales", kind = "table", key = character(), sorted_by = character(),
     partition = character(), bbox = NULL, crs = NA, h3_res = NA, history = NA, n_files = 1)

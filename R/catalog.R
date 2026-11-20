@@ -105,7 +105,7 @@ history_read <- function(be) {
 #' @noRd
 history_version_rows <- function(history, dataset, version) {
   rows <- history[history$dataset == dataset & history$version == version, ]
-  rows <- rows[!duplicated(rows$path), names(files_schema())]
+  rows <- rows[!duplicated(rows$path), names(schema_get("files"))]
   rows[order(rows$path, method = "radix"), ]
 }
 

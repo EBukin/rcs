@@ -173,6 +173,43 @@ catalog_files <- c(
 store_file <- "_store.json"
 lock_dir <- "_lock"
 
+# Exact doubles in JSON -------------------------------------------------------
+
+# `jsonlite::toJSON(digits = NA)` writes 15 significant digits, which does not
+# round-trip every double. `json_exact_doubles()` replaces each plain double
+# vector inside a list (recursively, data frames excepted) by verbatim JSON in
+# the shortest of 15, 16 or 17 significant digits that reads back to the same
+# double; serialise the result with `json_verbatim = TRUE`. A double that
+# round-trips with 15 digits is written exactly as `digits = NA` writes it, so
+# such JSON does not change. A length-one vector without `I()` becomes a
+# scalar, anything else an array; `NA`, `NaN` and infinite values become null.
+json_exact_doubles <- function(x) {
+  if (is.double(x) && (!is.object(x) || identical(class(x), "AsIs"))) {
+    items <- vapply(x, json_double, character(1))
+    if (length(x) == 1 && !inherits(x, "AsIs")) {
+      return(structure(items, class = "json"))
+    }
+    return(structure(paste0("[", paste(items, collapse = ","), "]"), class = "json"))
+  }
+  if (is.list(x) && !is.data.frame(x)) {
+    x[] <- lapply(x, json_exact_doubles)
+  }
+  x
+}
+
+json_double <- function(x) {
+  if (!is.finite(x)) {
+    return("null")
+  }
+  for (digits in 15:16) {
+    out <- sprintf("%.*g", digits, x)
+    if (as.numeric(out) == x) {
+      return(out)
+    }
+  }
+  sprintf("%.17g", x)
+}
+
 #' Canonical JSON of the partition values of one file
 #'
 #' The string stored in `_files.parquet$partition_values` and hashed into the
@@ -197,7 +234,10 @@ partition_values_json <- function(values = NULL) {
   values <- lapply(values, function(v) {
     if (is.factor(v) || inherits(v, c("Date", "POSIXct", "integer64"))) as.character(v) else v
   })
-  as.character(jsonlite::toJSON(values, auto_unbox = TRUE, digits = NA, na = "null"))
+  as.character(jsonlite::toJSON(
+    json_exact_doubles(values),
+    auto_unbox = TRUE, digits = NA, na = "null", json_verbatim = TRUE
+  ))
 }
 
 #' Path of a data file, relative to the location root

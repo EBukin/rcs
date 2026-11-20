@@ -227,6 +227,22 @@ test_that("geo_metadata() writes GeoParquet 1.1", {
   expect_error(geo_metadata(out$data["id"], out$crs), class = "rcs_error_geo")
 })
 
+test_that("the bbox of geo_metadata() round-trips exactly", {
+  # 15 significant digits do not give back these doubles
+  box <- c(-29.815337945564668, 6 + 1 / 3, -24.1 - 0.2, 9 + 2^-40)
+  wkb <- unclass(wk::as_wkb(wk::wkt(c(
+    sprintf("POINT (%.17g %.17g)", box[[1]], box[[2]]),
+    sprintf("POINT (%.17g %.17g)", box[[3]], box[[4]])
+  ))))
+  attributes(wkb) <- NULL
+  data <- tibble::tibble(
+    bbox = tibble::tibble(xmin = box[c(1, 3)], ymin = box[c(2, 4)], xmax = box[c(1, 3)], ymax = box[c(2, 4)]),
+    geometry = wkb
+  )
+  geo <- jsonlite::fromJSON(geo_metadata(data, "{\"type\":\"GeographicCRS\"}"), simplifyVector = FALSE)
+  expect_identical(unlist(geo$columns$geometry$bbox), box)
+})
+
 test_that("geo_metadata() names every geometry type", {
   skip_if_no_h3()
   g <- sf::st_sfc(

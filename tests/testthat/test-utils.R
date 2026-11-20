@@ -112,6 +112,39 @@ test_that("partition values have one canonical JSON form", {
   expect_error(partition_values_json(list(year = 1:2)))
 })
 
+test_that("doubles in partition values round-trip exactly", {
+  # 15 significant digits do not give back these doubles
+  x <- c(-29.815337945564668, 1 / 3, 0.1 + 0.2, 2^53 + 2)
+  for (v in x) {
+    json <- partition_values_json(list(x = v))
+    expect_identical(jsonlite::fromJSON(json, simplifyVector = FALSE)$x, v)
+  }
+  expect_identical(partition_values_json(list(x = 2024)), "{\"x\":2024}")
+  expect_identical(partition_values_json(list(x = NA_real_)), "{\"x\":null}")
+})
+
+test_that("json_exact_doubles() writes the shortest exact form", {
+  set.seed(1)
+  v <- c(stats::runif(500, -180, 180), stats::rnorm(200) * 10^sample(-300:300, 200, TRUE))
+  exact <- jsonlite::toJSON(json_exact_doubles(list(a = I(v), b = v[[1]])), auto_unbox = TRUE, json_verbatim = TRUE)
+  back <- jsonlite::fromJSON(exact, simplifyVector = FALSE)
+  expect_identical(unlist(back$a), v)
+  expect_identical(back$b, v[[1]])
+  # a double that round-trips with 15 digits is written as `digits = NA` does
+  same <- c(0, -0, 0.1, 2023, 1e-5, 1e20, 1234567.125, 1.5e-300)
+  for (s in same) {
+    expect_identical(
+      as.character(jsonlite::toJSON(json_exact_doubles(list(s = s)), auto_unbox = TRUE, json_verbatim = TRUE)),
+      as.character(jsonlite::toJSON(list(s = s), auto_unbox = TRUE, digits = NA))
+    )
+  }
+  # length one with I() stays an array; non-finite is null
+  expect_identical(
+    as.character(jsonlite::toJSON(json_exact_doubles(list(a = I(0.5), b = c(1, NaN, Inf))), json_verbatim = TRUE)),
+    "{\"a\":[0.5],\"b\":[1,null,null]}"
+  )
+})
+
 test_that("data file and manifest paths follow the plan", {
   version <- "0123456789abcdef"
   expect_identical(
