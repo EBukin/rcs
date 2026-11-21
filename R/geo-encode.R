@@ -38,9 +38,45 @@ geo_crs_json <- function(crs) {
 }
 
 geo_crs_from_json <- function(crs, call = caller_env()) {
-  out <- tryCatch(sf::st_crs(crs), error = function(e) sf::NA_crs_)
+  out <- tryCatch(geo_crs_cached(crs), error = function(e) sf::NA_crs_)
   if (is.na(out)) {
     geo_abort("{.arg crs} must be a coordinate reference system (PROJJSON).", call = call)
+  }
+  out
+}
+
+# `sf::st_crs()` of a CRS string, kept for the session: parsing a PROJJSON
+# string takes tens of milliseconds, and every spatial read parses the
+# catalog's CRS several times. Other inputs are parsed each time.
+geo_crs_cache <- new.env(parent = emptyenv())
+
+geo_crs_cached <- function(crs) {
+  if (!rlang::is_string(crs) || is.na(crs)) {
+    return(sf::st_crs(crs))
+  }
+  key <- md5_string(crs)
+  out <- geo_crs_cache[[key]]
+  if (is.null(out)) {
+    out <- sf::st_crs(crs)
+    if (length(geo_crs_cache) >= 32) {
+      rm(list = ls(geo_crs_cache), envir = geo_crs_cache)
+    }
+    geo_crs_cache[[key]] <- out
+  }
+  out
+}
+
+# Whether a CRS string is geographic, kept for the session as above
+# (`sf::st_is_longlat()` parses the CRS again on every call).
+geo_crs_is_longlat <- function(crs) {
+  if (!rlang::is_string(crs) || is.na(crs)) {
+    return(isTRUE(sf::st_is_longlat(sf::st_crs(crs))))
+  }
+  key <- paste0("longlat-", md5_string(crs))
+  out <- geo_crs_cache[[key]]
+  if (is.null(out)) {
+    out <- isTRUE(sf::st_is_longlat(geo_crs_cached(crs)))
+    geo_crs_cache[[key]] <- out
   }
   out
 }

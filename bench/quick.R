@@ -1,6 +1,6 @@
 # Quick performance check against the stored baseline.
 #
-# A small version of every benchmark (write, read, cloud, connect) on 1e5
+# A small version of every benchmark (write, read, spatial, cloud, connect) on 1e5
 # rows, in a few minutes. Each measure is timed with `bench_run()` (5
 # repetitions, median) and its work counters are taken once with
 # `bench_counters()`. The check fails, with an error and so a non-zero exit
@@ -47,6 +47,9 @@ env$commit <- tryCatch(
 sales <- rcs_sim_table(n, seed = 1)
 polygons <- rcs_sim_polygons(n, seed = 1)
 key <- c("shop_id", "date", "product")
+# spatial queries: a cell of resolution 7 and a box of 0.2 degrees
+spatial_cell <- as.character(h3o::h3_from_points(sf::st_as_sfc(wk::xy(-27, 7.5, crs = 4326)), 7L))
+spatial_box <- sf::st_as_sfc(sf::st_bbox(c(xmin = -27.1, ymin = 7.4, xmax = -26.9, ymax = 7.6), crs = sf::st_crs(4326)))
 
 # Every write goes to a new dataset: `bench_run()` evaluates the expression
 # of its first repetition twice.
@@ -97,6 +100,8 @@ local_measures <- function(st, uri) {
     read_key = quote(store_read(st, "sales/daily", shop_id == 7L, product == "p07")),
     read_partition = quote(store_read(st, "sales/daily", year == 2024L)),
     read_polygons = quote(store_read(st, "shapes/polygons")),
+    read_spatial_cell = quote(store_read(st, "shapes/polygons", intersects = spatial_cell)),
+    read_spatial_box = quote(store_read(st, "shapes/polygons", intersects = spatial_box)),
     check_integrity = quote(store_check(st, "sales/daily"))
   )
 }

@@ -6,7 +6,7 @@ title: "Benchmark: where write time goes"
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
 results <- function(name) {
   path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
-  tibble::as_tibble(arrow::read_parquet(path))
+  tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
 }
 write <- results("write")
 counters <- results("write-counters")
@@ -163,32 +163,30 @@ tl <- pick("table", 1e5)
 - Polygons: geocoding is the largest step,
   `r pct(p1, "geocode")`% of a write of
   `r format(big, big.mark = ",", scientific = FALSE)` polygons with one
-  worker (`r round(p1$rows_per_s)` rows per second in all). The H3
-  partition choice (in "sort") takes `r pct(p1, "sort")`%; serialising
-  `r pct(p1, "serialise")`%. The partition choice asks for the H3 parent of
-  every row at each resolution it tries, although the rows hold only a few
-  distinct cells (883 at 1e5 rows); taking the parents of the distinct cells and
-  matching them back gave the same result about 18 times faster on 1e5
-  polygons.
-- Tables: the serialization check takes `r pct(t1, "check")`% of a write of
-  `r format(big, big.mark = ",", scientific = FALSE)` rows, more than
-  serialising them (`r pct(t1, "serialise")`%); throughput
-  `r format(round(t1$rows_per_s), big.mark = ",")` rows per second. The
-  check compares 20 rows per file but restores the R types of the whole row
-  group it reads (50,000 rows, the list column element by element in R)
-  before taking them: about 0.5 s per file, against a few milliseconds when
-  the 20 rows are taken first.
+  worker (`r format(round(p1$rows_per_s), big.mark = ",")` rows per second in
+  all). The H3 partition choice (in "sort") now works on the distinct cells
+  and takes `r pct(p1, "sort")`%; serialising `r pct(p1, "serialise")`% and
+  the serialization check `r pct(p1, "check")`%.
+- Tables: `r format(round(t1$rows_per_s), big.mark = ",")` rows per second at
+  `r format(big, big.mark = ",", scientific = FALSE)` rows. The serialization
+  check restores only the sampled rows and takes `r pct(t1, "check")`% of the
+  write, about as much as serialising (`r pct(t1, "serialise")`%); it still
+  reads one row group of every file, so it grows with the number of files.
 - Four workers against one: `r signif(p1$median_s, 3)` s against
   `r signif(p4$median_s, 3)` s for `r format(big, big.mark = ",", scientific = FALSE)`
   polygons (geocode `r signif(p1$step_geocode_s, 3)` s against
-  `r signif(p4$step_geocode_s, 3)` s). At 1e5 rows four workers cannot help:
-  the rows form one chunk of `rcs.chunk_size` (1e5), and only chunks are
-  shared out; the difference at 1e5 rows is noise of the busy machine. At
-  `r format(big, big.mark = ",", scientific = FALSE)` rows the geocoding
-  gains a factor of `r signif(p1$step_geocode_s / p4$step_geocode_s, 2)`
-  with four workers, not four. Part of `geo_encode()` stays in the main
-  process (WKB conversion, sorting, the index table) and the chunks are
-  copied to the workers; how the remainder splits was not measured.
+  `r signif(p4$step_geocode_s, 3)` s, a factor of
+  `r signif(p1$step_geocode_s / p4$step_geocode_s, 2)`). At 1e5 rows four
+  workers cannot help: the rows form one chunk of `rcs.chunk_size` (1e5),
+  and only chunks are shared out. The gain stays well below four because the
+  rows that are costly to geocode, those crossing cell edges, all lie in the
+  first chunks of the simulated data, and the machine has four physical
+  cores. In a separate check on 2e5 polygons with four workers, chunks of
+  5e4 rows took 6.3 to 8.1 s against 8.5 to 9.1 s for 1e5 (one run each,
+  three for the pair), chunks of 2.5e4 no less, and spreading the rows over
+  the chunks in turn did not help; with one worker, the default, the chunk
+  size made no difference. The evidence is too thin to change
+  `rcs.chunk_size`, which stays at 1e5.
 - The cloud bucket adds the upload: `r signif(pg$median_s, 3)` s against
   `r signif(pl$median_s, 3)` s for 1e5 polygons, `r signif(tg$median_s, 3)` s
   against `r signif(tl$median_s, 3)` s for 1e5 table rows. MD5 verification
@@ -197,9 +195,8 @@ tl <- pick("table", 1e5)
 
 ## Limits
 
-- One machine; two other agents ran tests and rendered documents on it
-  while this benchmark ran, so absolute times carry noise (compare `min_s`
-  with `median_s`). The baseline is measured again on a quiet machine.
+- One machine, quiet while this benchmark ran (no other agent); absolute
+  times still carry some noise (compare `min_s` with `median_s`).
 - The cloud upload speed is that of this machine's network connection; it
   bounds every cloud number here.
 - The step times come from wrapping internal functions; the wrappers add a

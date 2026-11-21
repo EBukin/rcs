@@ -5,34 +5,45 @@
 #      cells of any resolution), densified before any change of CRS;
 #   2. covering cells at the dataset's `h3_res` plus their first ring
 #      (`geo_covering()`);
-#   3. file pruning: files whose `bbox` overlaps the query box and whose
-#      `h3_min`-`h3_max` range holds a covering cell or the `h3_main` of a
-#      matching index row;
-#   4. candidate rows, pushed down to Arrow: (`h3` in the covering cells, or
-#      `.rcs_id` among the index rows whose `h3` is in the covering cells)
-#      and `bbox` overlapping the query box; the box test alone for data
-#      written with `geocode = FALSE`;
+#   3. file pruning: files whose `bbox` overlaps the query box and, when the
+#      cell filter is used, whose `h3_min`-`h3_max` range holds a covering
+#      cell or the `h3_main` of a matching index row;
+#   4. candidate rows, pushed down to Arrow: `bbox` overlapping the query
+#      box, and, when the cell filter is used, (`h3` in the covering cells,
+#      or `.rcs_id` among the index rows whose `h3` is in the covering
+#      cells);
 #   5. exact test in `collect()`: `sf::st_intersects()` with the query shape
 #      in the data CRS, under the user's `sf::sf_use_s2()` setting.
 #
-# Completeness: an inside row lies in its `h3` cell, so it can only intersect
-# the query when that cell does, and the cell is then in the covering. A
-# crossing row has an index row for every cell it touches. The box of a row
-# holds the row, so the box test drops no intersecting row; the exception is
-# a row across the antimeridian or around a pole, whose plain box of
-# coordinates does not hold the shape read on the sphere: in a geographic
-# CRS a row (or file) whose box spans 180 degrees of longitude or more always
-# passes the box test. A query of that kind has no box (`geo_covering()`),
-# and the box test is skipped.
+# The cell filter (with the index table) is used only where it pays off
+# (`spatial_use_cells()`): when the query has no box (across the antimeridian
+# or around a pole), and when the query's box is much larger than the query
+# (a thin diagonal strip, a line). For compact queries the box test alone
+# leaves as few candidate rows, and reading the index table costs more than
+# it saves (work package M, `vignettes/articles/benchmark-spatial.Rmd`).
+#
+# Completeness: the box of a row holds the row, so the box test drops no
+# intersecting row; the exception is a row across the antimeridian or around
+# a pole, whose plain box of coordinates does not hold the shape read on the
+# sphere: in a geographic CRS a row (or file) whose box spans 180 degrees of
+# longitude or more always passes the box test. A query of that kind has no
+# box (`geo_covering()`), and the box test is skipped. When the cell filter
+# is used: an inside row lies in its `h3` cell, so it can only intersect the
+# query when that cell does, and the cell is then in the covering; a crossing
+# row has an index row for every cell it touches.
 
 #' Add a spatial filter to a lazy query
 #'
 #' Keeps the rows of a geospatial dataset whose geometry intersects `y`. The
-#' filter first prunes files by their extent and H3 cell range, then pushes a
-#' candidate test on the stored H3 cells (`h3`, and the dataset's index
-#' table for rows that cross cell edges) and bounding boxes (`bbox`) into the
-#' scan, and finally, in `collect()`, tests the candidate rows exactly with
-#' [sf::st_intersects()] under the session's [sf::sf_use_s2()] setting.
+#' filter first prunes files by their extent, then pushes a candidate test
+#' on the stored bounding boxes (`bbox`) into the scan, and finally, in
+#' `collect()`, tests the candidate rows exactly with [sf::st_intersects()]
+#' under the session's [sf::sf_use_s2()] setting. When the box of `y` is
+#' much larger than `y` itself (a thin diagonal strip, a line), or `y`
+#' crosses the antimeridian or holds a pole, files are also pruned by their
+#' H3 cell range and the candidate test also requires the stored H3 cell
+#' (`h3`, and the dataset's index table for rows that cross cell edges) to
+#' touch `y`.
 #'
 #' The filter applies to the rows of the dataset, before the other verbs of
 #' the query. Several calls combine: a row must intersect every query.
@@ -82,9 +93,39 @@ store_intersects <- function(q, y, exact = TRUE) {
 #' @param y The query shape.
 #' @param exact `TRUE` or `FALSE`.
 #' @param call Environment for errors.
+#' @param plan `NULL`, or the result of `spatial_plan()` for `y` and
+#'   `exact`, computed on the files of the read target before the query was
+#'   built (`query_new()`).
 #' @return The query.
 #' @noRd
-query_intersects <- function(q, y, exact = TRUE, call = caller_env()) {
+query_intersects <- function(q, y, exact = TRUE, call = caller_env(), plan = NULL) {
+  if (is.null(plan)) {
+    plan <- spatial_plan(q, y, exact, call = call)
+  }
+  test <- plan$test
+  q <- query_set_files(q, q$files[q$files$path %in% plan$paths, ])
+  predicate <- spatial_predicate(test)
+  if (!is.null(predicate)) {
+    q <- query_bottom_filter(q, predicate)
+  }
+  previous <- q$spatial
+  q$spatial <- list(
+    tests = c(previous$tests, list(test)),
+    cells = sum(previous$cells, length(test$cells)),
+    index = isTRUE(previous$index) || length(test$ids) > 0
+  )
+  q
+}
+
+#' Steps 1 to 3 of the spatial filter
+#'
+#' @param q An `rcs_query`, or a list with its fields `store`, `entry`,
+#'   `location` and `files` (a read target before its query is built).
+#' @inheritParams query_intersects
+#' @return A list: `test` (the element of `q$spatial$tests`) and `paths`
+#'   (the paths of the files of `q$files` kept by the file pruning).
+#' @noRd
+spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
   entry <- q$entry
   if (!identical(entry$kind, "geospatial")) {
     cli::cli_abort(
@@ -109,8 +150,8 @@ query_intersects <- function(q, y, exact = TRUE, call = caller_env()) {
       )
     }
   )
-  geographic <- isTRUE(sf::st_is_longlat(sf::st_crs(entry$crs)))
-  cells <- covering$cells
+  geographic <- geo_crs_is_longlat(entry$crs)
+  cells <- if (spatial_use_cells(covering)) covering$cells
   ids <- NULL
   if (!is.null(cells)) {
     index <- spatial_index_rows(q, cells)
@@ -126,19 +167,43 @@ query_intersects <- function(q, y, exact = TRUE, call = caller_env()) {
     cells = cells, ids = ids$.rcs_id, geographic = geographic
   )
 
-  q <- query_set_files(q, q$files[spatial_keep_files(q$files, test, ids$h3_main), ])
-  predicate <- spatial_predicate(test)
-  if (!is.null(predicate)) {
-    q <- query_bottom_filter(q, predicate)
-  }
-  previous <- q$spatial
-  q$spatial <- list(
-    tests = c(previous$tests, list(test)),
-    cells = sum(previous$cells, length(cells)),
-    index = isTRUE(previous$index) || length(test$ids) > 0
-  )
-  q
+  keep <- spatial_keep_files(q$files, test, ids$h3_main)
+  list(test = test, paths = q$files$path[keep])
 }
+
+#' Whether the cell filter pays off for a query
+#'
+#' The cell filter (the covering cells and the rows of the index table) is
+#' used when the query has cells and no box (the box test is then skipped),
+#' and when the area of the query's box is more than `spatial_cell_ratio`
+#' times the area of the query: the box test alone would then leave many
+#' rows that lie in the box but far from the query. A query without area
+#' (a line) has a box of positive area and uses it; a point or a box-shaped
+#' query does not.
+#'
+#' @param covering The result of `geo_covering()`.
+#' @return `TRUE` or `FALSE`.
+#' @noRd
+spatial_use_cells <- function(covering) {
+  if (is.null(covering$cells)) {
+    return(FALSE)
+  }
+  if (is.null(covering$bbox)) {
+    return(TRUE)
+  }
+  b <- covering$bbox
+  if (!(b[["xmax"]] > b[["xmin"]] && b[["ymax"]] > b[["ymin"]])) {
+    return(FALSE)
+  }
+  # areas in the plane of the data CRS coordinates (degrees in a geographic
+  # CRS): only their ratio matters, and the plane is fast
+  box_area <- (b[["xmax"]] - b[["xmin"]]) * (b[["ymax"]] - b[["ymin"]])
+  shape_area <- sum(as.numeric(sf::st_area(sf::st_set_crs(covering$shape, NA))))
+  !(shape_area * spatial_cell_ratio >= box_area)
+}
+
+# Above this ratio of box area to query area the cell filter is used.
+spatial_cell_ratio <- 4
 
 #' Rows of the index table matching the covering cells
 #'

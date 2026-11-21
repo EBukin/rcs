@@ -9,7 +9,10 @@
 # prefix is removed at the end, also after a failure. Without RCS_TEST_GCS
 # the script stops.
 #
-# The cost of `store_sync()` is not yet measured.
+# `store_sync()` is timed from the local store to a new, empty secondary
+# under the same prefix (the polygons and their index table, a new
+# secondary for every repetition) and to a secondary that is already
+# identical (nothing to transfer).
 #
 # Run in a fresh R session, with the project root in RCS_BENCH_ROOT (default:
 # the working folder) and RCS_TEST_GCS set:
@@ -135,6 +138,26 @@ md5_cases <- function(st_gcs, st_local) {
   )
 }
 
+# ---- sync ----
+# A new secondary for every repetition of the sync to an empty location.
+sync_cases <- function() {
+  sync_root <- paste0(sub("/store$", "", gcs_uri), "/sync-")
+  state <- new.env()
+  state$i <- 0L
+  fresh_secondary <- rlang::expr({
+    i <- i + 1L
+    st_sync <- store_connect(local_root, secondary = paste0(!!sync_root, i), create = TRUE)
+  })
+  empty <- bench_run(
+    sync_empty = store_sync(st_sync, datasets = "shapes/polygons"),
+    case = "sync polygons", setup = fresh_secondary, env = state
+  )
+  st_same <- store_connect(local_root, secondary = paste0(sync_root, "same"), create = TRUE)
+  store_sync(st_same, datasets = "shapes/polygons")
+  same <- bench_run(sync_identical = store_sync(st_same, datasets = "shapes/polygons"), case = "sync polygons")
+  rbind(empty, same)
+}
+
 # ---- counters ----
 counter_cases <- function(st_gcs, st_local) {
   roles <- c(stats::setNames("gcs", gcs_uri), stats::setNames("local", st_local$primary$uri))
@@ -176,6 +199,8 @@ run_all <- function() {
   timed <- rbind(timed, read_cases(st_gcs, st_local))
   cli::cli_inform("Timing MD5 and checks.")
   timed <- rbind(timed, md5_cases(st_gcs, st_local))
+  cli::cli_inform("Timing sync.")
+  timed <- rbind(timed, sync_cases())
   counted <- counter_cases(st_gcs, st_local)
   timed$datasets <- built$datasets
   timed$store_bytes <- built$bytes

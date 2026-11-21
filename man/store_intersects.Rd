@@ -25,11 +25,15 @@ The query with the filter added.
 }
 \description{
 Keeps the rows of a geospatial dataset whose geometry intersects \code{y}. The
-filter first prunes files by their extent and H3 cell range, then pushes a
-candidate test on the stored H3 cells (\code{h3}, and the dataset's index
-table for rows that cross cell edges) and bounding boxes (\code{bbox}) into the
-scan, and finally, in \code{collect()}, tests the candidate rows exactly with
-\code{\link[sf:st_intersects]{sf::st_intersects()}} under the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting.
+filter first prunes files by their extent, then pushes a candidate test
+on the stored bounding boxes (\code{bbox}) into the scan, and finally, in
+\code{collect()}, tests the candidate rows exactly with \code{\link[sf:st_intersects]{sf::st_intersects()}}
+under the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting. When the box of \code{y} is
+much larger than \code{y} itself (a thin diagonal strip, a line), or \code{y}
+crosses the antimeridian or holds a pole, files are also pruned by their
+H3 cell range and the candidate test also requires the stored H3 cell
+(\code{h3}, and the dataset's index table for rows that cross cell edges) to
+touch \code{y}.
 }
 \details{
 The filter applies to the rows of the dataset, before the other verbs of

@@ -68,7 +68,7 @@
       <rcs_query> shapes/polygons (geospatial, current)
       Location: primary
       Files:    10 of 44
-      Spatial:  2 queries, cell filter, box test, exact test in collect()
+      Spatial:  2 queries, no cell filter, box test, exact test in collect()
       Columns:  id, area
 
 ---

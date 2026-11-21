@@ -147,13 +147,22 @@ store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
     return(raster_open(target$location$backend, target$files$path[[1]], intersects))
   }
 
-  q <- query_new(st, target)
+  # the file pruning of the filters is done on the catalog before any file
+  # is opened (`query_new()`); the filters themselves are applied after
+  plan <- NULL
+  if (!is.null(intersects)) {
+    plan <- spatial_plan(c(list(store = st), target[c("entry", "location", "files")]),
+      intersects, exact,
+      call = call
+    )
+  }
+  q <- query_new(st, target, quos = quos, plan = plan)
   q$geometry <- geometry
   if (length(quos) > 0) {
     q <- query_filter(q, quos)
   }
   if (!is.null(intersects)) {
-    q <- query_intersects(q, intersects, exact, call = call)
+    q <- query_intersects(q, intersects, exact, call = call, plan = plan)
   }
   keep_id <- FALSE
   if (!rlang::quo_is_null(columns)) {
@@ -226,7 +235,7 @@ store_sample <- function(st, dataset, n = 1000, ..., columns = NULL, seed = NULL
   if (identical(target$entry$kind, "raster")) {
     abort_raster_verb("store_sample", call = call)
   }
-  q <- query_prune_partitions(query_new(st, target), quos)
+  q <- query_prune_partitions(query_new(st, target, quos = quos), quos)
   selected <- names(q$query)
   keep_id <- FALSE
   if (!rlang::quo_is_null(columns)) {

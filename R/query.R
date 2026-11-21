@@ -86,16 +86,62 @@ abort_raster_verb <- function(fn, call = caller_env()) {
   )
 }
 
-# The `rcs_query` of a read target (`read_target()`).
-query_new <- function(st, target) {
-  source <- query_open_files(target$location, target$files$path)
+#' The `rcs_query` of a read target
+#'
+#' Opening an Arrow dataset costs a request per file on a cloud backend, so
+#' a read whose filters are known before the query is built prunes the file
+#' list on the catalog first and opens only the files kept: partition
+#' filters (`quos`, evaluated on the partition values as in
+#' `query_prune_partitions()`) and the file pruning of a spatial filter
+#' (`plan`, from `spatial_plan()`). The filters are applied again by the
+#' caller, so this only saves work. With one file nothing is pruned here.
+#'
+#' @param st An `rcs_store`.
+#' @param target A read target (`read_target()`).
+#' @param quos Filter expressions (quosures) that will be applied.
+#' @param plan `NULL`, or the spatial plan that will be applied.
+#' @return An `rcs_query` whose `files` are the files kept.
+#' @noRd
+query_new <- function(st, target, quos = list(), plan = NULL) {
+  files <- target$files
+  location <- target$location
+  schema <- NULL
+  if (nrow(files) > 1 && (length(quos) > 0 || !is.null(plan))) {
+    keep <- rep(TRUE, nrow(files))
+    if (!is.null(plan)) {
+      keep <- files$path %in% plan$paths
+    }
+    partition <- target$entry$partition[[1]]
+    if (length(quos) > 0 && length(partition) > 0) {
+      schema <- query_open_files(location, files$path[[1]])$schema
+      use <- partition_quos(quos, names(schema), partition)
+      if (length(use) > 0) {
+        kept <- tryCatch(partition_keep(files, partition, schema, use), error = function(e) NULL)
+        if (!is.null(kept)) keep <- keep & kept
+      }
+    }
+    if (!any(keep) && is.null(schema)) {
+      schema <- query_open_files(location, files$path[[1]])$schema
+    }
+    files <- files[keep, ]
+  }
+  source <- query_open_files(location, files$path, schema = schema)
   new_query(
     store = st,
     entry = target$entry,
-    location = target$location,
-    files = target$files,
+    location = location,
+    files = files,
     query = dplyr::select(source, dplyr::everything())
   )
+}
+
+# Of the filter expressions `quos`, those whose column symbols (among
+# `columns`) are all partition columns.
+partition_quos <- function(quos, columns, partition) {
+  Filter(function(quo) {
+    refs <- intersect(all.vars(rlang::quo_get_expr(quo)), columns)
+    length(refs) > 0 && all(refs %in% partition)
+  }, quos)
 }
 
 #' An Arrow dataset from an explicit file list
@@ -175,7 +221,7 @@ query_bottom_edit <- function(query, fn) {
 # Replace the source of `q` by the files of `files` (a subset of `q$files`).
 query_set_files <- function(q, files) {
   source <- query_source(q$query)
-  if (!inherits(source, "FileSystemDataset")) {
+  if (!inherits(source, "FileSystemDataset") || identical(files$path, q$files$path)) {
     return(q)
   }
   new_source <- query_open_files(q$location, files$path, schema = source$schema)

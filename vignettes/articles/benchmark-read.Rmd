@@ -6,7 +6,7 @@ title: "Benchmark: what the package adds on top of Arrow when reading"
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
 results <- function(name) {
   path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
-  tibble::as_tibble(arrow::read_parquet(path))
+  tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
 }
 read <- results("read")
 counters <- results("read-counters")
@@ -122,42 +122,37 @@ r <- function(dataset, operation, column = "x_open_dataset") {
 
 - Tables: a full read through `store_read()` takes
   `r r("sales/one", "full")` times as long as `open_dataset()` on the same
-  file (`r r("sales/by_year", "full")` times for the partitioned copy). A
-  profile of the same read on 1e5 rows puts 70% of its time in restoring the
-  list column: `restore_list()` rebuilds it element by element through
-  `[[` on Arrow's `arrow_list` (a vctrs class, so every element access is
-  an S3 dispatch). Dropping the class first and stripping attributes only
-  where there are any gave the identical column five times faster. Arrow
-  alone returns the column as `arrow_list`, `integer64` as `integer` and
-  difftime in seconds.
-- A column subset without such columns costs about what Arrow costs
+  file (`r r("sales/by_year", "full")` times for the partitioned copy). The
+  difference is the restoring of the R types Arrow does not restore by
+  itself: `integer64`, difftime in its units, and the list column, which is
+  now rebuilt without a dispatch per element. Arrow alone returns the
+  column as `arrow_list`, `integer64` as `integer` and difftime in seconds.
+- A column subset costs about what Arrow costs
   (`r r("sales/one", "columns")` times), and so does the key filter
   (`r r("sales/one", "key_filter")` times; Arrow skips row groups by their
   statistics because the file is sorted by the key).
 - The partition filter on the partitioned copy opens only the file of that
-  year (the catalog's partition values), yet takes
-  `r r("sales/by_year", "partition_filter")` times as long as
-  `open_dataset()` and `r r("sales/by_year", "partition_filter", "x_read_parquet")`
-  times as long as `read_parquet()` on that one file: the
+  year: the partitions are pruned on the catalog's partition values before
+  any file is opened. It takes `r r("sales/by_year", "partition_filter")`
+  times as long as `open_dataset()` and
+  `r r("sales/by_year", "partition_filter", "x_read_parquet")` times as long
+  as `read_parquet()` on that one file: the
   `r format(read$rows_returned[read$dataset == "sales/by_year" & read$operation == "partition_filter"][[1]], big.mark = ",")`
-  rows returned carry the list column, whose restoring takes half of the
-  time in a profile; the rest is opening the dataset over all files before
-  pruning.
+  rows returned carry the list column and the other restored types, and the
+  schema is read from one file's footer before pruning.
 - Polygons: with geometry, `store_read()` takes
-  `r r("shapes/polygons", "full")` times as long as `open_dataset()` and
+  `r r("shapes/polygons", "full")` times as long as `open_dataset()`, which
+  returns WKB, and
   `r signif(read$median_s[read$dataset == "shapes/polygons" & read$operation == "full" & read$method == "store"] / read$median_s[read$dataset == "shapes/polygons" & read$operation == "full" & read$method == "arrow_sf"], 2)`
-  times as long as Arrow plus the same WKB decoding with
-  `sf::st_as_sfc()`. The decoding is nearly the whole cost: `sf` computes
-  each geometry's bounding box in R. Decoding the same WKB with
-  `wk::wk_handle(wk::new_wk_wkb(x), wk::sfc_writer())` (wk is already
-  imported) gave an equal `sfc`, with the same bounding box, about 16 times
-  faster on 1e5 polygons.
+  times as long as Arrow plus the decoding with `sf::st_as_sfc()`
+  (`arrow_sf`): the package decodes WKB with wk, which builds the same
+  `sfc`, bounding boxes included, many times faster than `sf`. The decoding
+  is still most of the time of a full read with geometry.
 - Without geometry, a polygon read costs what Arrow costs.
 
 ## Limits
 
-- One machine and its SSD, warm file cache; two other agents ran tests and
-  rendered documents while this benchmark ran.
+- One machine and its SSD, warm file cache; the machine was quiet.
 - The Arrow methods do not return the same R types as `store_read()`; they
   show the floor that Arrow sets, not an equivalent result.
 - Reads from a cloud bucket are in `benchmark-cloud.Rmd`; spatial queries in
