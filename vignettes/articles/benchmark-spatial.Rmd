@@ -1,0 +1,413 @@
+---
+title: "Benchmark: which steps of the spatial filter pay off"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
+results_dir <- Sys.getenv("RCS_ARTICLE_RESULTS", file.path("..", "..", "bench", "results"))
+results <- function(name) {
+  path <- file.path(results_dir, paste0(name, ".parquet"))
+  tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
+}
+timed <- results("spatial")
+counted <- results("spatial-counters")
+layouts <- results("spatial-layouts")
+# rows timed before the change of the default (no `default_rule`): the
+# default then ran every step, which is the variant `cells_index_bbox`
+old <- timed$variant == "default" & is.na(timed$default_rule)
+timed$variant[old] <- "cells_index_bbox"
+knitr::read_chunk(file.path("..", "..", "bench", "spatial.R"))
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+big <- function(x) format(x, big.mark = ",", scientific = FALSE)
+sizes <- sort(unique(timed$rows))
+query_order <- c(paste0("cell", 3:9), "poly_small", "poly_medium", "poly_large", "poly_band", "poly_strip")
+wide <- function(d, value, rows = "query", cols = "variant", digits = 3) {
+  d <- as.data.frame(d)
+  out <- stats::reshape(d[c(rows, cols, value)], idvar = rows, timevar = cols, direction = "wide")
+  names(out) <- sub(paste0("^", value, "\\."), "", names(out))
+  if (identical(rows, "query")) out <- out[order(match(out$query, query_order)), ]
+  num <- vapply(out, is.numeric, logical(1))
+  out[num] <- lapply(out[num], signif, digits)
+  out
+}
+t_of <- function(layout, variant, query, rows = max(sizes), location = "local") {
+  v <- timed$median_s[timed$layout == layout & timed$variant == variant & timed$query %in% query &
+    timed$rows == rows & timed$location == location]
+  if (length(v) == 0) NA_real_ else v
+}
+```
+
+This article reads stored results; it does not run the benchmark. The script
+is `bench/spatial.R`; its code is shown below as it was run.
+
+## Question
+
+A spatial read (`store_read(intersects = )`, `store_intersects()`) runs five
+steps (see "Reading" in the package's design): it finds the covering H3
+cells of the query, prunes files by their box and cell range (file
+pruning), pushes a test on the stored cell `h3` into the scan (cell filter),
+adds the rows of the index table for rows that cross cell edges (index
+table), pushes a test on the stored `bbox` struct into the scan (bbox
+pushdown), and tests the candidate rows exactly with `sf::st_intersects()`
+(exact test). Which of these steps pay off, at which `h3_res`, row-group
+size and sort order? And how does the result compare with the bbox struct
+alone, with DuckDB spatial on the same files, and with reading everything
+and filtering with `sf::st_filter()`?
+
+## Setup
+
+```{r}
+env <- timed[1, grep("^env_", names(timed))]
+knitr::kable(data.frame(
+  item = sub("^env_", "", names(env)),
+  value = vapply(env, function(v) as.character(v[[1]]), character(1)),
+  row.names = NULL
+))
+```
+
+`rcs_sim_polygons()` of `r paste(big(sizes), collapse = " and ")` rows
+(polygons in a box of 6 by 3 degrees, 10% built to cross resolution-5 cell
+edges, a few large ones), written in these layouts into a local store on
+SSD (`write_s` without the serialization check):
+
+```{r}
+shown <- layouts[c("rows", "layout", "partition", "h3_res", "rows_per_group", "sort", "write_s", "files", "row_groups", "data_bytes", "index_rows", "index_bytes")]
+shown$data_mb <- round(shown$data_bytes / 1e6, 1)
+shown$index_mb <- round(shown$index_bytes / 1e6, 1)
+shown$data_bytes <- shown$index_bytes <- NULL
+shown$write_s <- round(shown$write_s)
+knitr::kable(shown[order(shown$rows, shown$layout), ], row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+`partition = TRUE` is `partition = "h3"` (the package picks the parent
+resolution). `sort = "fine"` orders the rows inside each `h3` cell by the
+cell of their box centre at `h3_res + 3` instead of the written order; it is
+done in the benchmark by wrapping the internal `geo_encode()`, the package
+has no such option.
+
+Queries: five instances of each of H3 cells of resolutions 3 to 9 (from
+random points in the box) and irregular polygons of three sizes (radius
+about 0.01, 0.1 and 0.5 degrees, about 1, 11 and 55 km). At 5e6 rows two
+more polygon types were added after the results at 1e6 rows: diagonal
+strips 2 degrees long and 0.01 degrees wide (`poly_strip`) or 0.2 degrees
+wide (`poly_band`), whose box is 100 and about 7 times larger than the
+shape. The same queries are used for every layout of a size.
+
+Variants, each a query run through the package's internal steps with one or
+more steps left out. `default` is `store_read(intersects = )` itself. It
+changed during this benchmark: before, it ran every step for every query
+(`cells_index_bbox`; the rows measured then are shown under that name);
+since, it runs the box test alone (`bbox_only`) unless the area of the
+query's box is more than 4 times the area of the query or the query has no
+box (across the antimeridian or around a pole), and then every step.
+
+| Variant | File pruning | Cell filter | Index table | Bbox pushdown | Exact test | Complete |
+|---|---|---|---|---|---|---|
+| `default` | by box (and cells) | when it pays | when it pays | yes | yes | yes |
+| `cells_index_bbox` | yes | yes | yes | yes | yes | yes |
+| `no_bbox` | yes | yes | yes | no | yes | yes |
+| `no_prune` | no | yes | yes | yes | yes | yes |
+| `no_index` | yes | yes | no | yes | yes | no |
+| `candidates` | yes | yes | yes | yes | no | superset |
+| `bbox_only` | by box | no | no | yes | yes | yes |
+| `bbox_no_prune` | no | no | no | yes | yes | yes |
+| `cells_only` | no | yes | yes | no | yes | yes |
+| `prune_only` (partitioned) | by box | no | no | no | yes | yes |
+
+Comparisons: `bbox_only` is the bbox struct alone; `duckdb` runs DuckDB
+2.0 with the `spatial` extension on the same files (`read_parquet()` over
+the file list, the box test on `bbox` fields, which DuckDB pushes into the
+scan, and `ST_Intersects()`), returning the rows with WKB geometry but not
+as `sf`; `read_all` + `st_filter` is `store_read()` of everything followed
+by `sf::st_filter()` on the query shape. Every query type is timed with
+`bench_run()`: five repetitions, one query instance per repetition (the
+first instance runs twice), median reported; local reads are warm (file
+cache), GCS reads cold (new connection and new cloud clients before every
+query). Counters (files, row groups whose statistics overlap the filter,
+candidate rows) are taken for every combination of file pruning and row
+filter, without the exact test, and every candidate set is compared with
+the exact answer.
+
+```{r setup, eval = FALSE}
+```
+
+```{r layouts, eval = FALSE}
+```
+
+```{r queries, eval = FALSE}
+```
+
+```{r variants, eval = FALSE}
+```
+
+```{r comparisons, eval = FALSE}
+```
+
+```{r helpers, eval = FALSE}
+```
+
+```{r saving, eval = FALSE}
+```
+
+```{r run, eval = FALSE}
+```
+
+## Results
+
+### Completeness
+
+Rows of the exact answer missing from the candidate set, summed over all
+queries and layouts, by combination (`prune` = file pruning):
+
+```{r}
+comp <- stats::aggregate(cbind(missing, rows_returned) ~ rows + prune + row_filter, data = counted, FUN = sum)
+comp$complete <- comp$missing == 0
+knitr::kable(comp[order(comp$rows, comp$row_filter, comp$prune), ], row.names = FALSE, format.args = list(big.mark = ","))
+same <- stats::aggregate(returned_md5 ~ rows + query + instance, data = counted, FUN = function(v) length(unique(v)))
+st_ok <- layouts[!is.na(layouts$st_filter_compared), c("rows", "layout", "st_filter_identical", "st_filter_compared")]
+duck <- unique(counted[counted$layout %in% c("base", "part"), c("rows", "layout", "query", "instance", "rows_returned", "rows_duckdb", "duckdb_missing", "duckdb_extra")])
+```
+
+- The cell filter without the index table loses rows (it misses rows that
+  cross cell edges and whose `h3` lies outside the covering); every other
+  combination keeps all of them, as the completeness argument says.
+- The exact answer is the same in every layout of a size: one distinct
+  result for each of `r nrow(same)` query instances in
+  `r sum(same$returned_md5 == 1)` cases.
+- `sf::st_filter()` on all rows returned exactly the package's rows for
+  `r paste(st_ok$st_filter_identical, "of", st_ok$st_filter_compared, collapse = " and ")`
+  query instances (layout `base`).
+- DuckDB tests intersection on the plane (GEOS), the package and
+  `sf::st_filter()` on the sphere (s2, the session's `sf::sf_use_s2()`
+  setting): over the `base` and `part` layouts DuckDB missed
+  `r sum(duck$duckdb_missing)` and added `r sum(duck$duckdb_extra)` rows of
+  `r big(sum(duck$rows_returned))`, nearly all for the 2-degree strips and
+  bands and the largest cells, whose long edges lie farthest apart on the
+  plane and on the sphere.
+
+### Candidate rows
+
+Candidate rows per returned row (sums over the five instances), with file
+pruning, layout `base`:
+
+```{r, results = "asis"}
+ratio_table <- function(rows) {
+  d <- counted[counted$layout == "base" & counted$rows == rows & counted$prune, ]
+  agg <- stats::aggregate(cbind(rows_candidate, rows_returned) ~ query + row_filter, data = d, FUN = sum)
+  agg$ratio <- ifelse(agg$rows_returned > 0, agg$rows_candidate / agg$rows_returned, NA)
+  wide(agg, "ratio", cols = "row_filter")
+}
+for (s in sizes) {
+  cat("\n\n", big(s), " polygons:\n\n", sep = "")
+  print(knitr::kable(ratio_table(s), row.names = FALSE, format.args = list(big.mark = ",")))
+}
+```
+
+Share of row groups whose statistics overlap the filter, cells of
+resolution 7, with file pruning (row groups of the files kept):
+
+```{r}
+rg <- counted[counted$query == "cell7" & counted$prune, ]
+rg <- stats::aggregate(cbind(row_groups_overlap, row_groups_total) ~ rows + layout + row_filter, data = rg, FUN = sum)
+rg$share <- rg$row_groups_overlap / rg$row_groups_total
+rg_all <- merge(rg, layouts[c("rows", "layout", "row_groups")], by = c("rows", "layout"))
+rg_all$share_of_all <- rg_all$row_groups_overlap / (5 * rg_all$row_groups)
+knitr::kable(
+  wide(rg_all[rg_all$row_filter %in% c("bbox", "cells_index", "cells_index_bbox"), ], "share_of_all", rows = c("rows", "layout"), cols = "row_filter"),
+  row.names = FALSE
+)
+```
+
+`share_of_all` is the overlapping row groups divided by all row groups of
+the dataset.
+
+### Times of the variants
+
+Median seconds per query, local store, warm:
+
+```{r, results = "asis"}
+for (s in sizes) for (l in c("base", "part")) {
+  d <- timed[timed$rows == s & timed$layout == l & timed$location == "local" & !is.na(timed$query), ]
+  if (nrow(d) == 0) next
+  cat("\n\n", big(s), " polygons, layout ", l, ":\n\n", sep = "")
+  print(knitr::kable(wide(d, "median_s"), row.names = FALSE))
+}
+```
+
+```{r, eval = has_ggplot, fig.width = 7, fig.height = 6, fig.alt = "Dot chart of median seconds per query by query type, one panel per size and layout, one colour per variant. The default and bbox_only variants lie close together and far left of read-everything-then-filter."}
+library(ggplot2)
+d <- timed[timed$location == "local" & timed$layout %in% c("base", "part") & !is.na(timed$query), ]
+d$query <- factor(d$query, levels = rev(query_order))
+d$panel <- paste(big(d$rows), d$layout)
+ggplot(d, aes(x = median_s, y = query, colour = variant)) +
+  geom_point() +
+  facet_wrap(~panel) +
+  scale_x_log10() +
+  labs(x = "Median seconds per query (log scale)", y = NULL, colour = "Variant") +
+  theme_minimal()
+```
+
+Reading everything once (`read_all`, not per query):
+
+```{r}
+ra <- timed[timed$variant == "read_all", c("rows", "layout", "median_s", "min_s", "max_s")]
+knitr::kable(ra, row.names = FALSE, digits = 2, format.args = list(big.mark = ","))
+```
+
+### Layouts
+
+`cells_index_bbox` (every step) and `bbox_only`, median seconds per query, local:
+
+```{r, results = "asis"}
+for (s in sizes) for (v in c("cells_index_bbox", "bbox_only")) {
+  d <- timed[timed$rows == s & timed$variant == v & timed$location == "local" & !is.na(timed$query), ]
+  if (length(unique(d$layout)) < 2) next
+  cat("\n\n", big(s), " polygons, variant ", v, ":\n\n", sep = "")
+  print(knitr::kable(wide(d, "median_s", cols = "layout"), row.names = FALSE))
+}
+```
+
+Candidate rows per returned row and overlapping row groups, by layout, for
+the box test alone and for every step (cells of resolutions 5 to 9
+together, with file pruning):
+
+```{r}
+d <- counted[counted$prune & counted$row_filter %in% c("bbox", "cells_index_bbox") & counted$query %in% paste0("cell", 5:9), ]
+agg <- stats::aggregate(cbind(rows_candidate, rows_returned, row_groups_overlap) ~ rows + layout + row_filter, data = d, FUN = sum)
+agg$per_returned <- round(agg$rows_candidate / agg$rows_returned, 2)
+knitr::kable(agg[order(agg$rows, agg$layout, agg$row_filter), ], row.names = FALSE, format.args = list(big.mark = ","))
+```
+
+### Google Cloud Storage, cold
+
+```{r, results = "asis"}
+g <- timed[timed$location == "gcs", ]
+for (s in unique(g$rows)) for (l in unique(g$layout[g$rows == s])) {
+  cat("\n\n", big(s), " polygons, layout ", l, ":\n\n", sep = "")
+  print(knitr::kable(wide(g[g$rows == s & g$layout == l, ], "median_s"), row.names = FALSE))
+}
+sync <- layouts[!is.na(layouts$gcs_sync_s), c("rows", "layout", "gcs_sync_s", "data_bytes", "index_bytes")]
+knitr::kable(sync, row.names = FALSE, digits = 1, format.args = list(big.mark = ","))
+```
+
+`gcs_sync_s` is the time of `store_sync()` copying the dataset and its index
+table from the local store to an empty location in the bucket.
+
+## Verdict
+
+```{r, include = FALSE}
+small_q <- c(paste0("cell", 5:9), "poly_small", "poly_medium")
+rng <- function(v) paste(sprintf("%.2f", range(v, na.rm = TRUE)), collapse = " to ")
+ratio_of <- function(rows, filter, queries, layout = "base") {
+  d <- counted[counted$layout == layout & counted$rows == rows & counted$prune & counted$row_filter == filter & counted$query %in% queries, ]
+  agg <- stats::aggregate(cbind(rows_candidate, rows_returned) ~ query, data = d, FUN = sum)
+  agg$rows_candidate / pmax(agg$rows_returned, 1)
+}
+s_max <- max(sizes)
+gcs7 <- timed[timed$location == "gcs" & timed$query == "cell7" & timed$rows == s_max & timed$layout == "base", ]
+part_gain <- t_of("base", "bbox_only", small_q, 1e6) / t_of("part", "bbox_only", small_q, 1e6)
+gcs_part <- t_of("part", "bbox_only", small_q, 1e6, "gcs")
+gcs_base <- t_of("base", "bbox_only", small_q, 1e6, "gcs")
+```
+
+- **The box test is the step that selects.** With file pruning, the box
+  test alone leaves `r rng(ratio_of(1e6, "bbox", c(paste0("cell", 3:9), "poly_small", "poly_medium", "poly_large")))`
+  candidate rows per returned row on compact queries (cells of resolutions
+  3 to 9, polygons of 1 to 55 km) at 1e6 rows, and
+  `r rng(ratio_of(s_max, "bbox", c(paste0("cell", 3:9), "poly_small", "poly_medium", "poly_large"), "base"))`
+  at `r big(s_max)` rows; adding the cell filter and the index table
+  changes this by a few hundredths. The cell filter alone, with the index
+  table, leaves hundreds to thousands of candidates per row for small
+  queries, because the stored cell is at resolution 5.
+- **The index table does not pay for compact queries.** Reading it is an
+  extra file and an extra scan for every query: on 1e6 polygons in one file
+  the box test alone took `r rng(t_of("base", "bbox_only", small_q, 1e6))` s
+  per small query against `r rng(t_of("base", "cells_index_bbox", small_q, 1e6))` s
+  with every step, and on GCS cold `r rng(gcs_base)` s against
+  `r rng(t_of("base", "cells_index_bbox", small_q, 1e6, "gcs"))` s.
+  The default was therefore changed: the box test alone, with file pruning
+  by box.
+- **The cells pay off when the query's box is much larger than the query.**
+  For diagonal strips (box 100 times the strip) every step took
+  `r sprintf("%.1f", t_of("base", "cells_index_bbox", "poly_strip"))` s at
+  `r big(s_max)` rows against `r sprintf("%.1f", t_of("base", "bbox_only", "poly_strip"))` s
+  for the box test alone (`r sprintf("%.0f", stats::median(ratio_of(s_max, "cells_index_bbox", "poly_strip")))`
+  against `r sprintf("%.0f", stats::median(ratio_of(s_max, "bbox", "poly_strip")))`
+  candidates per returned row), and for bands (box about 7 times the band)
+  `r sprintf("%.1f", t_of("base", "cells_index_bbox", "poly_band"))` s
+  against `r sprintf("%.1f", t_of("base", "bbox_only", "poly_band"))` s. The
+  new default uses every step when the box is more than 4 times the query
+  (and for queries across the antimeridian or around a pole, which have no
+  box): `r sprintf("%.1f", t_of("base", "default", "poly_strip"))` s and
+  `r sprintf("%.1f", t_of("base", "default", "poly_band"))` s.
+- **File pruning pays off on partitioned data,** most on GCS, where every
+  file opened costs a request: `no_prune` on the partitioned layout took
+  `r rng(t_of("part", "no_prune", small_q, 1e6, "gcs"))` s per small query on
+  GCS against `r rng(t_of("part", "default", small_q, 1e6, "gcs"))` s.
+- **The bbox pushdown is needed** whatever else is used: without it
+  (`no_bbox`) small queries took 2 to 3 times as long.
+- **The exact test is the cost of large queries,** not of small ones: for
+  cells of resolution 3 the candidate set alone came in
+  `r sprintf("%.1f", t_of("base", "candidates", "cell3", 1e6))` s and the exact
+  answer in `r sprintf("%.1f", t_of("base", "cells_index_bbox", "cell3", 1e6))` s
+  (1e6 rows), because `sf::st_intersects()` on the sphere (s2) converts
+  every candidate. It stays: it makes the result exact.
+- **Layout:** `h3_res` 4, 5 or 6, row groups of 2e4, 5e4 or 1e5 rows and a
+  finer cell inside `h3` gave no consistent gain for the box test; none was
+  faster than the defaults (`h3_res = 5`, 5e4 rows, rows by `h3`), and the
+  defaults stay. Partitioning by H3 cell was the one layout that helped:
+  small queries `r sprintf("%.1f", min(part_gain))` to
+  `r sprintf("%.1f", max(part_gain))` times faster locally and
+  `r sprintf("%.1f", min(gcs_base / gcs_part))` to
+  `r sprintf("%.1f", max(gcs_base / gcs_part))` times faster on GCS cold at
+  1e6 rows, and `r sprintf("%.1f", t_of("base", "default", "cell7") / t_of("part", "default", "cell7"))`
+  times faster for a cell of resolution 7 at `r big(s_max)` rows
+  (`r sprintf("%.2f", t_of("part", "default", "cell7"))` s), because a
+  query reads one or two small files instead of
+  several row groups of one large file. Writing `partition = "h3"` is
+  recommended for large geospatial data; it is not made the default, which
+  is part of the write contract.
+- **Budget:** a query by a cell of resolution 7 on `r big(s_max)` polygons
+  in one file takes `r sprintf("%.2f", t_of("base", "default", "cell7"))` s
+  locally (warm) and `r sprintf("%.1f", gcs7$median_s[gcs7$variant == "default"])` s
+  on GCS cold (`r sprintf("%.2f", t_of("part", "default", "cell7"))` s
+  locally when partitioned by H3); cells of resolutions 5 to 9 leave at most
+  `r sprintf("%.1f", max(c(ratio_of(1e6, "bbox", paste0("cell", 5:9)), ratio_of(s_max, "bbox", paste0("cell", 5:9)))))`
+  candidate rows per returned row.
+- **Comparisons.** Reading everything and filtering with `sf::st_filter()`
+  took about `r sprintf("%.0f", stats::median(t_of("base", "st_filter", query_order, 1e6)) + ra$median_s[ra$rows == 1e6][1])` s
+  per query at 1e6 rows (`r sprintf("%.1f", ra$median_s[ra$rows == 1e6][1])` s
+  to read, the rest to filter), against well under a second for the
+  package. DuckDB on the same files was faster than the package:
+  `r rng(t_of("base", "duckdb", small_q, s_max))` s per small query at
+  `r big(s_max)` rows against `r rng(t_of("base", "default", small_q, s_max))` s.
+  DuckDB reads the `bbox` columns first and decodes the other columns, the
+  geometry above all, only for the rows that pass; Arrow decodes every
+  column of each row group whose statistics overlap the box (about
+  `r round(sum(counted$row_groups_overlap[counted$rows == s_max & counted$layout == "base" & counted$prune & counted$row_filter == "bbox" & counted$query == "cell7"]) / 5)`
+  row groups of 5e4 rows for a cell of resolution 7 at `r big(s_max)` rows),
+  and the package then turns WKB into `sf` and tests on the sphere. DuckDB
+  tests on the plane and returns WKB.
+
+## Limits
+
+- One machine and its SSD; local reads are warm (the files are in the
+  operating system's cache), GCS reads cold through one network connection.
+- Simulated polygons in one box in open ocean, mostly small; real data with
+  large or very unequal geometries change the share of crossing rows and the
+  size of the index table.
+- Five instances per query type; the medians mix instance-to-instance
+  variation with timing noise.
+- The variants are built from the package's internal functions; only
+  `default` is the public `store_read()`. The rows of `base` at 1e6 rows
+  were timed before the change of the default; their `default` is shown as
+  `cells_index_bbox`, which is what it ran.
+- DuckDB returns WKB, not `sf`, and tests on the plane; it was not run
+  against GCS (it needs its own credentials).
+- `read_all` + `st_filter` was run on layout `base` only; at 5e6 rows only
+  `read_all` was timed (one `sf::st_filter()` of 1e6 rows took about 30 s).
+- Cut from the plan's grid to stay within a few hours: `h3_res` 4 and 6
+  partitioned (the partition files are those of `part`), every layout but
+  `base` and `part` at 5e6 rows, several variants on the other layouts and at
+  5e6 rows, GCS at 5e6 rows to three variants and five query types, and
+  DuckDB on GCS.

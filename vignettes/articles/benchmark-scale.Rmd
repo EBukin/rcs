@@ -6,7 +6,7 @@ title: "Benchmark: how writes grow with the data"
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
 results <- function(name) {
   path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
-  tibble::as_tibble(arrow::read_parquet(path))
+  tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
 }
 scale <- results("scale")
 knitr::read_chunk(file.path("..", "..", "bench", "scale.R"))
@@ -131,15 +131,17 @@ largest <- poly[which.max(poly$rows), ]
   and `r format(largest$rows, big.mark = ",", scientific = FALSE)` rows;
   geocoding stays the largest part
   (`r round(100 * largest$geocode_s / largest$median_s)`% at
-  `r format(largest$rows, big.mark = ",", scientific = FALSE)` rows), then
-  the choice of the H3 partition resolution, counted in "sort"
-  (`r round(100 * largest$sort_s / largest$median_s)`%).
+  `r format(largest$rows, big.mark = ",", scientific = FALSE)` rows); the
+  choice of the H3 partition resolution, counted in "sort", works on the
+  distinct cells and takes
+  `r sprintf("%.1f", 100 * largest$sort_s / largest$median_s)`%.
 - Tables grow linearly too, but the serialization check grows with the
-  number of files, because it restores a whole row group of every file:
+  number of files: it reads one whole row group of every file (about half
+  a second each for the simulated table) before it compares the sampled
+  rows, so it took
   `r round(100 * tab$check_s[which.max(tab$rows)] / tab$median_s[which.max(tab$rows)])`%
   of the write of `r format(max(tab$rows), big.mark = ",", scientific = FALSE)`
-  rows in `r tab$files[which.max(tab$rows)]` files (see
-  `benchmark-write.Rmd` for the cause and a remedy).
+  rows in `r tab$files[which.max(tab$rows)]` files.
 - Memory: from 1e6 rows on, a polygon write needs at most
   `r sprintf("%.2f", max(poly$memory_over_x[poly$rows >= 1e6]))` times the size of
   `x` on top of `x` itself (`r largest$increase_gb` GiB for
@@ -154,9 +156,12 @@ largest <- poly[which.max(poly$rows), ]
 
 ## Limits
 
-- One machine with `r env$env_ram_gb` GB of RAM; two other agents ran tests
-  and rendered documents on it meanwhile. Fewer repetitions were run for the
-  largest sizes (column `reps`) because one repetition takes minutes.
+- One machine with `r env$env_ram_gb` GB of RAM. The sizes 1e5, 1e6 and 5e6
+  were measured again on the quiet machine after the speed fixes of the
+  fourth wave, with three, three and one repetitions (column `reps`); the
+  rows of 5e5 and 2e6 polygons are those of the first run, before those
+  fixes and on a machine that ran other agents, and are kept for the shape
+  of the curve.
 - Resident memory is sampled every 0.2 s, so a peak shorter than that can be
   missed; R also returns freed memory to the system late, so the
   "before" level of later repetitions is higher than that of the first.

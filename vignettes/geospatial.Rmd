@@ -137,12 +137,15 @@ inside <- store_read(st, "polygons", intersects = query)
 nrow(inside)
 ```
 
-The read works in steps. It finds the H3 cells that the query touches,
-keeps only the files whose extent and range of cells match, reads the
-candidate rows (those whose `h3`, or a cell in the index table, is one of
-the query's cells, and whose `bbox` overlaps the query's box), and finally
-tests the candidates exactly with `sf::st_intersects()`. The result is the
-same as filtering everything in memory:
+The read works in steps. It keeps only the files whose extent overlaps the
+query's box, reads the candidate rows (those whose `bbox` overlaps the
+query's box), and finally tests the candidates exactly with
+`sf::st_intersects()`. When the query's box is much larger than the query
+(a thin diagonal strip, a line), or the query crosses the antimeridian, the
+H3 cells help: the read then also finds the cells the query touches, keeps
+only files whose range of cells matches, and keeps only rows whose `h3`, or
+a cell in the index table, is one of them. The result is the same as
+filtering everything in memory:
 
 ```{r, eval = has_h3o}
 setequal(inside$id, st_filter(polys, query)$id)
@@ -185,7 +188,7 @@ store_read(st, "polygons", intersects = cell, columns = c(id, cat))
 ```
 
 A cell finer than the stored resolution works too; a message says that the
-cell filter runs at the stored resolution.
+stored resolution is coarser.
 
 ```{r, eval = has_h3o}
 fine <- h3o::h3_from_xy(7.5, -27.5, 8L)
@@ -211,7 +214,9 @@ store_open(st, "polygons") |>
 finest resolution at which the number of files stays at most `max_files`
 and names the partition column after it (`h3_p2` below: cells of
 resolution 2). A spatial read then opens only the files of the cells near
-the query.
+the query. For large datasets this makes small spatial reads several times
+faster, most of all from a cloud bucket (see the article "Benchmark: which
+steps of the spatial filter pay off").
 
 ```{r, eval = has_h3o}
 store_write(st, polys, "shapes/polygons_by_cell",
@@ -237,14 +242,15 @@ options(rcs.trace = FALSE)
 trace[trace$counter == "file_open", c("detail", "n")]
 ```
 
-One data file of seven was opened, plus the index table.
+One data file of seven was opened. The query is a compact box, so the box
+test alone selects the rows, and the index table is not read.
 
 ## Without H3: `geocode = FALSE`
 
 `geocode = FALSE` writes the geometries with their `bbox` only: no `h3`
-column and no index table, so writing skips the geocoding. A spatial read then filters by bounding boxes alone,
-which is still complete but reads more candidate rows. `partition = "h3"`
-cannot be combined with it.
+column and no index table, so writing skips the geocoding. A spatial read then filters by bounding boxes alone:
+as fast for compact queries, slower for queries much smaller than their box,
+and always complete. `partition = "h3"` cannot be combined with it.
 
 ```{r, eval = has_h3o}
 store_write(st, polys, "shapes/polygons_boxes",

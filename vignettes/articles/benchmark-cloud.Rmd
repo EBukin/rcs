@@ -6,7 +6,7 @@ title: "Benchmark: a store in the cloud against a local copy"
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>", eval = TRUE)
 results <- function(name) {
   path <- file.path("..", "..", "bench", "results", paste0(name, ".parquet"))
-  tibble::as_tibble(arrow::read_parquet(path))
+  tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
 }
 cloud <- results("cloud")
 counters <- results("cloud-counters")
@@ -24,9 +24,8 @@ A store kept in Google Cloud Storage is read by streaming: Arrow fetches the
 byte ranges it needs from the bucket. How does that compare with
 downloading whole files first, and with reading a local copy of the same
 store? What does a first connection cost (new credentials and file system)
-against a later one, and what does MD5 verification cost when the bucket
-reports the MD5 of each object? The cost of `store_sync()` is not yet
-measured (see Limits).
+against a later one, what does MD5 verification cost when the bucket
+reports the MD5 of each object, and what does `store_sync()` cost?
 
 ## Setup
 
@@ -57,6 +56,10 @@ repetitions, median reported).
 - MD5: `be_md5()` of the table's files (object metadata on the bucket,
   hashing the files on the local copy), and `store_check()` without `x`
   (MD5, rows and schema from the Parquet footers).
+- Sync: `store_sync()` of the polygons and their index table from the local
+  store to a new, empty secondary under the same prefix (a new secondary for
+  every repetition), and to a secondary that already holds them (nothing to
+  transfer).
 
 ```{r setup, eval = FALSE}
 ```
@@ -71,6 +74,9 @@ repetitions, median reported).
 ```
 
 ```{r md5, eval = FALSE}
+```
+
+```{r sync, eval = FALSE}
 ```
 
 ```{r run, eval = FALSE}
@@ -144,14 +150,13 @@ knitr::kable(wide, row.names = FALSE, format.args = list(big.mark = ","))
 - Filtered reads: one year and three columns streamed in
   `r signif(med("sales year and columns", "stream"), 2)` s, against
   `r signif(med("sales year and columns", "download") + med("sales year and columns", "local"), 2)` s
-  to download that year's file and read it locally. Streaming is slower
-  here because `store_read()` first opens an Arrow dataset over all
-  `r cloud$sales_files[[1]]` files of the version (Arrow asks the bucket for
-  each file's information and reads the first file's footer), and only then
-  prunes the partitions and opens the remaining file again. On a 2-file copy
-  of the table, opening the list took 0.36 s against 0.11 s when the schema
-  was given; pruning on the catalog before the first open, and passing a
-  schema, would remove most of this cost.
+  to download that year's file and read it locally. `store_read()` prunes
+  the partitions on the catalog before it opens any file (opening an Arrow
+  dataset costs a request per file on the bucket), so it reads one file's
+  footer for the schema and then opens only the file of that year; before
+  this was changed, it opened all `r cloud$sales_files[[1]]` files first and
+  took about twice as long. The remaining difference to the download is the
+  footer read and the separate requests for the three columns.
 - MD5 verification on the bucket reads object metadata: `be_md5()` of
   `r cloud$sales_files[[1]]` files takes `r signif(med("md5 of sales files", "gcs"), 2)` s
   (`r signif(med("md5 of sales files", "local"), 2)` s to hash the local
@@ -161,13 +166,21 @@ knitr::kable(wide, row.names = FALSE, format.args = list(big.mark = ","))
   Parquet footer of each file, one file after the other, over the network.
   MD5 verification itself is cheap on the bucket; the footers are the cost.
 
+- Sync: copying the polygons and their index table to an empty secondary
+  in the bucket took `r signif(med("sync polygons", "sync_empty"), 2)` s
+  (upload and MD5 verification of each file, then the manifest and the
+  three catalog files); a sync to a secondary that already holds them reads
+  the catalogs, finds nothing to copy and takes
+  `r signif(med("sync polygons", "sync_identical"), 2)` s. (The minimum of
+  the first is that of the repeated first repetition, which found the
+  secondary already synced.)
+
 ## Limits
 
 - One machine and one network connection; its bandwidth to the bucket bounds
-  every cloud number. Two other agents ran tests and rendered documents on
-  the machine meanwhile.
-- The cost of `store_sync()` is not yet measured. Its transfers are those
-  of a write's upload and verification, measured in `benchmark-write.Rmd`.
+  every cloud number. The machine was quiet.
+- `store_sync()` is measured for one dataset (the polygons and their index
+  table) only.
 - "Cold" means a new Arrow file system and a new access token in the same R
   session; the time to start R and load the package is not included.
 - Spatial queries on the bucket are measured in `benchmark-spatial.Rmd`.
