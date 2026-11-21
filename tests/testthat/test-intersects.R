@@ -41,6 +41,11 @@ sq <- function(xmin, ymin, xmax, ymax, crs = 4326) {
   sf::st_as_sfc(sf::st_bbox(c(xmin = xmin, ymin = ymin, xmax = xmax, ymax = ymax), crs = sf::st_crs(crs)))
 }
 
+# Whether an sfc in EPSG:4326 is valid both on the sphere and in the plane.
+shape_is_valid <- function(s) {
+  all(s2::s2_is_valid(s)) && all(sf::st_is_valid(sf::st_set_crs(s, NA)))
+}
+
 # A random query near the simulated data (EPSG:4326): an sf shape or H3
 # cells. Returns `list(query, shape, label)`: `query` is given to the
 # read, `shape` (an sfc in EPSG:4326) to the reference.
@@ -80,7 +85,15 @@ random_query <- function(data, cells_ok = TRUE) {
       r <- exp(stats::runif(1, log(0.01), log(0.8))) * stats::runif(k, 0.4, 1)
       a <- sort(stats::runif(k, 0, 2 * pi))
       s <- sfc(poly(x + r * cos(a), y + r * sin(a)))
-      list(query = s, shape = s, label = sprintf("polygon %d vertices at %.3f %.3f", k, x, y))
+      label <- sprintf("polygon %d vertices at %.3f %.3f", k, x, y)
+      # a gap of more than 180 degrees between consecutive angles can make the
+      # ring cross itself: then take the convex hull of the same vertices
+      # (no further random draws, so the other cases keep their draws)
+      if (!shape_is_valid(s)) {
+        s <- sf::st_set_crs(sf::st_convex_hull(sf::st_set_crs(s, NA)), 4326)
+        label <- paste(label, "(convex hull)")
+      }
+      list(query = s, shape = s, label = label)
     },
     hole = {
       w <- stats::runif(1, 0.05, 1)
@@ -145,6 +158,10 @@ test_that("spatial reads equal sf::st_filter() for random queries (property test
       rq <- random_query(data_4326, cells_ok = !projected)
       query <- rq$query
       shape <- rq$shape
+      if (!all(s2::s2_is_valid(shape))) {
+        failures <- c(failures, sprintf("case %d: the generated query is not valid on the sphere: %s", i, rq$label))
+        next
+      }
       if (projected) {
         # the query is given in the data CRS, so the reference sees the same shape
         query <- if (inherits(query, "bbox")) sf::st_bbox(sf::st_transform(sf::st_as_sfc(query), 32626)) else sf::st_transform(query, 32626)
@@ -248,6 +265,89 @@ test_that("a spatial filter on a table aborts", {
     class = "rcs_error_argument"
   )
   expect_snapshot(store_intersects(store_open(fx$st, "sales/daily"), sq(-28, 7, -27, 8), exact = NA), error = TRUE)
+})
+
+test_that("an invalid query geometry aborts before any file is read", {
+  fx <- local_test_store(tables = FALSE, geospatial = "polygons", secondaries = 0L)
+  st <- fx$st
+  withr::local_options(rcs.quiet = TRUE)
+  ring <- function(x, y) sf::st_sfc(sf::st_polygon(list(cbind(c(x, x[1]), c(y, y[1])))), crs = 4326)
+  bow_tie <- ring(c(-28, -27, -27, -28), c(7, 8, 7, 8))
+  # two of the self-intersecting rings drawn by the property test's old generator
+  drawn <- list(
+    ring(
+      c(-29.6089, -29.5536, -29.5958, -29.5955, -29.5308),
+      c(8.86745, 8.83942, 8.7811, 8.74439, 8.77457)
+    ),
+    ring(
+      c(-28.2011, -28.2048, -28.2096, -28.2072, -28.2155, -28.204),
+      c(6.42608, 6.43488, 6.43413, 6.43896, 6.41472, 6.41422)
+    )
+  )
+  for (s2 in c(TRUE, FALSE)) {
+    local_s2(s2)
+    for (shape in c(list(bow_tie), drawn)) {
+      expect_error(store_read(st, "polygons", intersects = shape), class = "rcs_error_argument")
+      expect_error(
+        store_intersects(store_open(st, "polygons"), shape),
+        class = "rcs_error_argument"
+      )
+    }
+    # one invalid geometry among valid ones, and an sf query
+    several <- c(sq(-29, 6, -28, 7), bow_tie)
+    expect_error(store_read(st, "polygons", intersects = several), class = "rcs_error_argument")
+    expect_error(
+      store_read(st, "polygons", intersects = sf::st_sf(id = 1, geometry = bow_tie)),
+      class = "rcs_error_argument"
+    )
+  }
+  local_s2(TRUE)
+  expect_snapshot(store_read(st, "polygons", intersects = bow_tie), error = TRUE)
+  local_s2(FALSE)
+  expect_snapshot(store_intersects(store_open(st, "polygons"), bow_tie), error = TRUE)
+})
+
+test_that("valid query geometries of every kind pass the validity check", {
+  skip_if_no_h3()
+  fx <- local_test_store(tables = FALSE, geospatial = "polygons", secondaries = 0L)
+  st <- fx$st
+  data <- fx$data[["shapes/polygons"]]
+  withr::local_options(rcs.quiet = TRUE)
+  pole <- local({
+    lon <- seq(-180, 150, by = 30)
+    sf::st_sfc(sf::st_polygon(list(cbind(c(lon, lon[1]), rep(89.5, length(lon) + 1)))), crs = 4326)
+  })
+  across_180 <- sf::st_sfc(sf::st_polygon(list(cbind(
+    c(179.6, -179.6, -179.6, 179.6, 179.6), c(7.2, 7.2, 7.8, 7.8, 7.2)
+  ))), crs = 4326)
+  hull <- sf::st_set_crs(sf::st_convex_hull(sf::st_sfc(sf::st_polygon(list(cbind(
+    c(-28, -27, -27, -28, -28), c(7, 8, 7, 8, 7)
+  ))))), 4326)
+  with_empty <- c(sq(-28, 7, -27, 8), sf::st_sfc(sf::st_polygon(), crs = 4326))
+  line <- sf::st_sfc(sf::st_linestring(cbind(c(-28, -27, -27.5, -27.5), c(7, 8, 8, 6.5))), crs = 4326)
+  queries <- list(
+    box = sf::st_bbox(sq(-28, 7, -27, 8)),
+    several = c(sq(-29, 6, -28, 7), sq(-27, 8, -26, 9)),
+    sf = sf::st_sf(id = 1:2, geometry = c(sq(-29, 6, -28, 7), sq(-27, 8, -26, 9))),
+    hull = hull,
+    with_empty = with_empty,
+    crossing_line = line
+  )
+  for (s2 in c(TRUE, FALSE)) {
+    local_s2(s2)
+    for (name in names(queries)) {
+      q <- queries[[name]]
+      got <- store_read(st, "polygons", intersects = q)
+      shape <- if (inherits(q, "bbox")) sf::st_as_sfc(q) else sf::st_geometry(q)
+      shape <- sf::st_transform(shape[!sf::st_is_empty(shape)], 4326)
+      expect_setequal(got$id, ref_filter(data, shape)$id)
+    }
+    # a query in another CRS is checked in the plane of its own CRS
+    expect_no_error(store_read(st, "polygons", intersects = sf::st_transform(sq(-28, 7, -27, 8), 32626)))
+  }
+  local_s2(TRUE)
+  expect_no_error(store_read(st, "polygons", intersects = pole))
+  expect_no_error(store_read(st, "polygons", intersects = across_180))
 })
 
 test_that("a spatial query opens only the files whose box and cell range match", {

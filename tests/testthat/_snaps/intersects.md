@@ -60,6 +60,26 @@
       Error in `store_intersects()`:
       ! `exact` must be `TRUE` or `FALSE`, not `NA`.
 
+# an invalid query geometry aborts before any file is read
+
+    Code
+      store_read(st, "polygons", intersects = bow_tie)
+    Condition
+      Error in `store_read()`:
+      ! The query geometry is not valid on the sphere (s2).
+      x Edge 0 crosses edge 2.
+      i Repair it with `sf::st_make_valid()`.
+
+---
+
+    Code
+      store_intersects(store_open(st, "polygons"), bow_tie)
+    Condition
+      Error in `store_intersects()`:
+      ! The query geometry is not valid in the plane.
+      x Self-intersection[-27.5 7.5].
+      i Repair it with `sf::st_make_valid()`.
+
 # store_intersects() combines with other verbs and with a second query
 
     Code

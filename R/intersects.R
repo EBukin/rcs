@@ -53,7 +53,12 @@
 #'   reference system (in any CRS; several geometries are combined), or H3
 #'   cells of any resolution as hex strings, `bit64::integer64` or `h3o`
 #'   `H3` vectors, which stand for their cell polygons. A plain number
-#'   aborts: it cannot hold an H3 cell.
+#'   aborts: it cannot hold an H3 cell. The geometries of an `sf` or `sfc`
+#'   query must be valid, or the call aborts with the reason and advice to
+#'   repair them with [sf::st_make_valid()] (only the query is checked). The
+#'   check reads them as the exact test does: on the sphere (s2) when the
+#'   query is in the data's geographic CRS and [sf::sf_use_s2()] is on, in
+#'   the plane otherwise.
 #' @param exact `TRUE` runs the exact test in `collect()`. `FALSE` returns
 #'   the candidate rows, a superset of the intersecting rows, with a
 #'   message saying so. The candidate set is also returned, with the same
@@ -141,6 +146,7 @@ spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
       class = "rcs_error_argument", call = call
     )
   }
+  check_query_valid(y, entry$crs, call = call)
   covering <- rlang::try_fetch(
     geo_covering(y, entry$h3_res, entry$crs),
     rcs_error_h3_input = function(e) {
@@ -169,6 +175,54 @@ spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
 
   keep <- spatial_keep_files(q$files, test, ids$h3_main)
   list(test = test, paths = q$files$path[keep])
+}
+
+#' Abort when the query shape is not a valid geometry
+#'
+#' Checks the geometries of an `sf` or `sfc` query (never the data) in the
+#' notion of validity the exact test uses: on the sphere (s2) when the query
+#' is in the data CRS, that CRS is geographic and [sf::sf_use_s2()] is on;
+#' in the plane otherwise (a query in another CRS is densified along its
+#' straight edges before its change of CRS, `geo_covering()`, so its edges
+#' are read in the plane). A `bbox` is a rectangle and H3 cells are cell
+#' polygons: neither is checked. Empty geometries are valid.
+#'
+#' @param y The query.
+#' @param crs The data CRS (`entry$crs`).
+#' @param call Environment for errors.
+#' @return `NULL`, invisibly; aborts with class `rcs_error_argument`.
+#' @noRd
+check_query_valid <- function(y, crs, call = caller_env()) {
+  if (!inherits(y, c("sf", "sfc"))) {
+    return(invisible(NULL))
+  }
+  g <- sf::st_geometry(y)
+  if (length(g) == 0 || is.na(sf::st_crs(g))) {
+    # left to `geo_covering()`, which aborts for an empty shape or no CRS
+    return(invisible(NULL))
+  }
+  target <- geo_crs_from_json(crs)
+  sphere <- sf::st_crs(g) == target && isTRUE(sf::st_is_longlat(g)) &&
+    suppressMessages(sf::sf_use_s2())
+  reason <- if (sphere) {
+    s2::s2_is_valid_detail(g)$reason
+  } else {
+    sf::st_is_valid(sf::st_set_crs(g, sf::NA_crs_), reason = TRUE)
+  }
+  bad <- which(!is.na(reason) & reason != "Valid Geometry")
+  if (length(bad) == 0) {
+    return(invisible(NULL))
+  }
+  where <- if (length(g) > 1) paste0(" (geometry ", bad[[1]], ")") else ""
+  notion <- if (sphere) "on the sphere (s2)" else "in the plane"
+  cli::cli_abort(
+    c(
+      "The query geometry is not valid {notion}.",
+      x = "{reason[[bad[[1]]]]}{where}.",
+      i = "Repair it with {.fn sf::st_make_valid}."
+    ),
+    class = "rcs_error_argument", call = call
+  )
 }
 
 #' Whether the cell filter pays off for a query

@@ -83,7 +83,10 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #' @param intersects `NULL`, or a query: an `sf`, `sfc` or `bbox` object
 #'   with a coordinate reference system, or H3 cells of any resolution as
 #'   hex strings, `bit64::integer64` or `h3o` `H3` vectors. A plain number
-#'   aborts: it cannot hold an H3 cell.
+#'   aborts: it cannot hold an H3 cell. An `sf` or `sfc` query with an
+#'   invalid geometry (for example a ring that crosses itself) aborts, with
+#'   the reason and advice to use [sf::st_make_valid()]; validity is read on
+#'   the sphere or in the plane as in [store_intersects()].
 #' @param geometry `FALSE` drops the geometry before reading and returns a
 #'   tibble.
 #' @param version `NULL` for the current version, or the 16 hex characters of

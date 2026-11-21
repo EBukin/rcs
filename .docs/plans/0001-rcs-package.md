@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-20
 - **Author:** Eduard Bukin
-- **Status:** active; wave 0 done and contracts reviewed on 2026-11-20; waves 1 to 6 running (see `.docs/handoffs/0002-waves-1-to-6.md`)
+- **Status:** active; wave 0 done and contracts reviewed on 2026-11-20; waves 1 to 6 done on 2026-11-21 (see `.docs/handoffs/0002-waves-1-to-6.md`); open decisions are listed under "Results of wave 6"
 
 ## Goal
 
@@ -507,9 +507,21 @@ Wave 5, one agent (after wave 4):
 
 - [x] **M. Spatial benchmark and tuning.** Owns `bench/spatial.R`, `vignettes/articles/benchmark-spatial.Rmd`; may change defaults in any file, being alone in its wave. On 1e6 and 5e6 simulated polygons, partitioned and not, local and GCS: time, work counters and candidate rows for each combination of file pruning, cell filter, index table, bbox pushdown and exact test; query cells of resolutions 3 to 9 and polygons of three sizes; `h3_res` 4, 5, 6; row-group sizes 2e4, 5e4, 1e5; a secondary sort key inside `h3` (a finer cell before the key); against the three comparisons of the table. Sets the defaults that the results support, updates this plan, fills its lines of the performance budget, updates the baseline. The completeness argument of "Reading" may not be weakened; the whole test suite must pass after any change.
 
+Results of wave 6 (2026-11-21):
+
+- `devtools::document()` changes nothing; `devtools::check(cran = TRUE)`: 0 errors, 0 warnings, 0 notes.
+- Suite at `RCS_TEST_LEVEL=full` with the test bucket: 18,281 expectations, 0 failed, 1 error, 3 skipped (no Parquet driver in GDAL; `GOOGLE_APPLICATION_CREDENTIALS` not set for the raster read through `/vsigs/`; the short random sequences, replaced by the long ones). About 33 minutes, run file by file.
+- The error was in the test: the query generator of the spatial property test made self-intersecting polygons in 8 of its 2,000 cases, none among the 200 of level `default`. Fix round: the generator replaces an invalid ring by its convex hull, and the test asserts that every query is valid. After it `test-intersects.R` passes at `full`.
+- Fix round, addition to "Reading": `store_intersects()` and `store_read(intersects = )` reject an invalid query geometry before any file is read (`rcs_error_argument`, with the reason and the advice to use `sf::st_make_valid()`). Validity is tested on the sphere when the query is in the data's geographic CRS and s2 is on, in the plane otherwise. Bounding boxes and empty geometries are not tested.
+- `bench/quick.R` against the baseline: every counter equal; highest time ratio 1.18. Time measures have about 20% noise on this machine, so a time above the limit counts as a failure only above 1.5 times the baseline or when it repeats in three runs.
+- Coverage: 95.0% overall, no file below 80% (lowest `R/write.R`, 89.6%). `covr::package_coverage(type = "tests")` does not complete, because the test of mirai workers finds no installed package under covr; it was measured with `type = "none"` and `testthat::test_dir()` on the installed package.
+- Neutrality scan: no hit for the owner's terms in the files, file names, benchmark results, or the content and messages of all commits. Open, for the owner: one sample string of `rcs_sim_table()` in `R/sim.R` is in a script that the wider scan flagged; it names nothing.
+- End to end on GCS through the public functions (create, connect, write of a table, polygons and a raster, reads with filters and `intersects`, check, update, history, sync, delete, rebuild): every step right. This stands in for "the same integration suite against GCS", which no test file implements.
+- Open, for the owner: `recycled/` is still in the repository and nothing uses it; `partition = "h3"` as the default for geospatial writes; an exported way to get a dataset's file paths for other readers such as DuckDB; the two gaps of the rebuild rule (wave 4).
+
 Wave 6:
 
-- [ ] **L. Final verification** (one agent). Fresh session: `devtools::document()`, `devtools::check(cran = TRUE)`, the test suite at `RCS_TEST_LEVEL=full`, `bench/quick.R` against the baseline, coverage, the neutrality scan (a search of the whole repository, git history included, for a list of forbidden terms that the project owner gives to this agent at run time; the list is never stored in the repository), and the cloud integration suite where test locations exist. Reports pass or fail per item.
+- [x] **L. Final verification** (one agent). Fresh session: `devtools::document()`, `devtools::check(cran = TRUE)`, the test suite at `RCS_TEST_LEVEL=full`, `bench/quick.R` against the baseline, coverage, the neutrality scan (a search of the whole repository, git history included, for a list of forbidden terms that the project owner gives to this agent at run time; the list is never stored in the repository), and the cloud integration suite where test locations exist. Reports pass or fail per item.
 
 ## Later development, not part of this plan
 
@@ -529,3 +541,4 @@ None. Every design question was decided on 2026-11-20. Work package B checked th
 
 ## Outcome
 
+All work packages are done (2026-11-21). The results of each wave, with every correction to this plan and the decisions left to the owner, are in the "Results of wave N" blocks under "Work packages and order"; the measured numbers are in the performance budget.

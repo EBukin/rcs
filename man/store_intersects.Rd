@@ -13,7 +13,12 @@ store_intersects(q, y, exact = TRUE)
 reference system (in any CRS; several geometries are combined), or H3
 cells of any resolution as hex strings, \code{bit64::integer64} or \code{h3o}
 \code{H3} vectors, which stand for their cell polygons. A plain number
-aborts: it cannot hold an H3 cell.}
+aborts: it cannot hold an H3 cell. The geometries of an \code{sf} or \code{sfc}
+query must be valid, or the call aborts with the reason and advice to
+repair them with \code{\link[sf:st_make_valid]{sf::st_make_valid()}} (only the query is checked). The
+check reads them as the exact test does: on the sphere (s2) when the
+query is in the data's geographic CRS and \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} is on, in
+the plane otherwise.}
 
 \item{exact}{\code{TRUE} runs the exact test in \code{collect()}. \code{FALSE} returns
 the candidate rows, a superset of the intersecting rows, with a

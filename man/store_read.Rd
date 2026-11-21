@@ -29,7 +29,10 @@ that is unique in the store.}
 \item{intersects}{\code{NULL}, or a query: an \code{sf}, \code{sfc} or \code{bbox} object
 with a coordinate reference system, or H3 cells of any resolution as
 hex strings, \code{bit64::integer64} or \code{h3o} \code{H3} vectors. A plain number
-aborts: it cannot hold an H3 cell.}
+aborts: it cannot hold an H3 cell. An \code{sf} or \code{sfc} query with an
+invalid geometry (for example a ring that crosses itself) aborts, with
+the reason and advice to use \code{\link[sf:st_make_valid]{sf::st_make_valid()}}; validity is read on
+the sphere or in the plane as in \code{\link[=store_intersects]{store_intersects()}}.}
 
 \item{geometry}{\code{FALSE} drops the geometry before reading and returns a
 tibble.}
