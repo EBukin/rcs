@@ -1,12 +1,16 @@
-# Build the website on this machine and publish it.
+# Build the website on this machine.
 #
 # Run from the project root:
-#   source("pkgdown/deploy.R")            # build and publish
-#   site_build()                          # build only, into docs/
+#   source("pkgdown/deploy.R")
 #
-# The whole site, vignettes and articles included, is rendered here. GitHub
-# receives finished HTML on the `gh-pages` branch and only serves it: no
-# workflow runs there. The branch always holds one commit, the latest site.
+# The whole site, vignettes and articles included, is rendered here into
+# `docs/`, which is committed. GitHub serves `docs/` of the `main` branch as
+# it is: the site changes when `main` is pushed, and nothing is rendered or
+# run on GitHub. The benchmark articles read the stored results in
+# `bench/results/`; building the site runs no benchmark.
+#
+# After a change to the documentation: source this file, commit `docs/`
+# together with the change, push.
 
 site_build <- function() {
   pkgdown::build_site(preview = FALSE)
@@ -36,37 +40,6 @@ site_clean <- function() {
   invisible("docs")
 }
 
-site_publish <- function(remote = "origin", branch = "gh-pages") {
-  # On Windows R points HOME at the Documents folder, where git finds no
-  # user settings; give git the folder it uses everywhere else.
-  if (.Platform$OS.type == "windows") {
-    withr::local_envvar(HOME = Sys.getenv("USERPROFILE"))
-  }
-  git <- function(..., dir = "docs") {
-    out <- system2("git", c("-C", dir, ...), stdout = TRUE, stderr = TRUE)
-    status <- attr(out, "status")
-    if (!is.null(status) && status != 0) {
-      cli::cli_abort(c("git {.val {c(...)[1]}} failed.", x = "{out}"))
-    }
-    out
-  }
-  if (!file.exists(file.path("docs", "index.html"))) {
-    cli::cli_abort("There is no built site in {.path docs}; run {.fn site_build} first.")
-  }
-  url <- git("remote", "get-url", remote, dir = ".")
-  sha <- git("rev-parse", "--short", "HEAD", dir = ".")
-  unlink(file.path("docs", ".git"), recursive = TRUE, force = TRUE)
-  on.exit(unlink(file.path("docs", ".git"), recursive = TRUE, force = TRUE))
-  git("init", "--quiet", "--initial-branch", branch)
-  git("config", "core.autocrlf", "false")
-  git("add", "--all")
-  git("commit", "--quiet", "-m", shQuote(paste("Site built from", sha)))
-  git("push", "--force", "--quiet", url, paste0("HEAD:", branch))
-  cli::cli_inform(c(v = "Published the site built from {.val {sha}} to {.val {branch}}."))
-  invisible(sha)
-}
-
 if (sys.nframe() == 0L || identical(sys.function(1), source)) {
   site_build()
-  site_publish()
 }

@@ -1,6 +1,6 @@
-# The site is built on the author's machine and pushed to the `gh-pages`
-# branch; GitHub only serves the files. Nothing is rendered on GitHub.
-# Publish with: pkgdown::deploy_to_branch()
+# The site is built on the author's machine into `docs/`, which is committed;
+# GitHub serves `docs/` of `main` as it is and renders nothing.
+# Rebuild with: source("pkgdown/deploy.R")
 url: https://ebukin.github.io/rcs/
 
 template:

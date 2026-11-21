@@ -20,4 +20,3 @@ Thumbs.db
 *.Rcheck/
 *.tar.gz
 inst/doc
-/docs/
