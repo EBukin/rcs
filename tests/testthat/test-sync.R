@@ -346,6 +346,30 @@ test_that("store_rebuild() restores lost catalogs and keeps the history", {
   expect_store_valid(st)
 })
 
+test_that("an unchanged write that brings a secondary up to date writes a fresh manifest there", {
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 1L, history = TRUE)
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  # The primary moves on alone; the secondary, used as a primary of its
+  # own, writes a later version.
+  x2 <- g_sim(20, 2)
+  g_write(g_connect(paths[[1]]), x2, mode = "replace")
+  v2 <- location_read(g_plain_backend(paths[[1]]))$catalog$version
+  g_write(g_connect(paths[[2]]), g_sim(20, 3), mode = "replace")
+  # The same data again through both: unchanged in the primary, landed in
+  # the secondary.
+  st <- g_connect(paths)
+  out <- g_write(st, x2, mode = "replace")
+  expect_identical(out$status, c("unchanged", "written"))
+  expect_identical(st$secondary[[1]]$catalog$version, v2)
+  unlink(file.path(paths[[2]], c("_catalog.parquet", "_files.parquet", "_history.parquet")))
+  g_quiet(store_rebuild(st, paths[[2]]))
+  expect_identical(st$secondary[[1]]$catalog$version, v2)
+  expect_true(all(store_status(st)$status == "same"))
+  expect_store_valid(st)
+})
+
 test_that("store_rebuild() reports what it skips and replaces a damaged catalog", {
   skip_below_level("default")
   paths <- g_paths()

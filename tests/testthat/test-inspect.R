@@ -68,6 +68,19 @@ test_that("store_status() compares every secondary with the primary", {
   expect_store_valid(st)
 })
 
+test_that("printed, store_status() lists long addresses once and numbers them", {
+  fx <- local_test_store(partial = TRUE)
+  status <- store_status(fx$st)
+  out <- capture.output(print(status, width = 80))
+  expect_match(out[[1]], paste0("Locations: [1] ", fx$secondary[[1]]), fixed = TRUE)
+  expect_match(out[[2]], paste0("[2] ", fx$secondary[[2]]), fixed = TRUE)
+  expect_true(any(grepl("[1]", out[-(1:2)], fixed = TRUE)))
+  expect_false(any(grepl(fx$secondary[[1]], out[-(1:2)], fixed = TRUE)))
+  capture.output(printed <- print(status))
+  expect_identical(printed, status)
+  expect_identical(unique(status$location), unname(unlist(fx$secondary)))
+})
+
 test_that("newer names the side with the later update", {
   fx <- local_test_store(partial = TRUE)
   st <- fx$st

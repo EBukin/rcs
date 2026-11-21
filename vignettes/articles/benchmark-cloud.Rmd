@@ -25,8 +25,8 @@ byte ranges it needs from the bucket. How does that compare with
 downloading whole files first, and with reading a local copy of the same
 store? What does a first connection cost (new credentials and file system)
 against a later one, and what does MD5 verification cost when the bucket
-reports the MD5 of each object? The cost of `store_sync()` is not measured
-(see Limits).
+reports the MD5 of each object? The cost of `store_sync()` is not yet
+measured (see Limits).
 
 ## Setup
 
@@ -166,8 +166,7 @@ knitr::kable(wide, row.names = FALSE, format.args = list(big.mark = ","))
 - One machine and one network connection; its bandwidth to the bucket bounds
   every cloud number. Two other agents ran tests and rendered documents on
   the machine meanwhile.
-- The cost of `store_sync()` is not measured: the function did not exist
-  when this benchmark was written (work package G). Its transfers are those
+- The cost of `store_sync()` is not yet measured. Its transfers are those
   of a write's upload and verification, measured in `benchmark-write.Rmd`.
 - "Cold" means a new Arrow file system and a new access token in the same R
   session; the time to start R and load the package is not included.

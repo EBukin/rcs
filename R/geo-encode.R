@@ -641,13 +641,29 @@ geo_decode <- function(data, crs) {
   if (any(missing)) {
     wkb[missing] <- list(geo_empty_wkb)
   }
-  geometry <- sf::st_as_sfc(structure(wkb, class = "WKB"), EWKB = FALSE, crs = crs)
+  geometry <- geo_wkb_to_sfc(wkb, crs)
   rest <- data[setdiff(names(data), "geometry")]
   rest <- tibble::as_tibble(rest)
   if (ncol(rest) == 0) {
     rest <- tibble::new_tibble(list(), nrow = length(geometry))
   }
   sf::st_sf(rest, geometry = geometry)
+}
+
+# WKB (a bare list of raw vectors, none NULL) to `sfc` in `crs`. wk's sfc
+# writer is about ten times faster than `sf::st_as_sfc()` and gives the
+# identical `sfc` (class, bounding box, precision, empty count, geometry
+# classes), except for zero geometries and columns of empty geometries
+# only, whose bounding box differs in its attributes; those take sf's path.
+geo_wkb_to_sfc <- function(wkb, crs) {
+  if (length(wkb) > 0) {
+    geometry <- wk::wk_handle(wk::new_wk_wkb(wkb), wk::sfc_writer())
+    if (attr(geometry, "n_empty") < length(geometry)) {
+      sf::st_crs(geometry) <- crs
+      return(geometry)
+    }
+  }
+  sf::st_as_sfc(structure(wkb, class = "WKB"), EWKB = FALSE, crs = crs)
 }
 
 # WKB of GEOMETRYCOLLECTION EMPTY (little endian), for missing geometries.

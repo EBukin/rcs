@@ -183,9 +183,13 @@ partition_plan_h3 <- function(data, max_files, h3_max_res, call) {
   if (!rlang::is_scalar_integerish(h3_max_res) || is.na(h3_max_res)) {
     cli::cli_abort("{.arg h3_max_res} must be a resolution.", .internal = TRUE)
   }
+  # Parents of the distinct cells only, matched back to the rows.
+  cells <- vctrs::vec_unique(data[["h3"]])
+  at_cell <- vctrs::vec_match(data[["h3"]], cells)
   for (res in seq(as.integer(h3_max_res), 0L)) {
-    parents <- h3_parent(data[["h3"]], res)
-    if (vctrs::vec_unique_count(parents) <= max_files) {
+    cell_parents <- h3_parent(cells, res)
+    if (vctrs::vec_unique_count(cell_parents) <= max_files) {
+      parents <- cell_parents[at_cell]
       column <- paste0("h3_p", res)
       data <- tibble::as_tibble(data)
       data[[column]] <- parents
@@ -641,11 +645,17 @@ restore_list <- function(x, strip = TRUE) {
   if (!is.list(x) || is.data.frame(x)) {
     return(x)
   }
-  out <- lapply(seq_along(x), function(i) {
-    e <- x[[i]]
-    if (strip && !is.null(e)) attributes(e) <- NULL
-    e
-  })
+  # A bare list of the elements (Arrow returns an `arrow_list`); element
+  # attributes are stripped only where an element has any.
+  out <- unclass(x)
+  attributes(out) <- NULL
+  if (strip) {
+    has <- which(lengths(lapply(out, attributes)) > 0L)
+    out[has] <- lapply(out[has], function(e) {
+      attributes(e) <- NULL
+      e
+    })
+  }
   out
 }
 

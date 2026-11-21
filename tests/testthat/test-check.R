@@ -201,3 +201,33 @@ test_that("a raster is compared by sampled cells", {
   expect_identical(out$status, "failed")
   expect_error(store_check(s$st, "grid", x = s$x), class = "rcs_error_argument")
 })
+
+test_that("the sampled rows taken from the Arrow table equal those of the whole row group restored", {
+  # The former path of check_file_rows(): restore a whole row group, then
+  # take the rows. The values compared by the check are identical; `[` on a
+  # POSIXct only adds an empty `tzone` attribute, which the check ignores.
+  skip_if_no_h3()
+  withr::local_options(arrow.int64_downcast = FALSE)
+  root <- withr::local_tempdir()
+  st <- suppressMessages(store_connect(file.path(root, "p"), create = TRUE))
+  suppressMessages(store_write(st, rcs_sim_table(600, seed = 1), "t", title = "t", description = "d", rows_per_group = 200))
+  suppressMessages(store_write(st, rcs_sim_polygons(80, seed = 1, special = TRUE), "p",
+    title = "p", description = "d", rows_per_group = 30
+  ))
+  be <- st$primary$backend
+  withr::local_seed(3)
+  for (ds in c("t", "p")) {
+    entry <- st$primary$catalog[st$primary$catalog$dataset == ds, ]
+    spec <- columns_from_json(entry$columns)
+    path <- st$primary$files$path[st$primary$files$dataset == ds][[1]]
+    for (g in 1:2) {
+      table <- files_read_row_groups(be, path, g)
+      take <- sort(sample.int(table$num_rows, 20))
+      old <- restore_types(as.data.frame(table), spec)[take, ]
+      new <- check_sample_rows(table, take, spec)
+      expect_identical(names(new), names(old))
+      expect_identical(lapply(new, normalise_values), lapply(old, normalise_values))
+      expect_identical(lapply(new, class), lapply(old, class))
+    }
+  }
+})

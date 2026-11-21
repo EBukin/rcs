@@ -136,7 +136,7 @@
       * h3_p2 = null: new, 1 row
       i Partition h3_p2 would give 7 files, more than `max_files` = 3.
       i The whole dataset is re-partitioned as h3_p0.
-      i Writing "shapes/polygons": 60 rows in 3 files (partition h3_p0).
+      i Writing "shapes/polygons": 60 rows in 3 files (partition h3_p0), and its index table in 1 file.
       v primary  <root>/primary  4/4 files sent  <bytes>  <time>
       v MD5 identical for 4 files in 1 location. Catalogs updated.
 

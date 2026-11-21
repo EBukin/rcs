@@ -536,3 +536,29 @@ test_that("a fresh local lock blocks a write; a stale one is taken over", {
   expect_false(dir.exists(lock))
   expect_store_valid(s$st)
 })
+
+test_that("the summary of a raster write counts cells, and of a geospatial write its index files", {
+  skip_if_not_installed("terra")
+  s <- local_store()
+  withr::local_options(rcs.quiet = FALSE)
+  messages_of <- function(expr) {
+    out <- character()
+    withCallingHandlers(expr, message = function(m) {
+      out <<- c(out, conditionMessage(m))
+      invokeRestart("muffleMessage")
+    })
+    cli::ansi_strip(out)
+  }
+  r <- rcs_sim_raster(seed = 1, nrow = 10, ncol = 10)
+  messages <- messages_of(store_write(s$st, r, "grid", title = "Grid", description = "Simulated raster."))
+  expect_true(any(grepl("100 cells in 1 file", messages, fixed = TRUE)))
+  skip_if_no_h3()
+  pol <- rcs_sim_polygons(40, seed = 1)
+  messages <- messages_of(store_write(s$st, pol, "shapes/polygons", title = "Polygons", description = "d"))
+  entry <- s$st$primary$catalog
+  n_data <- as.numeric(entry$n_files[entry$dataset == "shapes/polygons"])
+  n_index <- as.numeric(entry$n_files[entry$dataset == "shapes/polygons__h3"])
+  expect_true(any(grepl(paste0("in ", n_data, " file.*index table in ", n_index, " file"), messages)))
+  sent <- paste0(n_data + n_index, "/", n_data + n_index, " files sent")
+  expect_true(any(grepl(sent, messages, fixed = TRUE)))
+})

@@ -106,7 +106,11 @@ query_new <- function(st, target) {
 #' @param schema `NULL`, or the Arrow schema of the files; given, the files
 #'   are not inspected when the dataset is built, and zero paths give an
 #'   empty in-memory dataset with that schema.
-#' @return An Arrow `Dataset`.
+#' @return An Arrow `Dataset`. Aborts with class
+#'   `rcs_error_version_not_found` when files of the list no longer exist
+#'   (the version was replaced since the connection read the catalogs, and
+#'   history is off), and with `rcs_error_backend` and the authentication
+#'   hint when the files cannot be opened otherwise.
 #' @noRd
 query_open_files <- function(location, paths, schema = NULL) {
   if (length(paths) == 0) {
@@ -121,12 +125,30 @@ query_open_files <- function(location, paths, schema = NULL) {
       arrow::open_dataset(full, schema = schema, filesystem = fs$fs, format = "parquet")
     },
     error = function(e) {
-      uri <- location$uri
-      cli::cli_abort(
-        c("Cannot open the data files in {.path {uri}}.", be_auth_hint_safe(location$backend)),
-        class = "rcs_error_backend", parent = e, call = NULL
-      )
+      abort_open_files(location, paths, e)
     }
+  )
+}
+
+# The error of a file list that cannot be opened: files that no longer
+# exist mean a stale connection, anything else access.
+abort_open_files <- function(location, paths, error) {
+  uri <- location$uri
+  exists <- tryCatch(be_exists(location$backend, paths), error = function(e) NULL)
+  if (!is.null(exists) && !all(exists)) {
+    n <- sum(!exists)
+    cli::cli_abort(
+      c(
+        "{n} data file{?s} of the version this connection knows {?is/are} gone from {.path {uri}}.",
+        i = "The dataset was changed since the connection read the catalogs, and no history keeps the old files.",
+        i = "Run {.fn store_refresh} and read again."
+      ),
+      class = "rcs_error_version_not_found", parent = error, call = NULL
+    )
+  }
+  cli::cli_abort(
+    c("Cannot open the data files in {.path {uri}}.", be_auth_hint_safe(location$backend)),
+    class = "rcs_error_backend", parent = error, call = NULL
   )
 }
 

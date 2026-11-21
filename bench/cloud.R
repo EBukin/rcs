@@ -9,8 +9,7 @@
 # prefix is removed at the end, also after a failure. Without RCS_TEST_GCS
 # the script stops.
 #
-# The cost of `store_sync()` is not measured: the function does not exist
-# yet (work package G).
+# The cost of `store_sync()` is not yet measured.
 #
 # Run in a fresh R session, with the project root in RCS_BENCH_ROOT (default:
 # the working folder) and RCS_TEST_GCS set:

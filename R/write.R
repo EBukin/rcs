@@ -15,7 +15,8 @@
 #
 # A "version source" (`src`) describes one dataset version to land: a list
 # with `entry` (one-row catalog tibble), `files` (its file rows),
-# `manifest_local` (a local manifest file, or `NULL` to copy the primary's)
+# `manifest_local` (a local manifest file, or `NULL` to copy the primary's;
+# `store_write()` always writes its own, with the time of the call)
 # and `changed` (`FALSE` when the primary already holds exactly this entry).
 # The local copies of data files are found through a context environment
 # (`write_context()`): staged files first, else a download from the primary.
@@ -794,7 +795,12 @@ resolve_target <- function(src, existing, primary_files, dir, now) {
     probe[[field]] <- existing[[field]]
   }
   if (identical(entry_key(probe), entry_key(existing))) {
-    return(list(entry = existing, files = files, manifest_local = NULL, local = src$local, changed = FALSE))
+    # A secondary brought up to date gets the manifest written anew with
+    # the time of the landing, as by store_sync(), so that its latest
+    # manifest is the current version for store_rebuild().
+    manifest_local <- file.path(dir, "manifest", manifest_path(existing$dataset, existing$version))
+    manifest_write_local(new_manifest(existing, files, written = now), manifest_local)
+    return(list(entry = existing, files = files, manifest_local = manifest_local, local = src$local, changed = FALSE))
   }
   entry <- src$entry
   entry$created <- existing$created
@@ -1025,16 +1031,25 @@ land_location <- function(st, location, sets, drops, keep_history, ctx, replaced
 #' released when `frame` exits, and compares the MD5 of the stored
 #' `_catalog.parquet` with the token read at the start of the operation.
 #'
+#' The caller sets `guard$switched <- TRUE` once the location's catalogs are
+#' switched. A failing `be_unlock()` before that point is an error, as any
+#' failure of the operation; after it, the switch stands, so the failure
+#' only warns (class `rcs_warning_unlock`): the lock stays until it is older
+#' than `getOption("rcs.lock_timeout")` and the next writer takes it over.
+#'
 #' @param location The `rcs_location` as read at the start.
 #' @param frame The frame that holds the lock.
-#' @return `TRUE`, invisibly. Aborts with class `rcs_error_locked` when
+#' @return The guard, invisibly: an environment with the logical field
+#'   `switched` (`FALSE`). Aborts with class `rcs_error_locked` when
 #'   another writer holds a fresh lock, and with `rcs_error_conflict` when
 #'   the catalog changed since it was read.
 #' @noRd
 write_guard <- function(location, frame = parent.frame()) {
   be <- location$backend
   be_lock(be)
-  withr::defer(be_unlock(be), envir = frame)
+  guard <- new.env(parent = emptyenv())
+  guard$switched <- FALSE
+  withr::defer(guard_release(be, guard), envir = frame)
   token <- catalog_token(be)
   if (!identical(token, location$token)) {
     uri <- location$uri
@@ -1046,7 +1061,28 @@ write_guard <- function(location, frame = parent.frame()) {
       class = "rcs_error_conflict", call = NULL
     )
   }
-  invisible(TRUE)
+  invisible(guard)
+}
+
+# Release the lock of a write guard; see `write_guard()`.
+guard_release <- function(be, guard) {
+  done <- tryCatch(be_unlock(be), error = function(e) e)
+  if (!inherits(done, "error")) {
+    return(invisible())
+  }
+  if (!isTRUE(guard$switched)) {
+    rlang::cnd_signal(done)
+  }
+  uri <- be$uri
+  timeout <- rcs_option("rcs.lock_timeout")
+  cli::cli_warn(
+    c(
+      "The catalogs of {.path {uri}} were switched, but its lock could not be released.",
+      i = "The lock stays until it is older than {timeout} second{?s}; the next writer then takes it over."
+    ),
+    class = "rcs_warning_unlock", parent = done
+  )
+  invisible()
 }
 
 #' Switch the catalogs of one location
@@ -1073,7 +1109,7 @@ write_guard <- function(location, frame = parent.frame()) {
 #' @noRd
 switch_catalogs <- function(st, location, sets, drops, history, keep_history, replaced) {
   be <- location$backend
-  write_guard(location)
+  guard <- write_guard(location)
   catalog <- location$catalog
   files <- location$files
   hist <- history
@@ -1100,6 +1136,7 @@ switch_catalogs <- function(st, location, sets, drops, history, keep_history, re
   if (inherits(written, "error")) {
     written <- recover_switch(location, history, history_changed, written, sets, drops)
   }
+  guard$switched <- TRUE
   store_set_location(st, written)
   if (!keep_history) {
     delete <- setdiff(unique(delete), c(written$files$path, hist$path))
@@ -1269,16 +1306,21 @@ write_line <- function(r, widths) {
 write_header <- function(dataset, src, plan, mode, existing, changed) {
   entry <- src$entry
   rows <- format_count(entry$rows)
+  # A raster's rows are its cells.
+  unit <- if (identical(entry$kind, "raster")) "cells" else "rows"
   n <- as.numeric(entry$n_files)
   partition <- entry$partition[[1]]
   part <- if (length(partition) > 0) paste0(" (partition ", paste(partition, collapse = ", "), ")") else ""
+  # The index table's files count among the files sent to each location.
+  n_index <- if (is.null(plan$index)) 0 else as.numeric(plan$index$entry$n_files)
+  index <- if (n_index > 0) cli::format_inline(", and its index table in {n_index} file{?s}") else ""
   if (!changed) {
     version <- entry$version
-    rcs_inform(c(i = "{.val {dataset}} is unchanged (version {version}): {rows} rows in {n} file{?s}{part}."))
+    rcs_inform(c(i = "{.val {dataset}} is unchanged (version {version}): {rows} {unit} in {n} file{?s}{part}{index}."))
     return(invisible())
   }
   verb <- if (nrow(existing) == 0 || mode == "update") "Writing" else "Replacing"
-  rcs_inform(c(i = "{verb} {.val {dataset}}: {rows} rows in {n} file{?s}{part}."))
+  rcs_inform(c(i = "{verb} {.val {dataset}}: {rows} {unit} in {n} file{?s}{part}{index}."))
 }
 
 write_footer <- function(out, src) {

@@ -189,14 +189,11 @@ test_that("a reader connected before a write reads the old version with history,
     if (history) {
       expect_rows_same(store_read(reader, "sales/daily"), x, label = "stale reader, history on")
     } else {
-      err <- expect_error(store_read(reader, "sales/daily"))
+      err <- expect_error(store_read(reader, "sales/daily"), class = "rcs_error_version_not_found")
+      expect_match(conditionMessage(err), "store_refresh", fixed = TRUE)
+      expect_error(store_open(reader, "sales/daily"), class = "rcs_error_version_not_found")
       g_quiet(store_refresh(reader))
       expect_rows_same(store_read(reader, "sales/daily"), g_sim(30, 2))
-      expect_store_valid(writer)
-      if (!grepl("store_refresh", conditionMessage(err), fixed = TRUE)) {
-        skip("defect: a stale reader without history gets Arrow's missing-file error, not one telling it to refresh; see report")
-      }
-      expect_match(conditionMessage(err), "store_refresh", fixed = TRUE)
     }
     expect_store_valid(writer)
   }

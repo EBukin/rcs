@@ -257,8 +257,8 @@ current_location <- function(st, uri) {
 }
 
 # After a failed landing: re-read the location; when its catalogs hold every
-# version and none of `drops` (the error came after the catalog switch, e.g.
-# when the lock could not be released), the landing counts as done and the
+# version and none of `drops` (the error came after the catalog switch), the
+# landing counts as done and the
 # error becomes a warning. Returns a landing result, or the error.
 landed_anyway <- function(st, location, sets, drops, error) {
   fresh <- tryCatch(location_refresh(st, location), error = function(e) NULL)
@@ -798,7 +798,7 @@ delete_resolve <- function(st, dataset, call) {
 #' @noRd
 delete_switch <- function(st, location, names, purge, history, replaced, sink = new.env()) {
   be <- location$backend
-  write_guard(location)
+  guard <- write_guard(location)
   history <- history %||% history_read(be)
   catalog <- location$catalog
   files <- location$files
@@ -827,6 +827,7 @@ delete_switch <- function(st, location, names, purge, history, replaced, sink = 
   if (inherits(written, "error")) {
     written <- recover_switch(location, history, history_changed, written, list(), names)
   }
+  guard$switched <- TRUE
   store_set_location(st, written)
   delete <- setdiff(unique(delete), c(written$files$path, hist$path))
   is_manifest <- grepl("/_manifest-[0-9a-f]{16}\\.json$", delete)
@@ -836,8 +837,8 @@ delete_switch <- function(st, location, names, purge, history, replaced, sink = 
 }
 
 # After a failed catalog switch of a deletion: re-read the location; when it
-# no longer lists the datasets (the error came after the switch, e.g. when
-# the lock could not be released), the switch counts as done.
+# no longer lists the datasets (the error came after the switch), the switch
+# counts as done.
 deleted_anyway <- function(st, uri, names, purge, sink, error) {
   fresh <- tryCatch(location_refresh(st, uri), error = function(e) NULL)
   if (is.null(fresh) || is.null(sink$result) || !inherits(error, write_error_classes) ||
@@ -868,7 +869,9 @@ delete_files <- function(st, uri, switched) {
   location <- current_location(st, uri)
   be <- location$backend
   guarded <- function() {
-    write_guard(location)
+    # The catalogs were switched in phase 1.
+    guard <- write_guard(location)
+    guard$switched <- TRUE
     data <- paths[!grepl("/_manifest-[0-9a-f]{16}\\.json$", paths)]
     if (length(data) > 0) be_delete(be, data)
     manifests <- setdiff(paths, data)
@@ -983,8 +986,10 @@ store_rebuild <- function(st, location) {
   }
   rebuilt <- reach(catalog_rebuild(be), be, role, call)
   guarded <- function() {
-    write_guard(fresh)
-    with_retry(function() location_write(fresh, rebuilt$catalog, rebuilt$files, rebuilt$history))
+    guard <- write_guard(fresh)
+    written <- with_retry(function() location_write(fresh, rebuilt$catalog, rebuilt$files, rebuilt$history))
+    guard$switched <- TRUE
+    written
   }
   written <- reach(guarded(), be, role, call)
   store_set_location(st, written)

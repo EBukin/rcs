@@ -385,8 +385,9 @@ check_file_rows <- function(be, path, pv, spec, ref, ref_keys, match_by, key, by
     list(g = g, take = take)
   })
   offset <- sum(groups$rows[seq_len(pick$g - 1L)])
-  data <- as.data.frame(files_read_row_groups(be, path, groups$row_group[[pick$g]]))
-  data <- restore_types(data, spec)[pick$take, ]
+  # Only the sampled rows are converted to R and restored.
+  table <- files_read_row_groups(be, path, groups$row_group[[pick$g]])
+  data <- check_sample_rows(table, pick$take, spec)
   idx <- switch(match_by,
     key = vctrs::vec_match(key_frame(data, key), ref_keys),
     id = vctrs::vec_match(key_frame(data, ".rcs_id"), ref_keys),
@@ -412,6 +413,12 @@ check_file_rows <- function(be, path, pv, spec, ref, ref_keys, match_by, key, by
     ))
   }
   NA_character_
+}
+
+# Rows `take` (1-based, sorted) of an Arrow table, as a tibble with the
+# recorded R types restored. Needs `arrow.int64_downcast = FALSE`.
+check_sample_rows <- function(table, take, spec) {
+  restore_types(as.data.frame(table$Take(take - 1L)), spec)
 }
 
 # Values of a column in a form that compares equal across a round trip.

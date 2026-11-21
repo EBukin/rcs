@@ -219,12 +219,12 @@ store_refresh(st)
 dataset, from the catalogs alone. `status` is `same`, `differs` (another
 version), `missing` (not in the secondary) or `extra` (only in the
 secondary); for `differs`, `newer` says which side was written last, a hint
-only, as clocks of different machines can differ.
+only, as clocks of different machines can differ. Printed, the addresses
+of the secondaries are listed once above the table and numbered in the
+column `location`.
 
 ```{r}
-status <- store_status(st)
-status$location <- basename(status$location)
-status[c("dataset", "location", "status", "newer")]
+store_status(st)[c("dataset", "location", "status", "newer")]
 ```
 
 A copy that is behind is never read: reads go to a location that holds the
@@ -239,23 +239,24 @@ write, it copies only the files a location lacks, checks each by MD5 and
 switches the catalog last. It never deletes a dataset. `dry_run = TRUE`
 shows what it would do.
 
-```{r needs-sync-dry-run, eval = FALSE}
+```{r needs-sync-dry-run}
 store_sync(st, dry_run = TRUE)
 ```
 
-```{r needs-sync-run, eval = FALSE}
-store_sync(st)
-status <- store_status(st)
-status$location <- basename(status$location)
-status[c("dataset", "location", "status")]
+`datasets` and `to` limit it to some datasets or some secondaries. Here
+only the second copy is brought up to date:
+
+```{r needs-sync-run}
+store_sync(st, to = copy_2)
 ```
 
-`datasets` and `to` limit it to some datasets or some secondaries.
 `store_copy()` copies one dataset between any two locations of the
-connection, in either direction:
+connection, in either direction. The first copy still lacks
+`sales/weekly`; here it gets it from the second copy:
 
-```{r needs-sync-copy, eval = FALSE}
-store_copy(st, "sales/weekly", from = primary, to = copy_1)
+```{r needs-sync-copy}
+store_copy(st, "sales/weekly", from = copy_2, to = copy_1)
+store_status(st)[c("dataset", "location", "status")]
 ```
 
 Two more functions maintain locations. `store_delete()` removes a dataset
@@ -264,7 +265,7 @@ from every location; it stops unless `confirm` repeats the full name.
 file (manifest) that every version of every dataset leaves next to its data
 files, for example after a catalog file was lost.
 
-```{r needs-sync-delete, eval = FALSE}
+```{r needs-sync-delete}
 store_delete(st, "sales/weekly", confirm = "sales/weekly")
 store_rebuild(st, copy_2)
 ```

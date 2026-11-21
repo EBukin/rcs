@@ -457,3 +457,43 @@ test_that("files_read_row_groups() reads chosen groups and columns", {
   expect_identical(df$id, g$id)
   expect_equal(df$bbox$xmax, g$bbox$xmax)
 })
+
+test_that("restore_list() gives what the element-by-element version gave", {
+  old <- function(x, strip = TRUE) {
+    if (!is.list(x) || is.data.frame(x)) {
+      return(x)
+    }
+    lapply(seq_along(x), function(i) {
+      e <- x[[i]]
+      if (strip && !is.null(e)) attributes(e) <- NULL
+      e
+    })
+  }
+  tags <- rcs_sim_table(200, seed = 1)$tags
+  from_arrow <- as.data.frame(arrow::arrow_table(tags = tags))$tags
+  wkb <- as.data.frame(arrow::arrow_table(geometry = arrow::Array$create(
+    lapply(1:5, function(i) as.raw(seq_len(i))), type = arrow::binary()
+  )))$geometry
+  cases <- list(
+    from_arrow, from_arrow[0], tags, list(a = 1, NULL, structure(1:2, foo = 1), c(x = "a")), 1:3
+  )
+  for (x in cases) {
+    expect_identical(restore_list(x), old(x))
+    expect_identical(restore_list(x, strip = FALSE), old(x, strip = FALSE))
+  }
+  expect_identical(restore_list(wkb, strip = FALSE), old(wkb, strip = FALSE))
+})
+
+test_that("partition_plan_h3() matched back from distinct cells equals the parent of every row", {
+  skip_if_no_h3()
+  encoded <- geo_encode(rcs_sim_polygons(200, seed = 2), h3_res = 5L, geocode = TRUE, key = NULL, id_start = 1)
+  data <- encoded$data
+  for (max_files in c(4L, 30L, 1000L)) {
+    plan <- partition_plan_h3(data, max_files, 5L, call = NULL)
+    expect_identical(plan$data[[plan$partition]], h3_parent(data$h3, plan$res))
+    finer <- plan$res + 1L
+    if (finer <= 5L) {
+      expect_gt(vctrs::vec_unique_count(h3_parent(data$h3, finer)), max_files)
+    }
+  }
+})

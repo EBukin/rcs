@@ -124,7 +124,30 @@ store_status <- function(st) {
     primary_updated = local_time(as.POSIXct(character(), tz = "UTC")),
     location_updated = local_time(as.POSIXct(character(), tz = "UTC"))
   )
-  vctrs::vec_rbind(empty, !!!parts)
+  out <- vctrs::vec_rbind(empty, !!!parts)
+  class(out) <- c("rcs_status", class(out))
+  out
+}
+
+#' @rdname store_status
+#' @param x The result of `store_status()`.
+#' @param ... Passed on to the tibble's print method.
+#' @details Printed, the addresses are listed once above the table and the
+#'   column `location` shows their numbers, so that long addresses stay
+#'   readable; the values of the column are the full addresses.
+#' @export
+print.rcs_status <- function(x, ...) {
+  shown <- x
+  class(shown) <- setdiff(class(x), "rcs_status")
+  if (nrow(x) == 0 || !"location" %in% names(x) || !is.character(x$location)) {
+    print(shown, ...)
+    return(invisible(x))
+  }
+  uris <- unique(x$location[!is.na(x$location)])
+  shown$location <- ifelse(is.na(x$location), NA_character_, paste0("[", match(x$location, uris), "]"))
+  cat(paste0("Locations: ", paste0("[", seq_along(uris), "] ", uris, collapse = "\n           ")), "\n", sep = "")
+  print(shown, ...)
+  invisible(x)
 }
 
 # store_datasets() ------------------------------------------------------------

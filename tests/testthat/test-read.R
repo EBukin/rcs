@@ -332,6 +332,31 @@ test_that("rasters are read as SpatRaster, cropped by intersects, and refuse tab
 
 # Through the public functions only --------------------------------------------
 
+test_that("filters on a difftime column compare in the column's own units", {
+  root <- withr::local_tempdir()
+  st <- suppressMessages(store_connect(file.path(root, "primary"), create = TRUE))
+  values <- c(0.5, 2, NA, 12, 36, 100)
+  x <- tibble::tibble(
+    id = seq_along(values),
+    wait_hours = as.difftime(values, units = "hours"),
+    wait_mins = as.difftime(values, units = "mins")
+  )
+  suppressMessages(store_write(st, x, "waits", title = "Waits", description = "Difftimes.", key = "id"))
+  # `wait_hours > 10` means more than 10 hours; `wait_mins > 10` more than 10 minutes.
+  expected <- x[!is.na(values) & values > 10 & values <= 50, ]
+  expect_identical(store_read(st, "waits", wait_hours > 10, wait_hours <= 50), expected)
+  expect_identical(store_read(st, "waits", wait_mins > 10, wait_mins <= 50), expected)
+  got <- store_open(st, "waits") |>
+    dplyr::filter(wait_hours > 10, wait_hours <= 50) |>
+    dplyr::collect()
+  expect_identical(got, expected)
+  got <- store_open(st, "waits") |>
+    dplyr::filter(is.na(wait_mins) | wait_mins < 1) |>
+    dplyr::arrange(id) |>
+    dplyr::collect()
+  expect_identical(got, x[is.na(values) | values < 1, ])
+})
+
 test_that("a difftime of any units and fractional value survives store_write() and store_read()", {
   root <- withr::local_tempdir()
   st <- suppressMessages(store_connect(file.path(root, "primary"), create = TRUE))

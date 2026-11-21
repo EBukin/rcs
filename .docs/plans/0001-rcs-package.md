@@ -377,10 +377,10 @@ Performance budget. The first full run of J and M fixes a number for each line b
 
 | Measure | Budget |
 |---|---|
-| `store_connect()` to a local store and to GCS, catalog of 100 datasets | set by J |
-| Full read and filtered read through `store_read()` relative to raw Arrow on the same files | set by J |
-| Write throughput, rows per second, tables and polygons, 1 worker | set by J |
-| Peak memory of a write relative to the size of `x` in memory | set by J |
+| `store_connect()` to a local store and to GCS, catalog of 100 datasets | local 0.054 s; GCS 0.43 s warm, 0.63 s cold |
+| Full read and filtered read through `store_read()` relative to raw Arrow on the same files | full table 2.7× (one file), 2.0× (15 files); polygons with geometry 1.05× Arrow plus sf decoding; column subset 1.3×; key filter 1.3×; partition filter 3.6× |
+| Write throughput, rows per second, tables and polygons, 1 worker | tables 57,000 at 1e6 rows (72,000 at 1e5, 48,000 at 5e6); polygons 8,800 to 11,500 at 1e6, 11,300 at 5e6 |
+| Peak memory of a write relative to the size of `x` in memory | from 1e6 rows: increase during the write at most 1.25× for polygons, 1.07× for tables; up to 3.9× at 1e5 rows (fixed costs) |
 | Spatial query, cell of resolution 7 on 5e6 polygons, local and GCS cold | set by M |
 | Candidate rows per returned row, query cells of resolutions 5 to 9 | set by M |
 | Share of row groups overlapping a resolution-7 query | set by M |
@@ -467,11 +467,30 @@ Wave 3, two agents in parallel (after wave 2):
 - [x] **E. Write pipeline.** Owns `R/write.R`, `R/check.R`, `R/history.R`, `tests/testthat/test-write.R`, `tests/testthat/test-check.R`, `tests/testthat/test-history.R`. `store_write()` (all modes and kinds, staging, upload to every location with progress and retries, MD5 verification, write guard), `store_check()`, `store_history()`, `store_prune()`.
 - [x] **F. Read pipeline.** Owns `R/read.R`, `R/query.R`, `R/intersects.R`, `tests/testthat/test-read.R`, `tests/testthat/test-query.R`, `tests/testthat/test-intersects.R`. `store_open()`, `rcs_query` dplyr methods and `collect()` with type restoring, `store_read()` (all kinds), `store_sample()`, `store_glimpse()`, `store_intersects()`, partition pruning, spatial filter, property test of spatial correctness. Uses the fixture store of `helper-store.R`, so it does not depend on E.
 
+Results of wave 4 (2026-11-20). They add to this plan and correct it where they differ:
+
+- G: `store_sync()` and `store_copy()` write the manifest of the copied version anew, with the time of the landing, so that "the latest written manifest is current" stays true in `store_rebuild()` after an older version is copied.
+- G, gaps in the rebuild rule, open: a dataset deleted with `history = FALSE` in a store that keeps history comes back after `store_rebuild()`, from its latest kept manifest; an orphan manifest left by a failed write is taken as current by a rebuild, so the documentation says to run `store_prune()` first.
+- G: at level `full` the crash-point matrix takes about 22 minutes and the random-operation test about 11.
+- J: the budget numbers above were measured before the fix round of this wave, on a machine that ran other agents; M measures again on a quiet machine and updates the baseline.
+- J, correction: `options(rcs.workers = )` parallelises geocoding only when `x` has more than one chunk of `rcs.chunk_size` (1e5 rows). Four workers gave 1.4× on geocoding at 1e6 rows.
+- J: `rcs_sim_table(5e6)` spans 73 years, more than the default `max_files = 50` with `partition = "year"`; `bench/scale.R` passes `max_files = 100`.
+- J: time grows linearly, about 90 s per 1e6 polygons; a write of 5e6 polygons peaked at 10.4 GiB; the staging folder is as large as the dataset in the store.
+- J, left for M: a filtered read from GCS opens every file of the version before pruning (1.4 s against 0.31 s for downloading the one file); `store_check()` on GCS reads Parquet footers one after another (4.5 s against 0.5 s locally); the chunk size for geocoding workers.
+- J: `bench/cloud.R` does not measure `store_sync()`.
+- `DESCRIPTION`: `VignetteBuilder: knitr`; `ggplot2` (benchmark articles) and `DBI` (interoperability test) in `Suggests`.
+- Fix round, write guard: a failing `be_unlock()` before the catalog switch aborts as before; after the switch it warns (`rcs_warning_unlock`), the lock stays until `rcs.lock_timeout`, and the operation goes on to the secondaries. The same holds in `store_sync()`, `store_delete()`, `store_rebuild()` and `store_prune()`. The crash-point matrix fails every unlock too.
+- Fix round: a reader that connected before a write, in a store without history, gets `rcs_error_version_not_found` with the advice to run `store_refresh()`, from `store_open()`, `store_read()` and `store_sample()`. Open: `store_glimpse()` still gives `rcs_error_backend` there.
+- Fix round: a write that changes nothing in the primary and brings a secondary up to date writes a new manifest with the time of the landing, as sync and copy do.
+- Fix round: `store_status()` returns an `rcs_status` tibble whose print lists the addresses above the table. The interoperability tests exist in `test-interop.R`; the GDAL one skips here (no Parquet driver).
+- Fix round, speed, results unchanged: the write check restores only the sampled rows; list columns are restored without a dispatch per element; WKB is decoded with wk (sf is kept for empty columns); the H3 partition choice works on distinct cells. The budget numbers above predate these changes.
+- Open: the plan's "the same integration suite against GCS" is implemented by no test file; only the backend and raster tests run on GCS. `store_delete()` says "and its index table" for a plain table and counts the manifest among the files deleted.
+
 Wave 4, three agents in parallel (after wave 3):
 
-- [ ] **G. Sync, copy, delete, rebuild.** Owns `R/sync.R`, `tests/testthat/test-sync.R`, `tests/testthat/test-integration.R`. `store_sync()`, `store_copy()`, `store_delete()`, `store_rebuild()`; and `tests/testthat/test-crash-points.R`, `tests/testthat/test-random-operations.R`: the full integration suite with three local locations, the failure and concurrency tests, the crash-point matrix, the random-operation test, and raster and geospatial datasets written and read through the public functions.
-- [ ] **J. Benchmarks: write, read, cloud, scale.** Owns `bench/write.R`, `bench/read.R`, `bench/cloud.R`, `bench/scale.R`, `bench/quick.R`, `bench/results/`, and the articles `benchmark-write.Rmd`, `benchmark-read.Rmd`, `benchmark-cloud.Rmd`, `benchmark-scale.Rmd` in `vignettes/articles/`. Runs them on this machine and against `gs://rcs-test`, fills its lines of the performance budget, stores the baseline. Reports every case where the package is slower than its comparison, with the cause if found.
-- [ ] **K. Documentation.** Owns `README.Rmd`, `vignettes/rcs.Rmd` (getting started, local store), `vignettes/locations.Rmd` (primary and secondaries, environment variables, authentication per client), `vignettes/geospatial.Rmd`, `vignettes/articles/testing.Rmd` (how the package is tested: levels, invariants, crash points, oracles, how to run each level), `_pkgdown.yml` (lists the six benchmark articles by the names in "Performance"). Only simulated data.
+- [x] **G. Sync, copy, delete, rebuild.** Owns `R/sync.R`, `tests/testthat/test-sync.R`, `tests/testthat/test-integration.R`. `store_sync()`, `store_copy()`, `store_delete()`, `store_rebuild()`; and `tests/testthat/test-crash-points.R`, `tests/testthat/test-random-operations.R`: the full integration suite with three local locations, the failure and concurrency tests, the crash-point matrix, the random-operation test, and raster and geospatial datasets written and read through the public functions.
+- [x] **J. Benchmarks: write, read, cloud, scale.** Owns `bench/write.R`, `bench/read.R`, `bench/cloud.R`, `bench/scale.R`, `bench/quick.R`, `bench/results/`, and the articles `benchmark-write.Rmd`, `benchmark-read.Rmd`, `benchmark-cloud.Rmd`, `benchmark-scale.Rmd` in `vignettes/articles/`. Runs them on this machine and against `gs://rcs-test`, fills its lines of the performance budget, stores the baseline. Reports every case where the package is slower than its comparison, with the cause if found.
+- [x] **K. Documentation.** Owns `README.Rmd`, `vignettes/rcs.Rmd` (getting started, local store), `vignettes/locations.Rmd` (primary and secondaries, environment variables, authentication per client), `vignettes/geospatial.Rmd`, `vignettes/articles/testing.Rmd` (how the package is tested: levels, invariants, crash points, oracles, how to run each level), `_pkgdown.yml` (lists the six benchmark articles by the names in "Performance"). Only simulated data.
 
 Wave 5, one agent (after wave 4):
 

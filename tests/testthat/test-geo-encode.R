@@ -301,3 +301,33 @@ test_that("boxes far from the equator get extra test points on their equator-sid
   # with a coarse tolerance there are fewer points
   expect_lt(length(geo_edge_points(box, tolerance_m = 1)$row), length(edge$row))
 })
+
+test_that("geo_decode() gives the sfc that sf::st_as_sfc() gives from the WKB", {
+  skip_if_no_h3()
+  wkb_of <- function(g) {
+    w <- unclass(sf::st_as_binary(g, EWKB = FALSE))
+    attributes(w) <- NULL
+    w
+  }
+  pt <- sf::st_point(c(1, 2))
+  pol <- rcs_sim_polygons(60, seed = 2, special = TRUE)
+  cases <- list(
+    sf::st_geometry(pol),
+    sf::st_geometry(sf::st_transform(pol, 32626)),
+    sf::st_geometry(rcs_sim_points(40, seed = 1)),
+    sf::st_geometry(rcs_sim_lines(40, seed = 1)),
+    sf::st_sfc(sf::st_point(), sf::st_linestring(), sf::st_polygon(), sf::st_geometrycollection(), crs = 4326),
+    sf::st_sfc(pt, sf::st_point(), sf::st_point(c(3, 4)), crs = 4326),
+    sf::st_sfc(sf::st_point(c(1, 2, 3)), sf::st_point(c(4, 5, 6)), crs = 4326),
+    sf::st_sfc(sf::st_geometrycollection(list(pt, sf::st_linestring(rbind(c(0, 0), c(1, 1))))), pt, crs = 4326),
+    sf::st_sfc(sf::st_multipoint(rbind(c(0, 0), c(1, 1))), crs = 4326),
+    sf::st_sfc(sf::st_polygon(), sf::st_polygon(), crs = 4326),
+    sf::st_sfc(crs = 4326)
+  )
+  for (g in cases) {
+    crs <- sf::st_crs(g)
+    w <- wkb_of(g)
+    expected <- sf::st_as_sfc(structure(w, class = "WKB"), EWKB = FALSE, crs = crs)
+    expect_identical(geo_wkb_to_sfc(w, crs), expected)
+  }
+})

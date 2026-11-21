@@ -65,32 +65,60 @@ op_sync <- function(st) store_sync(st)
 op_delete <- function(st) store_delete(st, "sales/daily", confirm = "sales/daily", history = TRUE)
 op_prune <- function(st) store_prune(st, keep = 0)
 
-# A failure of be_unlock() after the primary's catalog switch: store_write()
-# reports that no catalog changed, writes no secondary, and a repeated
-# create aborts because the dataset exists (R/write.R, write_guard()).
-unlock_defect <- c(
-  be_unlock = "defect: a failing be_unlock() after the primary's catalog switch makes store_write() abort as if nothing changed; see report"
-)
-
-matrix_case <- function(label, setup, op, repair = "sync", default = TRUE, defects = character()) {
+# Every matrix also fails each be_unlock() call of the operation: after a
+# catalog switch that failure only warns (class rcs_warning_unlock), the
+# operation completes, secondaries included, and the lock stays until its
+# timeout (R/write.R, write_guard()).
+matrix_case <- function(label, setup, op, repair = "sync", default = TRUE) {
   test_that(paste("crash points:", label), {
     if (!default) skip_below_level("full")
     g_no_wait()
     local_mocked_bindings(orphan_min_age = 0)
-    left_out <- character()
     for (role in c("primary", "secondary")) {
       at <- if (role == "primary") 1L else 2L
-      done <- crash_matrix(paste(label, "on the", role), setup, op,
-        stub_at = at, points = crash_points(), repair = repair,
-        defects = if (role == "primary") defects else character()
+      crash_matrix(paste(label, "on the", role), setup, op,
+        stub_at = at, points = crash_points(), repair = repair, unlock = TRUE
       )
-      left_out <- c(left_out, done$defects)
     }
-    if (length(left_out) > 0) skip(left_out[[1]])
+    succeed()
   })
 }
 
-matrix_case("store_write(mode = \"create\")", setup_empty(), op_create, default = FALSE, defects = unlock_defect)
+test_that("a failing be_unlock() after the primary's switch warns and the secondaries are written", {
+  g_no_wait()
+  paths <- g_paths(secondaries = 2L)
+  stub <- local_backend_stub(uri = paths[[1]], generic = "be_unlock", fail_at = 1)
+  st <- g_connect(paths)
+  res <- g_capture(op_create(st))
+  expect_null(res$error)
+  expect_false(res$behind)
+  expect_true(any(vapply(res$warnings, inherits, logical(1), "rcs_warning_unlock")))
+  expect_true(dir.exists(file.path(paths[[1]], lock_dir)))
+  state <- g_state(paths)
+  versions <- vapply(state, function(s) unname(s$current["sales/daily"]), character(1))
+  expect_false(anyNA(versions))
+  expect_length(unique(versions), 1L)
+  unlink(file.path(paths[[1]], lock_dir), recursive = TRUE)
+  g_expect_valid(st, "after a failed unlock")
+})
+
+test_that("a failing be_unlock() before the switch still aborts", {
+  g_no_wait()
+  paths <- g_paths(secondaries = 0L)
+  st <- g_connect(paths)
+  location <- st$primary
+  stub <- local_backend_stub(generic = "be_unlock", fail_at = 1)
+  location$backend <- stub_backend(location$backend, stub)
+  # A guarded step that ends without switching the catalogs.
+  step <- function() {
+    write_guard(location)
+    "done"
+  }
+  expect_error(step(), class = "rcs_error_stub")
+  unlink(file.path(paths[[1]], lock_dir), recursive = TRUE)
+})
+
+matrix_case("store_write(mode = \"create\")", setup_empty(), op_create, default = FALSE)
 matrix_case("store_write(mode = \"replace\")", setup_written(), op_replace)
 matrix_case("store_write(mode = \"replace\") with history", setup_written(history = TRUE), op_replace, default = FALSE)
 matrix_case("store_write(mode = \"update\")", setup_written(), op_update, default = FALSE)

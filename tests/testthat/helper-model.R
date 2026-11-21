@@ -203,15 +203,16 @@ g_data_puts <- function(stub) {
 #'   the number of calls to fail, spread evenly over the N calls.
 #' @param repair What follows a call that left a secondary behind with a
 #'   warning: `"sync"` (writes) or `"repeat"` the call.
-#' @param defects Named character vector: generics whose failure exposes a
-#'   known defect (name: generic, value: the defect). Their crash points are
-#'   not run; the caller skips with the defect after the other points.
-#' @return A list, invisibly: `n`, the number of backend calls N of the
-#'   operation, and `defects`, the texts of `defects` whose points were left
-#'   out.
+#' @param unlock `TRUE` to fail every `be_unlock()` call of the operation in
+#'   addition to `points`.
+#' @return The number of backend calls N of the operation, invisibly.
+#'
+#' A failing `be_unlock()` after a catalog switch only warns (class
+#' `rcs_warning_unlock`): the operation completes and the lock stays. The
+#' matrix asserts this, then removes the lock as its timeout would.
 #' @noRd
 crash_matrix <- function(label, setup, op, stub_at, points = NULL, repair = c("sync", "repeat"),
-                         defects = character(), frame = parent.frame()) {
+                         unlock = FALSE, frame = parent.frame()) {
   repair <- match.arg(repair)
   template <- withr::local_tempdir(.local_envir = frame)
   root <- withr::local_tempdir(.local_envir = frame)
@@ -240,8 +241,9 @@ crash_matrix <- function(label, setup, op, stub_at, points = NULL, repair = c("s
   if (!is.null(points) && points < n) {
     ks <- unique(round(seq(1, n, length.out = points + 2L)[-c(1L, points + 2L)]))
   }
-  left_out <- ks[generics[ks] %in% names(defects)]
-  ks <- setdiff(ks, left_out)
+  if (unlock) {
+    ks <- sort(union(ks, which(generics == "be_unlock")))
+  }
   for (k in ks) {
     restore()
     st <- g_connect(paths)
@@ -251,6 +253,16 @@ crash_matrix <- function(label, setup, op, stub_at, points = NULL, repair = c("s
     stub$fail_at <- NULL
     generic <- if (k <= nrow(stub$log)) stub$log$generic[[k]] else "?"
     what <- paste0(label, ": failure at backend call ", k, " of ", n, " (", generic, ")")
+    unlocked <- Filter(function(w) inherits(w, "rcs_warning_unlock"), res$warnings)
+    if (length(unlocked) > 0) {
+      # The switch stands: the call completes, warns, and leaves the lock.
+      lock <- file.path(paths[[stub_at]], lock_dir)
+      testthat::expect(
+        generic == "be_unlock" && is.null(res$error) && !res$behind && dir.exists(lock),
+        paste0(what, ": a failed unlock must only warn, complete the call and leave the lock")
+      )
+      unlink(lock, recursive = TRUE)
+    }
     g_expect_valid(st, paste(what, "- after the failure"), orphans_ok = TRUE)
 
     # Readers see the old or the new version of every dataset.
@@ -298,7 +310,7 @@ crash_matrix <- function(label, setup, op, stub_at, points = NULL, repair = c("s
     g_prune_orphans(st)
     g_expect_valid(st, paste(what, "- at the end, orphans pruned"))
   }
-  invisible(list(n = n, defects = unique(unname(defects[generics[left_out]]))))
+  invisible(n)
 }
 
 # The random-operation test ----------------------------------------------------------
@@ -338,6 +350,10 @@ random_sequence <- function(seed, n_ops = 50L, frame = parent.frame()) {
     stub$fail_at <- fail_at
     res <- g_capture(call())
     stub$fail_at <- NULL
+    if (any(vapply(res$warnings, inherits, logical(1), "rcs_warning_unlock"))) {
+      # A failed unlock after a switch leaves the lock until its timeout.
+      unlink(file.path(paths, lock_dir), recursive = TRUE)
+    }
     if (is.null(fail_at)) {
       if (!is.null(res$error) || res$behind) {
         testthat::fail(paste0("Step ", length(log), " fails without injected failure: ",

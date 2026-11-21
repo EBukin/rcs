@@ -291,8 +291,9 @@ prune_location <- function(st, location, datasets, keep, before, dry_run) {
 
   if (!dry_run) {
     if (length(remove) > 0) {
-      write_guard(location)
+      guard <- write_guard(location)
       written <- with_retry(function() location_write(location, catalog, files, new_history))
+      guard$switched <- TRUE
       store_set_location(st, written)
       delete_quietly(be, c(old$path, manifests, orphan_manifest))
     }

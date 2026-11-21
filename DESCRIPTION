@@ -32,8 +32,10 @@ Imports:
 Suggests:
     bench,
     covr,
+    DBI,
     duckdb,
     gargle,
+    ggplot2,
     h3jsr,
     h3o,
     httr2,
@@ -43,6 +45,7 @@ Suggests:
     rmarkdown,
     terra,
     testthat (>= 3.0.0)
+VignetteBuilder: knitr
 Config/testthat/edition: 3
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

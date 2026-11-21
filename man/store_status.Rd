@@ -2,12 +2,19 @@
 % Please edit documentation in R/inspect.R
 \name{store_status}
 \alias{store_status}
+\alias{print.rcs_status}
 \title{Compare the secondary locations with the primary}
 \usage{
 store_status(st)
+
+\method{print}{rcs_status}(x, ...)
 }
 \arguments{
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}.}
+
+\item{x}{The result of \code{store_status()}.}
+
+\item{...}{Passed on to the tibble's print method.}
 }
 \value{
 A tibble with one row per secondary location and dataset of the
@@ -35,6 +42,11 @@ For each secondary location and each dataset, compares the catalogs held
 by the connection: a copy is the same when its version equals the
 primary's. No file is read and no location contacted; run
 \code{\link[=store_refresh]{store_refresh()}} first to compare what is stored now.
+}
+\details{
+Printed, the addresses are listed once above the table and the
+column \code{location} shows their numbers, so that long addresses stay
+readable; the values of the column are the full addresses.
 }
 \examples{
 root <- file.path(tempdir(), "rcs-example-status")

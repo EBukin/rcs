@@ -30,7 +30,7 @@ The suite has three levels, chosen by the environment variable
 |---|---|---|
 | `cran` | Unit tests: no network, small data, a few seconds per file. | `RCS_TEST_LEVEL` is unset and the tests run on CRAN or under `R CMD check`. |
 | `default` | Adds the integration suite on local folders and property tests of about 200 random cases each. | `RCS_TEST_LEVEL` is unset otherwise, e.g. under `devtools::test()`. |
-| `full` | Adds property tests of up to 2,000 cases, the random-operation test, and the suite against a Google Cloud Storage bucket. | Never; set it. |
+| `full` | Adds property tests of up to 2,000 cases, every point of every crash-point matrix, the long random-operation sequences, and the tests against a Google Cloud Storage bucket. | Never; set it. |
 
 Run each level from the package folder:
 
@@ -94,35 +94,48 @@ silently alters a written file. With it the tests check, among others:
 - an upload that silently alters a file: the MD5 check stops the write;
 - a catalog changed by another writer between the start of a write and its
   catalog switch: the write stops and changes nothing;
-- a stale lock on a local location is taken over, a fresh one blocks.
+- a stale lock on a local location is taken over, a fresh one blocks;
+- a lock that cannot be released after a catalog switch only warns: the
+  operation completes, secondaries included, and the lock stays until its
+  timeout;
+- a reader connected before a write reads the old version when history is
+  kept, and without history gets an error (class
+  `rcs_error_version_not_found`) telling it to run `store_refresh()`.
 
-The **crash-point matrix** goes through every backend call of an
-operation. Each of `store_write()` (every mode), `store_sync()`,
-`store_delete()` and `store_prune()` is first run with a counting stub to
-learn its number of backend calls, N. It is then run N times, failing at
-call 1, 2, ..., N, on the primary and on a secondary. After each failure
-the invariants hold, readers see the old or the new version and never a
-mixture, and repeating the call succeeds.
+The **crash-point matrix** goes through the backend calls of an operation.
+Each of `store_write()` (every mode, and a geospatial write with its index
+table), `store_sync()`, `store_delete()` and `store_prune()` is first run
+with a counting stub to learn its number of backend calls, N. It is then
+run again with the stub failing at one call, on the primary and on a
+secondary: at level `full` at every call 1, 2, ..., N; at level `default`
+at one call of some of the matrices, plus every `be_unlock()` call. After
+each failure the invariants hold, every location holds the old or the new
+version of each dataset and never a mixture, and repeating the call (or
+`store_sync()` for a secondary left behind by a write) succeeds, sends only
+the files that are missing, and ends in the state of a run without failure.
+Orphans left by the failure are then removed by `store_prune()`.
+
+The matrix is the helper `crash_matrix()` in
+`tests/testthat/helper-model.R`; a test file calls it like this:
 
 ```{r}
-stub <- local_backend_stub(uri = primary)
-run_operation()
-n <- stub$calls
-for (k in seq_len(n)) {
-  reset_fixture()
-  stub_reset(stub)
-  stub$fail_at <- k
-  expect_error(run_operation(), class = "rcs_error_stub")
-  stub$fail_at <- NULL
-  expect_store_valid(st, orphans_ok = TRUE)
-}
+crash_matrix("store_sync()",
+  setup = function(paths) { ... },   # builds the start state in three folders
+  op = function(st) store_sync(st),  # the operation on a connection
+  stub_at = 1L,                      # 1: fail in the primary, 2: in a secondary
+  points = NULL,                     # NULL: every call; a number: that many
+  repair = "repeat",                 # what follows a failure
+  unlock = TRUE                      # also fail every be_unlock() call
+)
 ```
 
 ## The random-operation test
 
-At level `full`, seeded sequences of 50 operations run against three local
-locations and, in parallel, against a plain model in memory: a named list
-of data frames per location. The operations are create, replace, update,
+Seeded sequences of operations run against three local locations and, in
+parallel, against a plain model in memory: a named list of data frames per
+location. Level `default` runs two short sequences of 6 operations; level
+`full` runs four sequences of 50 (`tests/testthat/test-random-operations.R`,
+with the helper `random_sequence()` in `helper-model.R`). The operations are create, replace, update,
 delete, sync, copy, prune, rebuild, an injected failure, and switching
 history on or off for the store, the connection or one dataset. After every
 step the invariants hold, and `store_read()` of every dataset from every
@@ -140,9 +153,10 @@ tests themselves):
   on the sphere;
 - the index table's rows equal the cells a brute-force intersection with
   the cell grid finds, for every row that crosses a cell edge;
-- the cells computed for a query contain every cell that a dense grid of
-  points finds, for random shapes including thin strips, large rectangles
-  with four vertices, shapes with holes and single points;
+- the cells computed for a query contain every cell that intersects the
+  query shape, on the sphere and in the plane, among the cells of a dense
+  grid of points around it, for random shapes including thin strips, large
+  rectangles with four vertices, shapes with holes and single points;
 - a spatial read returns exactly the rows of `sf::st_filter()` on the whole
   dataset, for random query shapes and H3 cells of resolutions 2 to 9, and
   a superset with `exact = FALSE`; repeated for a projected CRS, for
@@ -170,16 +184,27 @@ tests themselves):
   Because the counts are exact, tests assert them: listing and describing
   a store open no data file, a filter on partition columns opens only the
   matching files, a repeated identical write uploads no data file.
-- **Messages:** every print method, write summary and error message is
-  covered by a snapshot test (`expect_snapshot()`).
+- **Messages:** print methods, write summaries and error messages are
+  covered by snapshot tests (`expect_snapshot()`).
+- **Interoperability** (`tests/testthat/test-interop.R`, level `default`):
+  DuckDB with its spatial extension reads a written geospatial file as a
+  geometry column with its CRS, and a filter on the `bbox` struct returns
+  the rows of the same filter in R; GDAL (`sf::st_read()`) reads the file
+  when its Parquet driver is present. Each test skips when its tool is
+  missing; common Windows builds of GDAL lack the Parquet driver.
 
-## The cloud suite
+## The cloud tests
 
-At level `full`, the integration tests also run against Google Cloud
-Storage when the environment variable `RCS_TEST_GCS` names a bucket. Each
-run works under a random prefix in that bucket and removes it at the end.
-Use a dedicated, empty bucket, and set up credentials as described in
-`vignette("locations")`:
+At level `full`, the Google Cloud Storage backend is tested against a real
+bucket when the environment variable `RCS_TEST_GCS` names one
+(`tests/testthat/test-backend-gcs.R`): uploads, downloads, MD5 checksums
+read without a download, listing and deletion, a Parquet file streamed
+through Arrow and a file read through GDAL's `/vsigs/` path; and a raster
+is opened through `/vsigs/` (`test-raster.R`). The GDAL tests also need
+`GOOGLE_APPLICATION_CREDENTIALS`. The integration suite itself runs on
+local folders only. Each run works under a random prefix in the bucket and
+removes it at the end. Use a dedicated, empty bucket, and set up
+credentials as described in `vignette("locations")`:
 
 ```{r}
 withr::with_envvar(
