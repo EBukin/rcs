@@ -10,7 +10,8 @@ results <- function(name) {
 }
 write <- results("write")
 counters <- results("write-counters")
-knitr::read_chunk(file.path("..", "..", "bench", "write.R"))
+bench_script <- file.path("..", "..", "bench", "write.R")
+(knitr::read_chunk)(bench_script)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 step_names <- c("geocode", "sort", "serialise", "hash", "check", "upload", "verify", "catalogs")
 ```

@@ -10,7 +10,7 @@ Description: Stores tabular, geospatial vector and raster data in one store
     streamed, sampled and written through it, and every write lands in all
     locations with verified checksums.
 License: MIT + file LICENSE
-URL: https://github.com/EBukin/rcs
+URL: https://ebukin.github.io/rcs/, https://github.com/EBukin/rcs
 BugReports: https://github.com/EBukin/rcs/issues
 Depends:
     R (>= 4.4.0)

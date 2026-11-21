@@ -10,7 +10,8 @@ results <- function(name) {
 }
 read <- results("read")
 counters <- results("read-counters")
-knitr::read_chunk(file.path("..", "..", "bench", "read.R"))
+bench_script <- file.path("..", "..", "bench", "read.R")
+(knitr::read_chunk)(bench_script)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 ```
 

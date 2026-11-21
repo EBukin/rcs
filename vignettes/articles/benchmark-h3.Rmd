@@ -10,7 +10,8 @@ results <- function(name) {
 }
 backends <- results("h3-backends")
 inside <- results("h3-inside-rows")
-knitr::read_chunk(file.path("..", "..", "bench", "h3-backends.R"))
+bench_script <- file.path("..", "..", "bench", "h3-backends.R")
+(knitr::read_chunk)(bench_script)
 ```
 
 This article reads stored results; it does not run the benchmark. The script

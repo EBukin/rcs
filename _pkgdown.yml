@@ -1,5 +1,26 @@
+# The site is built on the author's machine and pushed to the `gh-pages`
+# branch; GitHub only serves the files. Nothing is rendered on GitHub.
+# Publish with: pkgdown::deploy_to_branch()
+url: https://ebukin.github.io/rcs/
+
 template:
   bootstrap: 5
+  light-switch: true
+  theme: atom-one-light
+  theme-dark: atom-one-dark
+  bslib:
+    primary: "#0f766e"
+    link-color: "#0f766e"
+    base_font: {google: "Inter"}
+    heading_font: {google: "Space Grotesk"}
+    code_font: {google: "JetBrains Mono"}
+    font-size-base: 1.02rem
+    headings-font-weight: 600
+    border-radius: 0.6rem
+    navbar-light-bg: "#0b3b3a"
+
+development:
+  mode: release
 
 reference:
   - title: Connect to a store
@@ -49,7 +70,7 @@ reference:
 navbar:
   structure:
     left: [intro, reference, articles, news]
-    right: [search, github]
+    right: [search, github, lightswitch]
 
 articles:
   - title: Using rcs

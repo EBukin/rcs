@@ -10,7 +10,8 @@ results <- function(name) {
 }
 cloud <- results("cloud")
 counters <- results("cloud-counters")
-knitr::read_chunk(file.path("..", "..", "bench", "cloud.R"))
+bench_script <- file.path("..", "..", "bench", "cloud.R")
+(knitr::read_chunk)(bench_script)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 med <- function(case, expression) cloud$median_s[cloud$case == case & cloud$expression == expression]
 ```

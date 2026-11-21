@@ -9,7 +9,8 @@ results <- function(name) {
   tibble::as_tibble(arrow::read_parquet(path, mmap = FALSE))
 }
 scale <- results("scale")
-knitr::read_chunk(file.path("..", "..", "bench", "scale.R"))
+bench_script <- file.path("..", "..", "bench", "scale.R")
+(knitr::read_chunk)(bench_script)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 gb <- function(x) round(x / 1024^3, 2)
 by_size <- do.call(rbind, lapply(split(scale, paste(scale$kind, scale$rows)), function(d) {

@@ -16,7 +16,8 @@ layouts <- results("spatial-layouts")
 # default then ran every step, which is the variant `cells_index_bbox`
 old <- timed$variant == "default" & is.na(timed$default_rule)
 timed$variant[old] <- "cells_index_bbox"
-knitr::read_chunk(file.path("..", "..", "bench", "spatial.R"))
+bench_script <- file.path("..", "..", "bench", "spatial.R")
+(knitr::read_chunk)(bench_script)
 has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 big <- function(x) format(x, big.mark = ",", scientific = FALSE)
 sizes <- sort(unique(timed$rows))
