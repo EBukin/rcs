@@ -37,6 +37,11 @@ site_clean <- function() {
 }
 
 site_publish <- function(remote = "origin", branch = "gh-pages") {
+  # On Windows R points HOME at the Documents folder, where git finds no
+  # user settings; give git the folder it uses everywhere else.
+  if (.Platform$OS.type == "windows") {
+    withr::local_envvar(HOME = Sys.getenv("USERPROFILE"))
+  }
   git <- function(..., dir = "docs") {
     out <- system2("git", c("-C", dir, ...), stdout = TRUE, stderr = TRUE)
     status <- attr(out, "status")
@@ -50,13 +55,9 @@ site_publish <- function(remote = "origin", branch = "gh-pages") {
   }
   url <- git("remote", "get-url", remote, dir = ".")
   sha <- git("rev-parse", "--short", "HEAD", dir = ".")
-  name <- git("config", "user.name", dir = ".")
-  email <- git("config", "user.email", dir = ".")
   unlink(file.path("docs", ".git"), recursive = TRUE, force = TRUE)
   on.exit(unlink(file.path("docs", ".git"), recursive = TRUE, force = TRUE))
   git("init", "--quiet", "--initial-branch", branch)
-  git("config", "user.name", shQuote(name))
-  git("config", "user.email", email)
   git("config", "core.autocrlf", "false")
   git("add", "--all")
   git("commit", "--quiet", "-m", shQuote(paste("Site built from", sha)))
