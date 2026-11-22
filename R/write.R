@@ -665,9 +665,15 @@ stage_update <- function(st, a) {
     old_data <- lapply(kept$path, function(p) {
       restore_types(read_stored(be, p), spec_old)
     })
-    old_data <- vctrs::vec_rbind(!!!old_data)
-    old_data <- old_data[setdiff(names(old_data), old_partition)]
-    all <- vctrs::vec_rbind(old_data, data[names(old_data)])
+    new_data <- data[setdiff(names(data), old_partition)]
+    all <- if (length(old_data) == 0) {
+      # every old file is replaced: only the new rows remain
+      new_data
+    } else {
+      old_data <- vctrs::vec_rbind(!!!old_data)
+      old_data <- old_data[setdiff(names(old_data), old_partition)]
+      vctrs::vec_rbind(old_data, new_data[names(old_data)])
+    }
     order_cols <- c(list(h3 = all$h3), lapply(stats::setNames(key, key), function(k) all[[k]]), list(id = all$.rcs_id))
     all <- all[vctrs::vec_order(tibble::new_tibble(order_cols, nrow = nrow(all)), na_value = "largest"), ]
     staged <- stage(all, NULL, res_old - 1L)
