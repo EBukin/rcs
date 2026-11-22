@@ -274,6 +274,22 @@ test_that("a raster opens from GCS through /vsigs/", {
   skip_if_not(arrow::arrow_with_gcs(), "Arrow is built without GCS.")
   skip_if_not_installed("gargle")
   skip_if_not_installed("httr2")
+  # `raster_open()` sets GDAL credentials process-wide: restore GDAL's options
+  # and the cached GDAL state of `the_auth` afterwards.
+  gdal_opts <- c(
+    "GS_OAUTH2_REFRESH_TOKEN", "GS_OAUTH2_CLIENT_ID", "GS_OAUTH2_CLIENT_SECRET",
+    "GOOGLE_APPLICATION_CREDENTIALS", "GDAL_HTTP_HEADERS"
+  )
+  old_gdal <- terra::getGDALconfig(gdal_opts)
+  names(old_gdal) <- gdal_opts
+  withr::defer(for (k in gdal_opts) terra::setGDALconfig(k, old_gdal[[k]]))
+  fields <- c("gdal_id", "gdal_header", "gdal_warned")
+  old_auth <- mget(fields, envir = the_auth, ifnotfound = list(NULL))
+  rm(list = intersect(fields, ls(the_auth)), envir = the_auth)
+  withr::defer({
+    rm(list = intersect(fields, ls(the_auth)), envir = the_auth)
+    for (f in names(old_auth)) if (!is.null(old_auth[[f]])) assign(f, old_auth[[f]], envir = the_auth)
+  })
   prefix <- paste0("rcs-test-", paste(sample(c(letters, 0:9), 12, TRUE), collapse = ""))
   be <- be_new(paste0(sub("/+$", "", uri), "/", prefix))
   withr::defer({
