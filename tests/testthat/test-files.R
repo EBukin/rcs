@@ -118,6 +118,43 @@ test_that("partition_plan() picks the finest h3 parent within max_files", {
   )
 })
 
+test_that("partition_plan() uses an equal h3_p<r> column of the data, aborts on a different one", {
+  local_geo_mocks()
+  g <- fake_geo()
+  ref <- partition_plan(g, "h3", max_files = 3, h3_max_res = 5L)
+  # an equal column placed elsewhere serves as the partition column
+  given <- g
+  given$h3_p4 <- new_rcs_h3(h3_parent(g$h3, 4L))
+  given <- given[c("h3_p4", setdiff(names(given), "h3_p4"))]
+  plan <- partition_plan(given, "h3", max_files = 3, h3_max_res = 5L)
+  expect_identical(plan$partition, "h3_p4")
+  expect_identical(names(plan$data), names(ref$data))
+  expect_identical(plan$groups, ref$groups)
+  expect_identical(unclass(plan$data$h3_p4), unclass(ref$data$h3_p4))
+  # a user column of another resolution stays a user column
+  other <- g
+  other$h3_p3 <- h3_parent(g$h3, 3L)
+  plan <- partition_plan(other, "h3", max_files = 3, h3_max_res = 5L)
+  expect_identical(plan$partition, "h3_p4")
+  expect_true("h3_p3" %in% names(plan$data))
+  # a different one aborts
+  wrong <- g
+  wrong$h3_p4 <- h3_parent(g$h3, 4L)
+  wrong$h3_p4[1:2] <- bit64::as.integer64(1L)
+  expect_error(
+    partition_plan(wrong, "h3", max_files = 3, h3_max_res = 5L),
+    "h3_p4", class = "rcs_error_prepared"
+  )
+  wrong$h3_p4 <- as.character(h3_parent(g$h3, 4L))
+  expect_error(
+    partition_plan(wrong, "h3", max_files = 3, h3_max_res = 5L),
+    "h3_p4", class = "rcs_error_prepared"
+  )
+  expect_snapshot(error = TRUE, {
+    partition_plan(wrong, "h3", max_files = 3, h3_max_res = 5L)
+  })
+})
+
 test_that("sort_rows() orders by the key in radix order", {
   x <- sim_table()
   sorted <- sort_rows(x, c("shop_id", "date"))

@@ -834,3 +834,186 @@ test_that("the summary of a raster write counts cells, and of a geospatial write
   sent <- paste0(n_data + n_index, "/", n_data + n_index, " files sent")
   expect_true(any(grepl(sent, messages, fixed = TRUE)))
 })
+
+# Prepared data (D27) --------------------------------------------------------------
+
+write_prepared <- function(st, x, mode = "create", ...) {
+  suppressMessages(store_write(st, x, "shapes/prepared",
+    title = "Prepared", description = "Simulated shapes.", mode = mode, ...
+  ))
+}
+
+prepared_entry <- function(st) {
+  catalog <- st$primary$catalog
+  catalog[catalog$dataset == "shapes/prepared", ]
+}
+
+test_that("prepared data equal to the write's own columns are accepted, with the raw version", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_polygons(60, seed = 8)
+  write_shapes(s$st, raw, key = "id", partition = "h3", max_files = 4)
+  prepared <- rcs_geo_add(raw)
+  prepared$.rcs_id <- bit64::as.integer64(rev(seq_len(60)))
+  write_prepared(s$st, prepared, key = "id", partition = "h3", max_files = 4)
+  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_identical(prepared_entry(s$st)$h3_res, 5L)
+  # bbox alone, h3 alone, and integer64 instead of rcs_h3
+  only_bbox <- rcs_geo_add(raw, h3_res = NULL)
+  write_prepared(s$st, only_bbox, mode = "replace", key = "id", partition = "h3", max_files = 4)
+  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  only_h3 <- rcs_geo_add(raw, bbox = FALSE)
+  only_h3$h3 <- rcs_h3_strip(only_h3$h3)
+  write_prepared(s$st, only_h3, mode = "replace", key = "id", partition = "h3", max_files = 4)
+  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_store_valid(s$st)
+})
+
+test_that("a store read of a geospatial dataset can be written again unchanged", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_points(50, seed = 3)
+  write_shapes(s$st, raw, key = "id", partition = "h3", max_files = 4)
+  back <- dplyr::collect(store_open(s$st, "shapes/polygons"))
+  expect_true(all(c("h3", "bbox") %in% names(back)))
+  out <- write_shapes(s$st, back, mode = "replace", key = "id", partition = "h3", max_files = 4)
+  expect_identical(out$status[[1]], "unchanged")
+})
+
+test_that("tampered h3 or bbox abort naming the rows", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_points(40, seed = 2)
+  prepared <- rcs_geo_add(raw)
+  tampered <- prepared
+  tampered$h3[c(4, 9)] <- tampered$h3[c(9, 4)]
+  expect_false(identical(as.character(tampered$h3), as.character(prepared$h3)))
+  err <- expect_error(write_prepared(s$st, tampered, key = "id"), class = "rcs_error_prepared")
+  expect_match(conditionMessage(err), "id = 4", fixed = TRUE)
+  expect_match(conditionMessage(err), "\"auto\"", fixed = TRUE)
+  err <- expect_error(write_prepared(s$st, tampered), class = "rcs_error_prepared")
+  expect_match(conditionMessage(err), "row 4", fixed = TRUE)
+  moved <- prepared
+  moved$bbox$ymax[7] <- moved$bbox$ymax[7] + 0.5
+  err <- expect_error(write_prepared(s$st, moved, key = "id"), class = "rcs_error_prepared")
+  expect_match(conditionMessage(err), "id = 7", fixed = TRUE)
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  local_snapshot_output()
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, tampered, "shapes/prepared", title = "t", description = "d", key = "id")
+  })
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, moved, "shapes/prepared", title = "t", description = "d")
+  })
+})
+
+test_that("cells prepared with another engine abort and name the write's engine", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- sf::st_sf(id = 1:2, geometry = geo_sfc_of_wkt(c(geo_long_edge_wkt(), "POINT(-27 7)")))
+  planar <- rcs_geo_add(x, h3_res = 3L, geocode_engine = "planar")
+  sphere <- rcs_geo_add(x, h3_res = 3L, geocode_engine = "s2")
+  expect_false(identical(as.character(planar$h3), as.character(sphere$h3)))
+  err <- expect_error(write_prepared(s$st, planar, key = "id"), class = "rcs_error_prepared")
+  expect_match(conditionMessage(err), "\"auto\"", fixed = TRUE)
+  expect_match(conditionMessage(err), "geocode_engine", fixed = TRUE)
+  write_prepared(s$st, planar, key = "id", geocode_engine = "planar")
+  expect_identical(prepared_entry(s$st)$geocode_engine, "planar")
+  local_snapshot_output()
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, planar, "shapes/other", title = "t", description = "d", geocode_engine = "s2")
+  })
+})
+
+test_that("h3_res is taken from the cells; mixed or other resolutions abort", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_points(30, seed = 5)
+  write_prepared(s$st, rcs_geo_add(raw, h3_res = 7L), key = "id")
+  expect_identical(prepared_entry(s$st)$h3_res, 7L)
+  write_prepared(s$st, rcs_geo_add(raw, h3_res = 7L), mode = "replace", key = "id", h3_res = 7L)
+  mixed <- rcs_geo_add(raw, h3_res = 7L)
+  mixed$h3[1:3] <- rcs_geo_add(raw[1:3, ], h3_res = 6L)$h3
+  expect_error(write_prepared(s$st, mixed, mode = "replace", key = "id"), class = "rcs_error_prepared")
+  expect_error(
+    write_prepared(s$st, rcs_geo_add(raw, h3_res = 7L), mode = "replace", key = "id", h3_res = 5L),
+    class = "rcs_error_prepared"
+  )
+  expect_error(
+    write_prepared(s$st, rcs_geo_add(raw, h3_res = 7L), mode = "replace", key = "id", geocode = FALSE),
+    class = "rcs_error_prepared"
+  )
+  # bbox alone with geocode = FALSE is fine
+  write_prepared(s$st, rcs_geo_add(raw, h3_res = NULL), mode = "replace", key = "id", geocode = FALSE)
+  expect_true(is.na(prepared_entry(s$st)$h3_res))
+  local_snapshot_output()
+  prepared7 <- rcs_geo_add(raw, h3_res = 7L)
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, mixed, "shapes/other", title = "t", description = "d")
+  })
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, prepared7, "shapes/other", title = "t", description = "d", h3_res = 5L)
+  })
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, prepared7, "shapes/other", title = "t", description = "d", geocode = FALSE)
+  })
+})
+
+test_that("update handles prepared data the same way", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_points(60, seed = 6)
+  write_prepared(s$st, rcs_geo_add(raw), key = "id", partition = "h3", max_files = 4)
+  part <- raw[raw$id <= 10, ]
+  part$value <- part$value + 1
+  plain <- local_store()
+  write_prepared(plain$st, raw, key = "id", partition = "h3", max_files = 4)
+  write_prepared(plain$st, part, mode = "update")
+  write_prepared(s$st, rcs_geo_add(part), mode = "update")
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(plain$st)$version)
+  tampered <- rcs_geo_add(part)
+  tampered$bbox$xmin[1] <- tampered$bbox$xmin[1] - 1
+  expect_error(write_prepared(s$st, tampered, mode = "update"), class = "rcs_error_prepared")
+  expect_error(write_prepared(s$st, rcs_geo_add(part, h3_res = 6L), mode = "update"), class = "rcs_error_prepared")
+  # the stored partition column may come along when equal
+  partition <- prepared_entry(s$st)$partition[[1]]
+  r <- as.integer(sub("h3_p", "", partition))
+  write_prepared(s$st, rcs_geo_add(part, parents = r), mode = "update")
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(plain$st)$version)
+  wrong <- rcs_geo_add(part, parents = r)
+  wrong[[partition]][1] <- h3_parent(rcs_geo_add(sf::st_sf(geometry = geo_sfc_of_wkt("POINT(-10 50)")))$h3, r)
+  expect_error(write_prepared(s$st, wrong, mode = "update"), class = "rcs_error_prepared")
+  expect_store_valid(s$st)
+})
+
+test_that("h3_p<r> user columns are stored and read as rcs_h3", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_polygons(30, seed = 9)
+  write_prepared(s$st, rcs_geo_add(raw, parents = c(3L, 1L)), key = "id")
+  spec <- columns_from_json(prepared_entry(s$st)$columns)
+  expect_identical(spec$r_type[[match("h3_p3", spec$name)]], list(class = "integer64"))
+  back <- dplyr::collect(store_open(s$st, "shapes/prepared"))
+  expect_s3_class(back$h3_p3, "rcs_h3")
+  expect_s3_class(back$h3_p1, "rcs_h3")
+  expect_identical(as.character(back$h3_p3), as.character(h3_parent(back$h3, 3L)))
+})
+
+test_that("with partition = \"h3\" an equal h3_p<r> serves as partition column, a different one aborts", {
+  skip_if_no_h3()
+  s <- local_store()
+  raw <- rcs_sim_polygons(60, seed = 10)
+  write_shapes(s$st, raw, key = "id", partition = "h3", max_files = 4)
+  partition <- shapes_entry(s$st)$partition[[1]]
+  r <- as.integer(sub("h3_p", "", partition))
+  prepared <- rcs_geo_add(raw, parents = r)
+  write_prepared(s$st, prepared, key = "id", partition = "h3", max_files = 4)
+  expect_identical(prepared_entry(s$st)$partition[[1]], partition)
+  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  wrong <- prepared
+  wrong[[partition]][1] <- h3_parent(rcs_geo_add(sf::st_sf(geometry = geo_sfc_of_wkt("POINT(-10 50)")))$h3, r)
+  expect_error(
+    write_prepared(s$st, wrong, mode = "replace", key = "id", partition = "h3", max_files = 4),
+    partition, class = "rcs_error_prepared"
+  )
+})
