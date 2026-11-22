@@ -145,7 +145,10 @@ test_that("an unreachable primary on GCS aborts with the hint of every client", 
   local_mocked_bindings(location_exists = function(be) {
     cli::cli_abort("Injected: no route to the bucket.", class = "rcs_error_backend")
   })
-  expect_snapshot(store_connect("gs://example-bucket/store"), error = TRUE)
+  expect_snapshot(
+    store_connect("gs://example-bucket/store", auth = rcs_auth_gcs(token = "some-token")),
+    error = TRUE
+  )
 })
 
 test_that("store_create() initialises an empty store once", {
@@ -207,4 +210,117 @@ test_that("store_refresh() aborts when the primary cannot be reached", {
   stub$fail_at <- 1
   expect_error(store_refresh(st), class = "rcs_error_backend")
   expect_error(store_refresh(list()), class = "rcs_error_object")
+})
+
+# Credentials ------------------------------------------------------------------
+
+# Fake bucket for connecting: every Arrow file system made for a credential is
+# a new object (with a serial `id` and the token it was made with) over one
+# temporary folder that holds `<bucket>/<prefix>/...`. No network.
+local_fake_bucket <- function(env = parent.frame()) {
+  dir <- withr::local_tempdir(.local_envir = env)
+  sub_fs <- arrow::SubTreeFileSystem$create(dir, arrow::LocalFileSystem$create())
+  made <- new.env()
+  made$fs <- list()
+  gcs_reset_clients()
+  withr::defer(gcs_reset_clients(), envir = env)
+  testthat::local_mocked_bindings(
+    arrow_with_gcs = function() TRUE, .package = "arrow", .env = env
+  )
+  testthat::local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    auth_http_token = function(body) stop("no network in this test"),
+    auth_arrow_fs_create = function(token, expiration) {
+      fs <- list(
+        id = length(made$fs) + 1L,
+        token = token,
+        GetFileInfo = function(x) sub_fs$GetFileInfo(x),
+        OpenInputStream = function(path) sub_fs$OpenInputStream(path),
+        OpenOutputStream = function(path) {
+          dir.create(dirname(file.path(dir, path)), recursive = TRUE, showWarnings = FALSE)
+          sub_fs$OpenOutputStream(path)
+        },
+        DeleteFiles = function(paths) sub_fs$DeleteFiles(paths)
+      )
+      made$fs[[length(made$fs) + 1L]] <- fs
+      fs
+    },
+    .env = env
+  )
+  made
+}
+
+test_that("store_connect(auth = ) gives each GCS location its credential", {
+  made <- local_fake_bucket()
+  withr::local_options(rcs.quiet = TRUE)
+  token_a <- rcs_auth_gcs(token = "token-a")
+  token_b <- rcs_auth_gcs(token = "token-b")
+  key <- file.path(withr::local_tempdir(), "key.json")
+  jsonlite::write_json(list(type = "service_account", private_key = "x"), key, auto_unbox = TRUE)
+  local_mocked_bindings(auth_token = function(auth) {
+    if (identical(auth$source, "token")) auth$cache$given_token else "token-key"
+  })
+
+  store_create("gs://bucket-a/store", auth = token_a)
+  store_create("gs://bucket-b/store/", auth = token_b)
+  local <- withr::local_tempdir()
+
+  # One object for every GCS location
+  st <- store_connect("gs://bucket-a/store", secondary = c("gs://bucket-b/store", local), auth = token_a, create = TRUE)
+  expect_identical(st$primary$backend$auth, token_a)
+  expect_identical(st$secondary[[1]]$backend$auth, token_a)
+  expect_false("auth" %in% names(st$secondary[[2]]$backend))
+
+  # A key file path
+  st <- store_connect("gs://bucket-a/store", auth = key)
+  expect_identical(st$primary$backend$auth, rcs_auth_gcs(key = key))
+
+  # A list named by address, as given; addresses left out use the default
+  st <- store_connect(
+    "gs://bucket-a/store", secondary = c("gs://bucket-b/store/", local),
+    auth = list("gs://bucket-a/store" = token_a, "gs://bucket-b/store/" = token_b)
+  )
+  expect_identical(st$primary$backend$auth, token_a)
+  expect_identical(st$secondary[[1]]$backend$auth, token_b)
+  expect_false(identical(st$primary$backend$auth$cache, st$secondary[[1]]$backend$auth$cache))
+  expect_true(all(vapply(store_locations(st), function(l) l$available, logical(1))))
+  expect_store_valid(st)
+
+  shown <- paste(capture.output(str(st)), collapse = "
+")
+  expect_no_match(shown, "token-a", fixed = TRUE)
+  expect_no_match(shown, "token-b", fixed = TRUE)
+})
+
+test_that("two connections to one address with different credentials keep separate file systems", {
+  made <- local_fake_bucket()
+  withr::local_options(rcs.quiet = TRUE)
+  token_a <- rcs_auth_gcs(token = "token-a")
+  token_b <- rcs_auth_gcs(token = "token-b")
+  store_create("gs://bucket/store", auth = token_a)
+  st_a <- store_connect("gs://bucket/store", auth = token_a)
+  st_b <- store_connect("gs://bucket/store", auth = token_b)
+  fs_a <- be_arrow_fs(st_a$primary$backend)$fs
+  fs_b <- be_arrow_fs(st_b$primary$backend)$fs
+  expect_identical(fs_a$token, "token-a")
+  expect_identical(fs_b$token, "token-b")
+  expect_false(identical(fs_a$id, fs_b$id))
+  expect_identical(be_arrow_fs(st_a$primary$backend)$fs$id, fs_a$id)
+  expect_length(made$fs, 2)
+})
+
+test_that("auth = is checked", {
+  withr::local_options(cli.width = 250)
+  expect_snapshot(error = TRUE, {
+    store_connect("gs://bucket/store", auth = 1)
+    store_connect("gs://bucket/store", auth = list("gs://bucket/store", "x"))
+    store_connect("gs://bucket/store", auth = list("gs://other/store" = "key.json"))
+    store_connect("gs://bucket/store", auth = list("gs://bucket/store" = 1))
+    store_create("gs://bucket/store", auth = TRUE)
+  })
+})
+
+test_that("store_connect() and store_create() take auth", {
+  expect_identical(names(formals(store_connect)), c("primary", "secondary", "env", "history", "create", "auth"))
+  expect_identical(names(formals(store_create)), c("location", "history", "auth"))
 })
