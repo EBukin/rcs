@@ -12,8 +12,11 @@
 #      box, and, when the cell filter is used, (`h3` in the covering cells,
 #      or `.rcs_id` among the index rows whose `h3` is in the covering
 #      cells);
-#   5. exact test in `collect()`: `sf::st_intersects()` with the query shape
-#      in the data CRS, under the user's `sf::sf_use_s2()` setting.
+#   5. exact test in `collect()` (`exact_keep()`): the candidate rows against
+#      the query shape in the data CRS, on the sphere or in the plane as the
+#      exact engine says (plan 0002, D34, D35): by default the dataset's
+#      geocoding engine, and the session's `sf::sf_use_s2()` setting for
+#      datasets written without one.
 #
 # The cell filter (with the index table) is used only where it pays off
 # (`spatial_use_cells()`): when the query has no box (across the antimeridian
@@ -37,8 +40,8 @@
 #' Keeps the rows of a geospatial dataset whose geometry intersects `y`. The
 #' filter first prunes files by their extent, then pushes a candidate test
 #' on the stored bounding boxes (`bbox`) into the scan, and finally, in
-#' `collect()`, tests the candidate rows exactly with [sf::st_intersects()]
-#' under the session's [sf::sf_use_s2()] setting. When the box of `y` is
+#' `collect()`, tests the candidate rows exactly, on the sphere or in the
+#' plane as `exact_engine` says. When the box of `y` is
 #' much larger than `y` itself (a thin diagonal strip, a line), or `y`
 #' crosses the antimeridian or holds a pole, files are also pruned by their
 #' H3 cell range and the candidate test also requires the stored H3 cell
@@ -57,12 +60,24 @@
 #'   query must be valid, or the call aborts with the reason and advice to
 #'   repair them with [sf::st_make_valid()] (only the query is checked). The
 #'   check reads them as the exact test does: on the sphere (s2) when the
-#'   query is in the data's geographic CRS and [sf::sf_use_s2()] is on, in
-#'   the plane otherwise.
+#'   query is in the data's geographic CRS and the exact engine works on the
+#'   sphere (`"s2"`, `"auto"`, or `"session"` with [sf::sf_use_s2()] on), in
+#'   the plane otherwise. A query valid only in the plane can be used with
+#'   `exact_engine = "planar"`.
 #' @param exact `TRUE` runs the exact test in `collect()`. `FALSE` returns
 #'   the candidate rows, a superset of the intersecting rows, with a
 #'   message saying so. The candidate set is also returned, with the same
 #'   message, when the geometry is not collected.
+#' @param exact_engine How the exact test reads the geometries. `NULL` (the
+#'   default) follows the geocoding engine the dataset was written with
+#'   (`geocode_engine` of [store_write()]): `"s2"` tests on the sphere (a
+#'   row invalid on the sphere is first rebuilt by s2, as the write did),
+#'   `"planar"` in the plane of the coordinates, `"auto"` on the sphere for
+#'   rows valid on the sphere and in the plane for the others; a dataset
+#'   written before the engine was recorded follows the session's
+#'   [sf::sf_use_s2()] setting. `"s2"`, `"planar"` or `"session"` (the
+#'   [sf::sf_use_s2()] setting) override the dataset's engine. Data in a
+#'   projected CRS are always tested in the plane of that CRS.
 #' @return The query with the filter added.
 #' @seealso [store_read()], whose `intersects` argument does the same.
 #' @export
@@ -80,17 +95,67 @@
 #'   store_intersects(area) |>
 #'   dplyr::collect()
 #' unlink(location, recursive = TRUE)
-store_intersects <- function(q, y, exact = TRUE) {
+store_intersects <- function(q, y, exact = TRUE, exact_engine = NULL) {
   local_trace("store_intersects")
   validate_query(q)
   check_flag(exact)
-  query_intersects(q, y, exact, call = rlang::current_env())
+  call <- rlang::current_env()
+  check_exact_engine(exact_engine, call = call)
+  query_intersects(q, y, exact, call = call, exact_engine = exact_engine)
+}
+
+# Values of `exact_engine` a user may give (`NULL` follows the dataset).
+exact_engines <- c("s2", "planar", "session")
+
+#' Check the `exact_engine` argument
+#'
+#' @param exact_engine `NULL`, or one of `exact_engines`.
+#' @param call Environment for errors.
+#' @return `NULL`, invisibly; aborts with class `rcs_error_argument`.
+#' @noRd
+check_exact_engine <- function(exact_engine, call = caller_env()) {
+  if (is.null(exact_engine) ||
+    (rlang::is_string(exact_engine) && exact_engine %in% exact_engines)) {
+    return(invisible(NULL))
+  }
+  given <- if (rlang::is_string(exact_engine)) {
+    cli::format_inline("{.val {exact_engine}}")
+  } else {
+    cli::format_inline("{.obj_type_friendly {exact_engine}}")
+  }
+  cli::cli_abort(
+    c(
+      "{.arg exact_engine} must be {.code NULL} or one of {.val {exact_engines}}.",
+      x = "It is {given}."
+    ),
+    class = "rcs_error_argument", call = call
+  )
+}
+
+#' The exact engine of a read
+#'
+#' @param exact_engine `NULL`, or a value accepted by `check_exact_engine()`.
+#' @param entry The entry of the dataset (of the version read).
+#' @return One of `"s2"`, `"planar"`, `"auto"`, `"session"`: the argument
+#'   when given, else the dataset's `geocode_engine`; `"session"` when that
+#'   is `NA` or missing (datasets written before it was recorded).
+#' @noRd
+exact_engine_of <- function(exact_engine, entry) {
+  if (!is.null(exact_engine)) {
+    return(exact_engine)
+  }
+  engine <- entry[["geocode_engine"]]
+  if (length(engine) != 1 || is.na(engine) || !engine %in% catalog_geocode_engines) {
+    return("session")
+  }
+  as.character(engine)
 }
 
 #' Apply the spatial filter to a query
 #'
 #' Steps 1 to 4, and the state for step 5 in `q$spatial`:
-#' `list(tests = list(list(shape, exact, bbox, cells, ids, geographic)),
+#' `list(tests = list(list(shape, exact, bbox, cells, ids, geographic,
+#' exact_engine)),
 #' cells = <number of covering cells>, index = <TRUE when index rows were
 #' used>)`, one element of `tests` per call.
 #'
@@ -101,11 +166,13 @@ store_intersects <- function(q, y, exact = TRUE) {
 #' @param plan `NULL`, or the result of `spatial_plan()` for `y` and
 #'   `exact`, computed on the files of the read target before the query was
 #'   built (`query_new()`).
+#' @param exact_engine `NULL`, or the user's `exact_engine` (checked).
 #' @return The query.
 #' @noRd
-query_intersects <- function(q, y, exact = TRUE, call = caller_env(), plan = NULL) {
+query_intersects <- function(q, y, exact = TRUE, call = caller_env(), plan = NULL,
+                             exact_engine = NULL) {
   if (is.null(plan)) {
-    plan <- spatial_plan(q, y, exact, call = call)
+    plan <- spatial_plan(q, y, exact, call = call, exact_engine = exact_engine)
   }
   test <- plan$test
   q <- query_set_files(q, q$files[q$files$path %in% plan$paths, ])
@@ -130,7 +197,7 @@ query_intersects <- function(q, y, exact = TRUE, call = caller_env(), plan = NUL
 #' @return A list: `test` (the element of `q$spatial$tests`) and `paths`
 #'   (the paths of the files of `q$files` kept by the file pruning).
 #' @noRd
-spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
+spatial_plan <- function(q, y, exact = TRUE, call = caller_env(), exact_engine = NULL) {
   entry <- q$entry
   if (!identical(entry$kind, "geospatial")) {
     cli::cli_abort(
@@ -146,7 +213,8 @@ spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
       class = "rcs_error_argument", call = call
     )
   }
-  check_query_valid(y, entry$crs, call = call)
+  exact_engine <- exact_engine_of(exact_engine, entry)
+  check_query_valid(y, entry$crs, exact_engine, call = call)
   covering <- rlang::try_fetch(
     geo_covering(y, entry$h3_res, entry$crs),
     rcs_error_h3_input = function(e) {
@@ -170,7 +238,8 @@ spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
   }
   test <- list(
     shape = covering$shape, exact = exact, bbox = covering$bbox,
-    cells = cells, ids = ids$.rcs_id, geographic = geographic
+    cells = cells, ids = ids$.rcs_id, geographic = geographic,
+    exact_engine = exact_engine
   )
 
   keep <- spatial_keep_files(q$files, test, ids$h3_main)
@@ -181,18 +250,23 @@ spatial_plan <- function(q, y, exact = TRUE, call = caller_env()) {
 #'
 #' Checks the geometries of an `sf` or `sfc` query (never the data) in the
 #' notion of validity the exact test uses: on the sphere (s2) when the query
-#' is in the data CRS, that CRS is geographic and [sf::sf_use_s2()] is on;
-#' in the plane otherwise (a query in another CRS is densified along its
+#' is in the data CRS, that CRS is geographic and the exact engine works on
+#' the sphere (`"s2"`, `"auto"`, and `"session"` when [sf::sf_use_s2()] is
+#' on); in the plane otherwise (`"planar"`; a query in another CRS is
+#' densified along its
 #' straight edges before its change of CRS, `geo_covering()`, so its edges
 #' are read in the plane). A `bbox` is a rectangle and H3 cells are cell
 #' polygons: neither is checked. Empty geometries are valid.
 #'
 #' @param y The query.
 #' @param crs The data CRS (`entry$crs`).
+#' @param exact_engine The exact engine of the read (`exact_engine_of()`).
+#'   With `"s2"` or `"auto"`, an abort on the sphere advises
+#'   `exact_engine = "planar"`.
 #' @param call Environment for errors.
 #' @return `NULL`, invisibly; aborts with class `rcs_error_argument`.
 #' @noRd
-check_query_valid <- function(y, crs, call = caller_env()) {
+check_query_valid <- function(y, crs, exact_engine = "session", call = caller_env()) {
   if (!inherits(y, c("sf", "sfc"))) {
     return(invisible(NULL))
   }
@@ -202,8 +276,13 @@ check_query_valid <- function(y, crs, call = caller_env()) {
     return(invisible(NULL))
   }
   target <- geo_crs_from_json(crs)
-  sphere <- sf::st_crs(g) == target && isTRUE(sf::st_is_longlat(g)) &&
+  on_sphere <- switch(exact_engine,
+    s2 = ,
+    auto = TRUE,
+    planar = FALSE,
     suppressMessages(sf::sf_use_s2())
+  )
+  sphere <- sf::st_crs(g) == target && isTRUE(sf::st_is_longlat(g)) && on_sphere
   reason <- if (sphere) {
     s2::s2_is_valid_detail(g)$reason
   } else {
@@ -219,7 +298,10 @@ check_query_valid <- function(y, crs, call = caller_env()) {
     c(
       "The query geometry is not valid {notion}.",
       x = "{reason[[bad[[1]]]]}{where}.",
-      i = "Repair it with {.fn sf::st_make_valid}."
+      i = "Repair it with {.fn sf::st_make_valid}.",
+      i = if (sphere && exact_engine %in% c("s2", "auto")) {
+        "Or test in the plane with {.code exact_engine = \"planar\"}."
+      }
     ),
     class = "rcs_error_argument", call = call
   )
@@ -392,8 +474,9 @@ spatial_predicate <- function(test) {
 #' Step 5: the exact test on collected rows
 #'
 #' Counts `rows_candidate`. With every test exact and the geometry read,
-#' keeps the rows that intersect every query shape; otherwise returns the
-#' candidate rows and informs that they are a candidate set.
+#' keeps the rows that intersect every query shape (`exact_keep()` with the
+#' engine of each test); otherwise returns the candidate rows and informs
+#' that they are a candidate set.
 #'
 #' @param q The `rcs_query`.
 #' @param data The rows, after `rows_finish()`.
@@ -421,10 +504,80 @@ spatial_exact <- function(q, data) {
     if (!any(keep)) {
       break
     }
-    hits <- suppressMessages(sf::st_intersects(geometry[keep], test$shape))
-    keep[keep] <- lengths(hits) > 0
+    engine <- test$exact_engine %||% "session"
+    keep[keep] <- exact_keep(geometry[keep], test$shape, engine, test$geographic)
   }
   data[keep, ]
+}
+
+#' The exact test of the spatial filter
+#'
+#' Which geometries intersect the query shape, read as the exact engine
+#' says (plan 0002, D34, D35):
+#'
+#' * data in a projected CRS (`geographic = FALSE`), and `"planar"`: in the
+#'   plane of the data CRS coordinates (`sf_use_s2(FALSE)`);
+#' * `"session"`: [sf::st_intersects()] under the session's
+#'   [sf::sf_use_s2()] setting;
+#' * `"s2"`: on the sphere; a geometry invalid on the sphere is first
+#'   rebuilt (`geo_rebuild()`), as the geocoding did, and tested in the
+#'   plane when the rebuild fails;
+#' * `"auto"`: on the sphere for geometries valid on the sphere, in the
+#'   plane for the others; an invalid geometry whose box spans 180 degrees
+#'   or more (it has no planar reading) is rebuilt on the sphere.
+#'
+#' Empty geometries never intersect.
+#'
+#' @param geometry An `sfc` (the candidate rows) in the data CRS.
+#' @param shape An `sfc` of length 1 in the data CRS (the query shape).
+#' @param exact_engine `"s2"`, `"planar"`, `"auto"` or `"session"`.
+#' @param geographic Whether the data CRS is geographic.
+#' @return A logical vector, one element per geometry.
+#' @noRd
+exact_keep <- function(geometry, shape, exact_engine, geographic) {
+  n <- length(geometry)
+  if (n == 0) {
+    return(logical())
+  }
+  if (!isTRUE(geographic) || identical(exact_engine, "planar")) {
+    return(exact_planar(geometry, shape))
+  }
+  if (identical(exact_engine, "session")) {
+    return(lengths(suppressMessages(sf::st_intersects(geometry, shape))) > 0)
+  }
+  wkb <- geo_wkb(geometry)
+  geog <- s2::as_s2_geography(wk::wk_set_geodesic(wkb, TRUE), check = FALSE)
+  valid <- s2::s2_is_valid(geog)
+  valid[is.na(valid)] <- FALSE
+  special <- geo_is_special(geo_envelope(wkb))
+  planar <- rep(FALSE, n)
+  for (i in which(!valid)) {
+    if (identical(exact_engine, "auto") && !special[[i]]) {
+      planar[[i]] <- TRUE
+      next
+    }
+    copy <- tryCatch(geo_rebuild(geog[i]), error = function(e) NULL)
+    if (is.null(copy) || length(copy) != 1) {
+      planar[[i]] <- TRUE
+    } else {
+      geog[i] <- copy
+    }
+  }
+  keep <- rep(FALSE, n)
+  sphere <- which(!planar)
+  if (length(sphere) > 0) {
+    target <- geo_as_s2(geo_wkb(shape))
+    keep[sphere] <- lengths(s2::s2_intersects_matrix(geog[sphere], target)) > 0
+  }
+  if (any(planar)) {
+    keep[planar] <- exact_planar(geometry[planar], shape)
+  }
+  keep
+}
+
+# The exact test in the plane of the data CRS coordinates.
+exact_planar <- function(geometry, shape) {
+  without_s2(lengths(sf::st_intersects(geometry, shape)) > 0)
 }
 
 # Whether collecting `q` runs an exact test, which needs the geometry.

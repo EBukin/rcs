@@ -155,7 +155,7 @@ test_that("an earlier version is read from the history with that version's entry
   current <- st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"]
   expect_same_table(store_read(st, "sales/daily", version = current), fx$data[["sales/daily"]], daily_key)
   q <- store_open(st, "sales/daily", version = old)
-  expect_snapshot(q)
+  expect_snapshot(print(dplyr::arrange(q, shop_id, date, ts)))
   expect_identical(q$entry$version, old)
   expect_identical(nrow(dplyr::collect(q)), nrow(fx$old))
 })
@@ -321,6 +321,7 @@ test_that("rasters are read as SpatRaster, cropped by intersects, and refuse tab
   expect_true(e[["xmin"]] <= -28 && e[["xmax"]] >= -27 && e[["ymin"]] <= 7 && e[["ymax"]] >= 8)
   expect_snapshot(store_read(fx$st, "grids/sim", layer > 1, geometry = FALSE), error = TRUE)
   expect_snapshot(store_read(fx$st, "grids/sim", columns = 1, exact = FALSE), error = TRUE)
+  expect_snapshot(store_read(fx$st, "grids/sim", exact_engine = "planar"), error = TRUE)
   expect_snapshot(store_open(fx$st, "grids/sim"), error = TRUE)
   expect_snapshot(store_sample(fx$st, "grids/sim"), error = TRUE)
   withr::local_options(rcs.trace = TRUE)
