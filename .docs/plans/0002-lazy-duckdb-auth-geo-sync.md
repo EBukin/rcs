@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-10 done (2026-11-22)
+- **Status:** done (2026-11-22)
 
 ## Goal
 
@@ -557,14 +557,69 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 11: Y1 and Y2 in parallel, then Y3
 
-- [ ] **Y1. Check and full suite.** Fresh session: `devtools::document()` (no change), `devtools::check(cran = TRUE)` 0/0/0, the whole suite at `RCS_TEST_LEVEL=full` with `RCS_TEST_GCS=gs://rcs-test`, file by file (plan 0001, wave 6). Reports pass or fail per file.
-- [ ] **Y2. Coverage and neutrality.** Coverage as in plan 0001 wave 6 (`type = "none"` with `testthat::test_dir()` on the installed package): ≥ 90% overall, ≥ 80% per file. Neutrality scan (owner decision 6): a separate subagent first writes search patterns from the neutrality rule (plan 0001, "Context"): names of real countries, regions, cities, seas named after places where they could identify a place, organisations and people; e-mail addresses other than the author's in `DESCRIPTION`; user names and home paths; machine names; tokens, keys and secrets (`ya29.`, `-----BEGIN`, `client_secret`, `refresh_token` values). It runs them (case-insensitive, word boundaries) over every tracked file, file names, `bench/results/` contents and the content and messages of all commits (`git log -p --all`), reviews each hit, and reports hits with file and line. The patterns are kept only in its session, never committed. A hit that is not a false positive fails Y2.
-- [ ] **Y3. End to end and cleanup** (after Y1 and Y2 pass).
+- [x] **Y1. Check and full suite.** Fresh session: `devtools::document()` (no change), `devtools::check(cran = TRUE)` 0/0/0, the whole suite at `RCS_TEST_LEVEL=full` with `RCS_TEST_GCS=gs://rcs-test`, file by file (plan 0001, wave 6). Reports pass or fail per file.
+- [x] **Y2. Coverage and neutrality.** Coverage as in plan 0001 wave 6 (`type = "none"` with `testthat::test_dir()` on the installed package): ≥ 90% overall, ≥ 80% per file. Neutrality scan (owner decision 6): a separate subagent first writes search patterns from the neutrality rule (plan 0001, "Context"): names of real countries, regions, cities, seas named after places where they could identify a place, organisations and people; e-mail addresses other than the author's in `DESCRIPTION`; user names and home paths; machine names; tokens, keys and secrets (`ya29.`, `-----BEGIN`, `client_secret`, `refresh_token` values). It runs them (case-insensitive, word boundaries) over every tracked file, file names, `bench/results/` contents and the content and messages of all commits (`git log -p --all`), reviews each hit, and reports hits with file and line. The patterns are kept only in its session, never committed. A hit that is not a false positive fails Y2.
+- [x] **Y3. End to end and cleanup** (after Y1 and Y2 pass).
   1. Delete `dev/prototype/` and, if `dev/` is then empty, the `^dev$` line of `.Rbuildignore`.
   2. On the test bucket through public functions only: `store_auth_check()`; writes of a table, polygons and a raster; `store_open()` print; DuckDB views in both modes and the spatial filter; DuckDB writes of a table and of polygons; `rcs_geo_add()` round trip; a sync from a local secondary with `delete = TRUE`; prefix removed.
   3. Rebuild the pkgdown site into `docs/` with the existing local build script (it renders stored results only). If it would run a `bench/` file, stop and report.
   4. Fill "Outcome" (including that `bench/` was not re-validated), set the status to done, commit and push.
 
+#### Results of wave 11
+
+- Y1 (detached worktree at 1b30dbd): `devtools::document()` changed nothing. `devtools::check(cran = TRUE)` with tests: 0 errors, 0 warnings, 1 note. The note is about a hidden `.git` file, which exists only in a git worktree (there `.git` is a file, not a folder); not a package defect. The checks on the main checkout at the wave 8 gate (with tests) and the wave 9 gate were 0/0/0. Whole suite at `RCS_TEST_LEVEL=full`, `RCS_TEST_GCS=gs://rcs-test`, file by file: 40 files, 20,767 expectations, 0 failed, 0 errors, 2 skipped (GDAL without its Parquet driver; the short random sequences, skipped on purpose at `full`). No bucket prefix left behind.
+- Y2 coverage (method of plan 0001 wave 6, default level): 95.39% overall. Lowest file `R/raster.R` at 91.8%; no file below 80%. 13,511 expectations, 0 failed, 16 skipped during the run.
+- Y2 neutrality scan (patterns kept in the scanning agent's session only): three real hits in tracked files, fixed in one round:
+  - The local temporary folder path in example output of 40 pages under `docs/reference/` and in `docs/search.json`. The local site build (`pkgdown/deploy.R`) now replaces the temporary folder with `/tmp/Rtmp`. The rebuild in Y3 showed a second path, the credentials file printed by the `rcs_auth_gcs()` example, so the build now also replaces the home folder with `~`.
+  - `test-write-duckdb.R` used the time zone `Asia/Tokyo`; it now uses the fixed offset `Etc/GMT-9`.
+  - The wave 6 record above named two cities; reworded.
+  - Left for the owner: the old path stays in the history of commit `a5d65a58a` (main) and of the `gh-pages` branch. Removing it needs a history rewrite and a force push.
+  - Allowed, recorded for the owner: author bylines in `.docs/`, the GitHub handle in `README`, `_pkgdown.yml` and `DESCRIPTION`, and future cloud backends named in plan 0001.
+- Y3:
+  1. `dev/prototype/` deleted; `dev/` was then empty, so the `^dev$` line of `.Rbuildignore` was removed.
+  2. End to end on `gs://rcs-test` through exported functions only, all eight steps passed:
+     - `store_auth_check()`;
+     - writes of a table, polygons and a raster (all MD5 identical);
+     - the `store_open()` print;
+     - DuckDB views in memory, in arrow mode and in a file database (reopened);
+     - the DuckDB spatial filter, equal to Arrow and to `sf` (also `exact = "sql"`);
+     - DuckDB writes of an aggregate and of polygons;
+     - the `rcs_geo_add()` round trip;
+     - a sync from a local secondary with `delete = TRUE`, which needs `force = TRUE` to delete on the primary, as documented.
+     
+     The prefix was removed.
+  3. Site rebuilt into `docs/` with `pkgdown/deploy.R`. The benchmark articles show the bench code unevaluated and read the stored results; no `bench/` file ran.
+
 ## Outcome
 
-Filled in when the status becomes done or superseded.
+Done on 2026-11-22. Every work package (Z to Y3) shipped:
+
+- Lazy reads with `store_open()` and its print.
+- DuckDB views, a file database and the spatial filter in DuckDB.
+- Writing from DuckDB: tables, geospatial data, partitions and geocoding engines.
+- Credentials (`rcs_auth_gcs()`, `store_auth_check()`) and sync in both directions.
+- The H3 class and the geospatial verbs.
+- Robust geocoding engines on the write and read sides.
+- Documentation: README, the getting-started vignette, the DuckDB, locations and geospatial vignettes, and the testing article.
+
+Nothing was dropped. Final state:
+
+- Whole suite at `full` with GCS: 20,767 expectations, 0 failed.
+- Coverage 95.4%.
+- Check 0/0/0 on the main checkout.
+
+Deviations and known limitations, all recorded under the results of each wave:
+
+- Partition values that differ only by case collide on Windows.
+- Temporary DuckDB cell tables stay on the connection until it closes.
+- `ts_local` comes back with time zone `UTC` from DuckDB and `""` from Arrow.
+- In arrow mode, BIGINT literals are pushed into the Arrow scan as doubles. The package works around this with `IN (SELECT unnest([...]::BIGINT[]))`.
+- `"h3"` mixed with other partition columns aborts for DuckDB input only.
+- A struct field named `HUGEINT` in upper case is a false positive of the unsupported-type check.
+- The fetch of distinct cells for the partition map is one query.
+
+Not done by decision: `bench/` was not run and not re-validated. The benchmark results and articles show the state before this plan.
+
+Open for the owner: the local temporary folder path is still in the git history (commit `a5d65a58a` on main and the `gh-pages` branch). Removing it needs a history rewrite and a force push.
+
+Execution record: `.docs/handoffs/0003-plan-0002-execution.md`, and the owner change of 2026-11-22 under "Orchestration".
