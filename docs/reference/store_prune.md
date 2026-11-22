@@ -59,7 +59,7 @@ A tibble, invisibly, one row per file removed (or to be removed with
 root <- file.path(tempdir(), "rcs-example-prune")
 store_create(file.path(root, "primary"), history = TRUE)
 #> ✔ Created an empty store in
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-prune/primary.
+#>   /tmp/Rtmp/rcs-example-prune/primary.
 st <- store_connect(file.path(root, "primary"))
 sales <- rcs_sim_table(100, seed = 1)
 for (i in 1:3) {
@@ -70,15 +70,15 @@ for (i in 1:3) {
   )
 }
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-prune/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-prune/primary  1/1
 #>   files sent  13.7 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 #> ℹ Replacing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-prune/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-prune/primary  1/1
 #>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 #> ℹ Replacing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-prune/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-prune/primary  1/1
 #>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 store_prune(st, keep = 1, dry_run = TRUE)

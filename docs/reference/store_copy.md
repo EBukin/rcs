@@ -55,14 +55,14 @@ replaces are deleted when the dataset keeps no history, as in
 root <- file.path(tempdir(), "rcs-example-copy")
 store_create(file.path(root, "copy"))
 #> ✔ Created an empty store in
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/copy.
+#>   /tmp/Rtmp/rcs-example-copy/copy.
 st <- store_connect(file.path(root, "primary"), create = TRUE)
 store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
   title = "Daily sales", description = "Simulated daily sales.",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/primary  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-copy/primary  2/2
 #>   files sent  23.7 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 st <- store_connect(file.path(root, "primary"),
@@ -72,12 +72,12 @@ store_copy(st, "sales/daily",
   from = file.path(root, "primary"), to = file.path(root, "copy")
 )
 #> ℹ Copying "sales/daily" (version bf16efd1aebea856, 2 files) from
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/primary to
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/copy.
+#>   /tmp/Rtmp/rcs-example-copy/primary to
+#>   /tmp/Rtmp/rcs-example-copy/copy.
 #> ✔ 2/2 files sent (23.7 kB) in 0.2s, MD5 verified. Catalogs of
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/copy updated.
+#>   /tmp/Rtmp/rcs-example-copy/copy updated.
 store_status(st)
-#> Locations: [1] C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-copy/copy
+#> Locations: [1] /tmp/Rtmp/rcs-example-copy/copy
 #> # A tibble: 1 × 8
 #>   dataset     location status newer primary_version  location_version
 #>   <chr>       <chr>    <chr>  <chr> <chr>            <chr>           

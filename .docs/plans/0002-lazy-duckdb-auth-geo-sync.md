@@ -493,7 +493,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 #### Results of wave 6
 
 - T2 and T3 are recorded under wave 5 (started early). V2 passed at the first verification; no decision contradicted.
-- V2 (`R/write-duckdb.R`): V1 stored a DuckDB `TIMESTAMP` with the session time zone, so the version depended on the machine; now `TIMESTAMP` is stored without time zone and `TIMESTAMPTZ` as UTC, with DuckDB's unit (version identical under UTC, Tokyo and New York). Unsupported types abort with one line per column. A table write makes one streaming pass. The roxygen of `store_write()` gained a "DuckDB input" section (X1 reworks the whole help).
+- V2 (`R/write-duckdb.R`): V1 stored a DuckDB `TIMESTAMP` with the session time zone, so the version depended on the machine; now `TIMESTAMP` is stored without time zone and `TIMESTAMPTZ` as UTC, with DuckDB's unit (version identical under UTC and two fixed offsets, UTC+9 and UTC-5). Unsupported types abort with one line per column. A table write makes one streaming pass. The roxygen of `store_write()` gained a "DuckDB input" section (X1 reworks the whole help).
 - Known gap, assigned to DW2: unsupported types are detected at top level only; `STRUCT(a HUGEINT)` is written as `struct<a: double>` (precision lost).
 - Gate (whole suite, main at d7e50d4): `document()` updated `store_write.Rd`. No non-ASCII in `R/`. Whole suite at default: 39 files, 13,350 expectations, 0 failed, 0 errors, 16 skipped. `devtools::check(cran = TRUE)` with tests: 0/0/0.
 

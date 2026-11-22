@@ -65,19 +65,19 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
   title = "Daily sales", description = "Simulated daily sales."
 )
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-delete/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-delete/primary  1/1
 #>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 store_delete(st, "daily", confirm = "sales/daily")
 #> ℹ Deleting "sales/daily" and its index table from every location, keeping its
 #>   history.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-delete/primary  2
+#> ✔ primary  /tmp/Rtmp/rcs-example-delete/primary  2
 #>   files deleted  13.7 kB
 #> ✔ "sales/daily" is removed from 1 location.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
 #> Locations:
-#>   primary  local  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-delete/primary
+#>   primary  local  /tmp/Rtmp/rcs-example-delete/primary
 #> History: off (store default)
 #> Datasets: none
 unlink(root, recursive = TRUE)

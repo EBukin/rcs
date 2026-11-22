@@ -46,14 +46,14 @@ with `store_read(version = )`.
 root <- file.path(tempdir(), "rcs-example-history")
 store_create(file.path(root, "primary"), history = TRUE)
 #> ✔ Created an empty store in
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-history/primary.
+#>   /tmp/Rtmp/rcs-example-history/primary.
 st <- store_connect(file.path(root, "primary"))
 sales <- rcs_sim_table(100, seed = 1)
 store_write(st, sales, "sales/daily",
   title = "Daily sales", description = "Simulated daily sales."
 )
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-history/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-history/primary  1/1
 #>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 sales$qty <- sales$qty + 1L
@@ -62,7 +62,7 @@ store_write(st, sales, "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 100 rows in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-history/primary  1/1
+#> ✔ primary  /tmp/Rtmp/rcs-example-history/primary  1/1
 #>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 store_history(st, "sales/daily")

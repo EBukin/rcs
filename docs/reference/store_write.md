@@ -199,9 +199,9 @@ store_write(st, sales, "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
-#> ✔ primary    C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/primary  2/2
+#> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  2/2
 #>   files sent  27.8 kB  0.2s
-#> ✔ secondary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/copy     2/2
+#> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     2/2
 #>   files sent  27.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 
@@ -214,8 +214,8 @@ store_write(st, sales, "sales/daily",
 )
 #> ℹ "sales/daily" is unchanged (version e39540d1414c4708): 200 rows in 2 files
 #>   (partition year).
-#> ✔ primary    C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/primary  unchanged
-#> ✔ secondary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/copy     up
+#> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  unchanged
+#> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     up
 #>   to date
 #> ✔ All 2 locations hold this version.
 
@@ -230,16 +230,16 @@ store_write(st, year_2024, "sales/daily",
 #> ℹ Updating "sales/daily": 1 partition replaced, 0 added, 1 kept.
 #> • year = 2024: 97 rows -> 97 rows
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
-#> ✔ primary    C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/primary  1/2
+#> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/2
 #>   files sent  13.8 kB  0.2s
-#> ✔ secondary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/copy     1/2
+#> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/2
 #>   files sent  13.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
 #> Locations:
-#>   primary      local  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/primary
-#>   secondary 1  local  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-write/copy
+#>   primary      local  /tmp/Rtmp/rcs-example-write/primary
+#>   secondary 1  local  /tmp/Rtmp/rcs-example-write/copy
 #> History: off (store default)
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1

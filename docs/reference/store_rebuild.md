@@ -66,19 +66,19 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-rebuild  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-rebuild  2/2
 #>   files sent  23.7 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 # The catalogs are lost
 unlink(file.path(location, "_catalog.parquet"))
 store_rebuild(st, location)
 #> ✔ Rebuilt the catalogs of
-#>   C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-rebuild: 1 dataset in
+#>   /tmp/Rtmp/rcs-example-rebuild: 1 dataset in
 #>   2 files, 0 earlier versions.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
 #> Locations:
-#>   primary  local  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-rebuild
+#>   primary  local  /tmp/Rtmp/rcs-example-rebuild
 #> History: off (store default)
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated

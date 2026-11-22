@@ -75,7 +75,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
 )
 #> Linking to GEOS 3.14.1, GDAL 3.12.1, PROJ 9.7.1; sf_use_s2() is TRUE
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-intersects  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-intersects  2/2
 #>   files sent  41.1 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(

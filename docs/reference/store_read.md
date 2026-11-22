@@ -133,7 +133,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-read  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
 #>   files sent  38.1 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_read(st, "sales/daily", year == 2023, product == "p07",
@@ -161,7 +161,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
   title = "Polygons", description = "Simulated polygons in open ocean."
 )
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-read  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
 #>   files sent  41.1 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(

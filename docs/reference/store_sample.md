@@ -92,7 +92,7 @@ store_write(st, rcs_sim_table(2000), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 2,000 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-sample  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-sample  2/2
 #>   files sent  89.0 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_sample(st, "sales/daily", n = 5, qty > 10, seed = 42)

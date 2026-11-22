@@ -414,7 +414,7 @@ test_that("DuckDB types map as D38 says: BIGINT as integer64, TIMESTAMP without 
 
   # the files do not depend on the time zone of the R session
   s2 <- duck_store()
-  withr::with_timezone("Asia/Tokyo", duck_write(s2$st, tbl, key = "id"))
+  withr::with_timezone("Etc/GMT-9", duck_write(s2$st, tbl, key = "id"))
   expect_identical(s2$st$primary$catalog$version, entry$version)
 })
 

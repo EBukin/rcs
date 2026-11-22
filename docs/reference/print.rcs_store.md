@@ -52,13 +52,13 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-print/primary  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-print/primary  2/2
 #>   files sent  23.7 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 print(st)
 #> ── rcs store ───────────────────────────────────────────────────────────────────
 #> Locations:
-#>   primary  local  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-print/primary
+#>   primary  local  /tmp/Rtmp/rcs-example-print/primary
 #> History: off (store default)
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated

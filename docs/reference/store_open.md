@@ -75,7 +75,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  C:/Users/EB2/AppData/Local/Temp/Rtmp6hCb4K/rcs-example-open  2/2
+#> ✔ primary  /tmp/Rtmp/rcs-example-open  2/2
 #>   files sent  38.1 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 q <- store_open(st, "daily")

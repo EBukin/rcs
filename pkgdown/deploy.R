@@ -35,9 +35,36 @@ site_clean <- function() {
     keep <- !vapply(entries, function(e) isTRUE(mentions(e$path)), logical(1))
     jsonlite::write_json(entries[keep], index, auto_unbox = TRUE)
   }
+  site_scrub_paths()
   # Without this file GitHub would pass the site through Jekyll.
   file.create(file.path("docs", ".nojekyll"))
   invisible("docs")
+}
+
+site_scrub_paths <- function() {
+  # Example output prints store locations below tempdir(), whose path holds
+  # the local user name; the site shows a neutral temporary folder instead.
+  temp <- normalizePath(dirname(tempdir()), winslash = "/", mustWork = FALSE)
+  forms <- unique(c(
+    temp,
+    gsub("/", "\\", temp, fixed = TRUE),
+    gsub("/", "\\\\", temp, fixed = TRUE)
+  ))
+  pattern <- paste0(
+    "(", paste(gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", forms), collapse = "|"), ")",
+    "[/\\\\]+Rtmp[A-Za-z0-9]+"
+  )
+  files <- list.files("docs", recursive = TRUE, full.names = TRUE)
+  files <- files[grepl("\\.(html|md|json|txt|xml)$", files)]
+  for (file in files) {
+    lines <- readLines(file, encoding = "UTF-8", warn = FALSE)
+    hit <- grepl(pattern, lines, ignore.case = TRUE)
+    if (any(hit)) {
+      lines[hit] <- gsub(pattern, "/tmp/Rtmp", lines[hit], ignore.case = TRUE)
+      writeLines(lines, file, useBytes = TRUE)
+    }
+  }
+  invisible(files)
 }
 
 if (sys.nframe() == 0L || identical(sys.function(1), source)) {
