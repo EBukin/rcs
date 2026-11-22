@@ -361,6 +361,240 @@ test_that("an update of partition = \"h3\" beyond max_files re-partitions the da
   expect_true(all(as.numeric(rows$.rcs_id[rows$id %in% b$id]) > max_id))
 })
 
+# Geocoding engines (plan 0002, D30, D32) ----------------------------------------
+
+write_shapes <- function(st, x, mode = "create", ...) {
+  suppressMessages(store_write(st, x, "shapes/polygons",
+    title = "Polygons", description = "Simulated polygons.", mode = mode, ...
+  ))
+}
+
+# Evaluates `expr` and returns the warnings of class `rcs_warning_s2_rebuild`.
+rebuild_warnings <- function(expr) {
+  out <- list()
+  withCallingHandlers(expr, rcs_warning_s2_rebuild = function(w) {
+    out[[length(out) + 1L]] <<- w
+    invokeRestart("muffleWarning")
+  })
+  out
+}
+
+shapes_entry <- function(st) {
+  catalog <- st$primary$catalog
+  catalog[catalog$dataset == "shapes/polygons", ]
+}
+
+# Records the `geocode_engine` of every `geo_encode()` call into `log`.
+local_engine_log <- function(log, frame = parent.frame()) {
+  real <- geo_encode
+  testthat::local_mocked_bindings(
+    geo_encode = function(x, ..., geocode_engine = "auto") {
+      log$engines <- c(log$engines, geocode_engine)
+      real(x, ..., geocode_engine = geocode_engine)
+    },
+    .package = "rcs", .env = frame
+  )
+}
+
+# `n_valid` simulated polygons, then the two polygons of fact 18 repeated 25
+# times each, shifted by whole degrees of longitude inside the simulation
+# box; `id` numbers the rows.
+geo_with_invalid_repeated <- function(n_valid) {
+  valid <- sf::st_geometry(rcs_sim_polygons(n_valid, seed = 7))
+  invalid <- geo_sfc_of_wkt(geo_invalid_wkt())
+  shifts <- rep(-2:2, each = 5)
+  copies <- lapply(c(1, 2), function(j) {
+    do.call(c, lapply(shifts, function(k) invalid[j] + c(k, 0)))
+  })
+  geometry <- c(valid, sf::st_set_crs(c(copies[[1]], copies[[2]]), 4326))
+  sf::st_sf(id = seq_along(geometry), geometry = geometry)
+}
+
+# Rewrites `_catalog.parquet` of a location folder with `geocode_engine` set
+# to NA, as for a dataset written before plan 0002.
+clear_catalog_engine <- function(root) {
+  path <- file.path(root, "_catalog.parquet")
+  catalog <- arrow::read_parquet(readBin(path, "raw", file.size(path)), as_data_frame = FALSE)
+  catalog$geocode_engine <- arrow::Array$create(rep(NA_character_, catalog$num_rows), arrow::utf8())
+  arrow::write_parquet(catalog, path, compression = "zstd")
+}
+
+test_that("geocode_engine is checked and stored; NA for tables and geocode = FALSE", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, x, "shapes/polygons", title = "t", description = "d", geocode_engine = "sphere")
+  })
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  rebuild_warnings(write_shapes(s$st, x, geocode_engine = "s2"))
+  expect_identical(shapes_entry(s$st)$geocode_engine, "s2")
+  expect_length(rebuild_warnings(write_shapes(s$st, x, mode = "replace", geocode = FALSE)), 0L)
+  expect_identical(shapes_entry(s$st)$geocode_engine, NA_character_)
+  write_sales(s$st, sales_data(20), geocode_engine = "planar")
+  catalog <- s$st$primary$catalog
+  expect_identical(catalog$geocode_engine[catalog$dataset == "sales/daily"], NA_character_)
+  expect_store_valid(s$st)
+})
+
+test_that("store_check() passes for keyless sf datasets written with each engine", {
+  skip_below_level("default")
+  skip_if_no_h3()
+  x <- geo_with_invalid()
+  for (engine in c("auto", "s2", "planar")) local({
+    s <- local_store()
+    warnings <- rebuild_warnings(
+      write_shapes(s$st, x, partition = "h3", max_files = 4, geocode_engine = engine)
+    )
+    expect_identical(shapes_entry(s$st)$geocode_engine, engine)
+    if (engine != "planar") {
+      expect_length(warnings, 1L)
+      expect_match(conditionMessage(warnings[[1]]), ".rcs_id = ", fixed = TRUE)
+    }
+    log <- new.env()
+    local_engine_log(log)
+    checked <- store_check(s$st, "shapes/polygons", x)
+    expect_identical(log$engines, engine)
+    expect_true(all(checked$status == "ok"), label = engine)
+    expect_store_valid(s$st)
+  })
+})
+
+test_that("10,000 rows with 50 sphere-invalid polygons: one partition each, shares sum to 1, keys named", {
+  skip_below_level("default")
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid_repeated(10000)
+  invalid_ids <- 10000L + seq_len(50)
+  warnings <- rebuild_warnings(write_shapes(s$st, x, key = "id", partition = "h3"))
+  expect_length(warnings, 1L)
+  message <- cli::ansi_strip(conditionMessage(warnings[[1]]))
+  for (id in invalid_ids[1:5]) {
+    expect_match(message, paste0("id = ", id, "\\b"))
+  }
+  expect_no_match(message, paste0("id = ", invalid_ids[[6]], "\\b"))
+  expect_match(message, "\\b50\\b")
+
+  expect_identical(shapes_entry(s$st)$geocode_engine, "auto")
+  files <- s$st$primary$files[s$st$primary$files$dataset == "shapes/polygons", ]
+  rows <- vctrs::vec_rbind(!!!lapply(files$path, function(p) {
+    read_stored(s$st$primary$backend, p, c("id", ".rcs_id", "h3"))
+  }))
+  expect_identical(nrow(rows), nrow(x))
+  expect_false(anyDuplicated(rows$id) > 0)
+  expect_setequal(rows$id, x$id)
+  empty <- x$id[sf::st_is_empty(x)]
+  expect_identical(sort(rows$id[is.na(rows$h3)]), sort(empty))
+  expect_true(all(invalid_ids %in% rows$id[!is.na(rows$h3)]))
+
+  index_paths <- s$st$primary$files$path[s$st$primary$files$dataset == "shapes/polygons__h3"]
+  index <- vctrs::vec_rbind(!!!lapply(index_paths, function(p) read_stored(s$st$primary$backend, p)))
+  sums <- tapply(index$share, as.character(index$.rcs_id), sum)
+  expect_true(all(abs(sums - 1) < 1e-6))
+  invalid_rcs_ids <- as.character(rows$.rcs_id[rows$id %in% invalid_ids])
+  expect_true(all(invalid_rcs_ids %in% names(sums)))
+
+  checked <- store_check(s$st, "shapes/polygons", x)
+  expect_true(all(checked$status == "ok"))
+  expect_store_valid(s$st)
+})
+
+test_that("the same data written twice give the same version, with the warning both times", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  warnings <- rebuild_warnings(write_shapes(s$st, x, key = "id", partition = "h3", max_files = 4))
+  v <- shapes_entry(s$st)$version
+  warnings <- c(warnings, rebuild_warnings(
+    out <- write_shapes(s$st, x, mode = "replace", key = "id", partition = "h3", max_files = 4)
+  ))
+  expect_length(warnings, 2L)
+  expect_identical(attr(out, "version"), v)
+  expect_identical(out$status, "unchanged")
+})
+
+test_that("update geocodes with the stored engine; another explicit engine aborts", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  rebuild_warnings(write_shapes(s$st, x[1:15, ], key = "id", partition = "h3", max_files = 20, geocode_engine = "s2"))
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, x[16:22, ], "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", mode = "update", geocode_engine = "auto"
+    )
+  })
+  log <- new.env()
+  local_engine_log(log)
+  warnings <- rebuild_warnings(write_shapes(s$st, x[16:22, ], mode = "update", geocode_engine = "s2"))
+  expect_length(warnings, 1L)
+  rebuild_warnings(write_shapes(s$st, x[16:22, ], mode = "update"))
+  expect_identical(log$engines, c("s2", "s2"))
+  expect_identical(shapes_entry(s$st)$geocode_engine, "s2")
+  expect_store_valid(s$st)
+})
+
+test_that("update of a dataset without engine geocodes new rows with s2; an explicit engine aborts", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  write_shapes(s$st, x[1:15, ], key = "id", partition = "h3", max_files = 20, geocode_engine = "planar")
+  clear_catalog_engine(s$paths[[1]])
+  st <- store_connect(s$paths[[1]])
+  expect_identical(shapes_entry(st)$geocode_engine, NA_character_)
+  expect_snapshot(error = TRUE, {
+    store_write(st, x[16:22, ], "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", mode = "update", geocode_engine = "s2"
+    )
+  })
+  log <- new.env()
+  local_engine_log(log)
+  warnings <- rebuild_warnings(write_shapes(st, x[16:22, ], mode = "update"))
+  expect_length(warnings, 1L)
+  expect_identical(log$engines, "s2")
+  expect_identical(shapes_entry(st)$geocode_engine, NA_character_)
+  expect_store_valid(st)
+})
+
+test_that("the rebuild warning names rebuilt rows and fallbacks, before the upload lines", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  local_snapshot_output()
+  withr::local_options(rcs.quiet = FALSE)
+  expect_snapshot(
+    store_write(s$st, x, "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", key = "id"
+    ),
+    transform = scrub(s$root)
+  )
+  # An empty rebuild fails the check of "auto": both rows fall back.
+  local_mocked_bindings(geo_rebuild = function(geog) {
+    s2::as_s2_geography(rep("GEOMETRYCOLLECTION EMPTY", length(geog)))
+  })
+  expect_snapshot(
+    store_write(s$st, x, "shapes/keyless", title = "Polygons",
+      description = "Simulated polygons."
+    ),
+    transform = scrub(s$root)
+  )
+})
+
+test_that("a rebuilt row is found by a read of its cell", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  rebuild_warnings(write_shapes(s$st, x, key = "id", partition = "h3", max_files = 4))
+  rows <- stored_rows(s$st$primary, "shapes/polygons")
+  # The stored geometries stay invalid on the sphere, so the exact test is
+  # planar here (the exact engine of a dataset is work package N2).
+  local_s2(FALSE)
+  for (id in c(21L, 22L)) {
+    cell <- rows$h3[rows$id == id]
+    got <- store_read(s$st, "shapes/polygons", intersects = cell)
+    expect_true(id %in% got$id, label = paste("row", id))
+  }
+})
+
 # Rasters -----------------------------------------------------------------------
 
 test_that("a raster is written, replaced, and cannot be updated", {
