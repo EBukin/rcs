@@ -408,6 +408,10 @@ files_write_parquet <- function(data, path, schema, rcs, geo = NULL, rows_per_gr
 #'   `"h3"` when `geocode = FALSE`).
 #' @param crs PROJJSON string (geospatial), else `NA`.
 #' @param h3_res Geocode resolution (geospatial with geocodes), else `NA`.
+#' @param geocode_engine The geocoding engine recorded in the entry
+#'   (`"auto"`, `"s2"`, `"planar"`), or `NA` (tables, index tables,
+#'   `geocode = FALSE`). Embedded in the files and the manifest only when not
+#'   `NA`.
 #' @param h3_max_res Finest parent resolution for `partition = "h3"`;
 #'   default `h3_res`.
 #' @param index_of For an index table, the dataset it indexes; else `NA`.
@@ -441,8 +445,8 @@ files_stage <- function(data, dataset, title, description,
                         kind = c("table", "geospatial"),
                         key = NULL, partition = NULL, sorted_by = NULL,
                         crs = NA_character_, h3_res = NA_integer_,
-                        h3_max_res = h3_res, index_of = NA_character_,
-                        source = NA_character_, inputs = NA_character_,
+                        h3_max_res = h3_res, geocode_engine = NA_character_,
+                        index_of = NA_character_, source = NA_character_, inputs = NA_character_,
                         columns = NULL, history = NA,
                         max_files = 50L, rows_per_group = 50000L,
                         keep = NULL, created = now_utc(),
@@ -481,7 +485,8 @@ files_stage <- function(data, dataset, title, description,
     version = strrep("0", 16), n_files = 0, rows = 0, bytes = 0,
     columns = columns_json, key = key, sorted_by = sorted_by,
     partition = plan$partition, source = source, inputs = inputs, crs = crs,
-    h3_res = h3_res, index_of = index_of, history = history
+    h3_res = h3_res, geocode_engine = geocode_engine, index_of = index_of,
+    history = history
   )
   rcs_json <- entry_metadata_json(provisional)
   geospatial <- kind == "geospatial" && "geometry" %in% names(data)
@@ -556,8 +561,8 @@ files_stage <- function(data, dataset, title, description,
     sorted_by = sorted_by, partition = plan$partition, source = source,
     inputs = inputs, crs = crs,
     bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
-    h3_res = h3_res, index_of = index_of, history = history,
-    created = created, updated = now
+    h3_res = h3_res, geocode_engine = geocode_engine, index_of = index_of,
+    history = history, created = created, updated = now
   )
   manifest <- new_manifest(entry, files, written = now)
   manifest_local <- file.path(dir, manifest_path(dataset, version))

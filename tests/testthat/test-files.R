@@ -497,3 +497,62 @@ test_that("partition_plan_h3() matched back from distinct cells equals the paren
     }
   }
 })
+
+# Geocoding engine column (plan 0002, D30) ------------------------------------
+
+embedded_rcs <- function(path) {
+  arrow::ParquetFileReader$create(path)$GetSchema()$metadata$rcs
+}
+
+expected_rcs <- function(entry) {
+  kinds <- schema_kinds("catalog")
+  to_json(row_to_list(entry, kinds[setdiff(names(kinds), c(entry_not_embedded, "geocode_engine"))]))
+}
+
+test_that("files_stage() with geocode_engine = NA embeds no geocode_engine key", {
+  local_geo_mocks()
+  table <- stage_table(rcs_sim_table(200, seed = 1))
+  expect_true(is.na(table$entry$geocode_engine))
+  geo <- files_stage(
+    fake_geo(), "shapes/points", title = "Points", description = "Simulated points.",
+    kind = "geospatial", crs = sf::st_crs(4326)$proj4string, h3_res = 5L,
+    dir = withr::local_tempdir()
+  )
+  expect_true(is.na(geo$entry$geocode_engine))
+  for (out in list(table, geo)) {
+    for (p in out$staged$local) {
+      json <- embedded_rcs(p)
+      expect_false("geocode_engine" %in% names(jsonlite::fromJSON(json, simplifyVector = FALSE)))
+      expect_identical(json, expected_rcs(out$entry))
+    }
+    manifest <- jsonlite::fromJSON(paste(readLines(out$manifest_local, warn = FALSE), collapse = "\n"),
+      simplifyVector = FALSE)
+    expect_false("geocode_engine" %in% names(manifest$entry))
+  }
+})
+
+test_that("files_stage() with a geocoding engine embeds it in the files and the manifest", {
+  local_geo_mocks()
+  out <- files_stage(
+    fake_geo(), "shapes/points", title = "Points", description = "Simulated points.",
+    kind = "geospatial", crs = sf::st_crs(4326)$proj4string, h3_res = 5L,
+    partition = "h3", max_files = 3, geocode_engine = "auto", dir = withr::local_tempdir()
+  )
+  expect_identical(out$entry$geocode_engine, "auto")
+  for (p in out$staged$local) {
+    json <- embedded_rcs(p)
+    expect_identical(jsonlite::fromJSON(json, simplifyVector = FALSE)$geocode_engine, "auto")
+    expect_identical(json, entry_metadata_json(out$entry))
+  }
+  manifest <- manifest_from_json(paste(readLines(out$manifest_local, warn = FALSE), collapse = "\n"))
+  expect_identical(manifest$entry$geocode_engine, "auto")
+  expect_identical(out$manifest$entry$geocode_engine, "auto")
+
+  # the engine is part of the files, so the version differs from the NA write
+  plain <- files_stage(
+    fake_geo(), "shapes/points", title = "Points", description = "Simulated points.",
+    kind = "geospatial", crs = sf::st_crs(4326)$proj4string, h3_res = 5L,
+    partition = "h3", max_files = 3, dir = withr::local_tempdir()
+  )
+  expect_false(identical(plain$entry$version, out$entry$version))
+})

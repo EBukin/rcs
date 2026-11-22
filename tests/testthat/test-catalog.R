@@ -417,3 +417,108 @@ test_that("the geospatial fixture is valid and rebuilds", {
   expect_identical(out$catalog, st$primary$catalog)
   expect_identical(out$files, st$primary$files)
 })
+
+# Geocoding engine column (plan 0002, D30) ------------------------------------
+
+# Rewrites `_catalog.parquet` of a location folder as the schema before plan
+# 0002 had it: without the column `geocode_engine`.
+# Read from memory: a memory-mapped file cannot be overwritten on Windows.
+read_catalog_file <- function(root, as_data_frame = FALSE) {
+  path <- file.path(root, "_catalog.parquet")
+  arrow::read_parquet(readBin(path, "raw", file.size(path)), as_data_frame = as_data_frame)
+}
+
+drop_engine_column <- function(root) {
+  path <- file.path(root, "_catalog.parquet")
+  table <- read_catalog_file(root)
+  arrow::write_parquet(table[, setdiff(names(table), "geocode_engine")], path, compression = "zstd")
+}
+
+catalog_file_columns <- function(root) {
+  names(read_catalog_file(root))
+}
+
+catalog_file_engines <- function(root) {
+  catalog <- read_catalog_file(root, as_data_frame = TRUE)
+  stats::setNames(catalog$geocode_engine, catalog$dataset)
+}
+
+test_that("a catalog file of the old schema is read, validated and rewritten with the column", {
+  fx <- local_test_store(secondaries = 0)
+  drop_engine_column(fx$primary)
+  expect_false("geocode_engine" %in% catalog_file_columns(fx$primary))
+  be <- be_new(fx$primary)
+  loc <- location_read(be)
+  expect_identical(names(loc$catalog), names(catalog_schema()))
+  expect_true(all(is.na(loc$catalog$geocode_engine)))
+  expect_no_error(schema_validate(loc$catalog, "catalog"))
+  written <- location_write(loc, loc$catalog, loc$files)
+  expect_true("geocode_engine" %in% catalog_file_columns(fx$primary))
+  expect_identical(location_read(be)$catalog, loc$catalog)
+  expect_identical(written$token, catalog_token(be))
+})
+
+local_engine_store <- function(frame = parent.frame()) {
+  fx <- local_test_store(tables = TRUE, geospatial = "points", secondaries = 1, frame = frame)
+  fixture_write(fx$st, rcs_sim_points(30, seed = 7), "shapes/engine",
+    title = "Points with engine", description = "Simulated points written with an engine.",
+    geocode_engine = "auto", locations = store_locations(fx$st)[1]
+  )
+  fx$st <- fixture_connect(fx$primary, fx$secondary)
+  fx
+}
+
+test_that("store_rebuild() keeps the geocoding engine from manifests and from file metadata", {
+  skip_below_level("default")
+  withr::local_options(rcs.quiet = TRUE)
+  fx <- local_engine_store()
+  st <- fx$st
+  stored <- st$primary$catalog
+  expect_identical(stored$geocode_engine[stored$dataset == "shapes/engine"], "auto")
+  expect_true(all(is.na(stored$geocode_engine[stored$dataset != "shapes/engine"])))
+
+  store_rebuild(st, fx$primary)
+  expect_identical(catalog_file_engines(fx$primary)[stored$dataset], stats::setNames(stored$geocode_engine, stored$dataset))
+
+  be <- st$primary$backend
+  for (i in seq_len(nrow(stored))) {
+    unlink(file.path(be$root, manifest_path(stored$dataset[[i]], stored$version[[i]])))
+  }
+  store_rebuild(st, fx$primary)
+  rebuilt <- st$primary$catalog
+  expect_identical(rebuilt$version, stored$version)
+  expect_identical(rebuilt$geocode_engine, stored$geocode_engine)
+})
+
+test_that("store_sync() and store_copy() work between an old-format location and a new one", {
+  skip_below_level("default")
+  withr::local_options(rcs.quiet = TRUE)
+  fx <- local_engine_store()
+  secondary <- fx$secondary[[1]]
+  # a table only in the secondary, then the secondary goes back to the old schema
+  fixture_write(fx$st, rcs_sim_table(30, seed = 9), "sales/extra",
+    title = "Extra sales", description = "A table only in the secondary.",
+    locations = store_locations(fx$st)[2]
+  )
+  drop_engine_column(secondary)
+  st <- fixture_connect(fx$primary, fx$secondary)
+  expect_true(all(is.na(st$secondary[[1]]$catalog$geocode_engine)))
+
+  # new primary -> old secondary
+  out <- store_sync(st)
+  expect_true("shapes/engine" %in% unlist(out$datasets))
+  expect_true("geocode_engine" %in% catalog_file_columns(secondary))
+  engines <- catalog_file_engines(secondary)
+  expect_identical(engines[["shapes/engine"]], "auto")
+  expect_true(all(is.na(engines[names(engines) != "shapes/engine"])))
+
+  # old secondary -> new primary
+  drop_engine_column(secondary)
+  st <- fixture_connect(fx$primary, fx$secondary)
+  store_copy(st, "sales/extra", from = secondary, to = fx$primary)
+  engines <- catalog_file_engines(fx$primary)
+  expect_true("sales/extra" %in% names(engines))
+  expect_true(is.na(engines[["sales/extra"]]))
+  expect_identical(engines[["shapes/engine"]], "auto")
+  expect_true("geocode_engine" %in% catalog_file_columns(fx$primary))
+})

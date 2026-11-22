@@ -41,8 +41,8 @@ test_that("the catalog schema has the columns of the plan", {
     c(
       "dataset", "kind", "title", "description", "source", "inputs", "key",
       "sorted_by", "partition", "columns", "version", "n_files", "rows", "bytes",
-      "crs", "bbox", "h3_res", "index_of", "history", "writer", "r_version",
-      "rcs_version", "created", "updated"
+      "crs", "bbox", "h3_res", "geocode_engine", "index_of", "history", "writer",
+      "r_version", "rcs_version", "created", "updated"
     )
   )
   types <- vapply(catalog_schema()$fields, function(f) f$type$ToString(), character(1))
@@ -50,6 +50,7 @@ test_that("the catalog schema has the columns of the plan", {
   expect_identical(types[["key"]], "list<item: string>")
   expect_identical(types[["rows"]], "int64")
   expect_identical(types[["h3_res"]], "int32")
+  expect_identical(types[["geocode_engine"]], "string")
   expect_identical(types[["history"]], "bool")
   expect_identical(types[["created"]], "timestamp[us, tz=UTC]")
   expect_identical(
@@ -341,4 +342,81 @@ test_that("bbox_df() and bbox_na() give the struct's columns", {
   expect_type(bbox_df(1L, 2L, 3L, 4L)$xmin, "double")
   expect_equal(nrow(bbox_na(3)), 3)
   expect_true(all(is.na(bbox_na(3))))
+})
+
+# Geocoding engine column (plan 0002, D30) ------------------------------------
+
+test_that("new_entry() records the geocoding engine, NA by default", {
+  expect_true(is.na(example_entry()$geocode_engine))
+  expect_type(example_entry()$geocode_engine, "character")
+  expect_identical(example_entry(geocode_engine = "auto")$geocode_engine, "auto")
+})
+
+test_that("a catalog file without geocode_engine is read with NA and validated", {
+  catalog <- vctrs::vec_rbind(example_entry(), example_entry("other", geocode_engine = "s2"))
+  old <- catalog[setdiff(names(catalog), "geocode_engine")]
+  expect_no_error(schema_validate(old, "catalog"))
+  back <- schema_as_tibble(old, "catalog")
+  expect_identical(names(back), names(catalog_schema()))
+  expect_identical(back$geocode_engine, c(NA_character_, NA_character_))
+  expect_identical(back[setdiff(names(back), "geocode_engine")], old)
+
+  # through Parquet, with the old schema
+  path <- withr::local_tempfile(fileext = ".parquet")
+  table <- schema_as_arrow(catalog, "catalog")
+  arrow::write_parquet(table[, setdiff(names(table), "geocode_engine")], path)
+  read <- schema_as_tibble(arrow::read_parquet(path, as_data_frame = FALSE), "catalog")
+  expect_true(all(is.na(read$geocode_engine)))
+  expect_identical(names(schema_as_arrow(read, "catalog")), names(catalog_schema()))
+
+  # other columns are still required, and files tables have no optional column
+  expect_error(schema_as_tibble(old[setdiff(names(old), "h3_res")], "catalog"),
+    "h3_res", class = "rcs_error_schema")
+  expect_error(schema_validate(old[setdiff(names(old), "h3_res")], "catalog"),
+    class = "rcs_error_schema")
+})
+
+test_that("the embedded metadata and the manifest leave out geocode_engine when NA", {
+  entry <- example_entry()
+  parsed <- jsonlite::fromJSON(entry_metadata_json(entry), simplifyVector = FALSE)
+  expect_false("geocode_engine" %in% names(parsed))
+  kinds <- schema_kinds("catalog")
+  kept <- setdiff(names(kinds), c(entry_not_embedded, "geocode_engine"))
+  expect_identical(entry_metadata_json(entry), to_json(row_to_list(entry, kinds[kept])))
+
+  manifest <- new_manifest(entry, example_files(), written = as.POSIXct("2026-03-04", tz = "UTC"))
+  json <- manifest_to_json(manifest)
+  expect_false("geocode_engine" %in% names(jsonlite::fromJSON(json, simplifyVector = FALSE)$entry))
+  expect_identical(manifest_from_json(json), manifest)
+})
+
+test_that("the embedded metadata and the manifest hold geocode_engine when set", {
+  entry <- example_entry(geocode_engine = "auto")
+  json <- entry_metadata_json(entry)
+  expect_identical(jsonlite::fromJSON(json, simplifyVector = FALSE)$geocode_engine, "auto")
+  expect_identical(entry_from_metadata_json(json)$geocode_engine, "auto")
+  # the engine is the only difference from the NA entry
+  expect_false(identical(json, entry_metadata_json(example_entry())))
+
+  manifest <- new_manifest(entry, example_files(), written = as.POSIXct("2026-03-04", tz = "UTC"))
+  mjson <- manifest_to_json(manifest)
+  expect_identical(jsonlite::fromJSON(mjson, simplifyVector = FALSE)$entry$geocode_engine, "auto")
+  expect_identical(manifest_from_json(mjson), manifest)
+})
+
+test_that("a manifest and file metadata without geocode_engine give NA", {
+  entry <- example_entry(geocode_engine = "planar")
+  manifest <- new_manifest(entry, example_files(), written = as.POSIXct("2026-03-04", tz = "UTC"))
+  parsed <- jsonlite::fromJSON(manifest_to_json(manifest), simplifyVector = FALSE)
+  parsed$entry$geocode_engine <- NULL
+  back <- manifest_from_json(to_json(parsed))
+  expect_true(is.na(back$entry$geocode_engine))
+  expect_identical(back$entry[setdiff(names(entry), "geocode_engine")],
+    entry[setdiff(names(entry), "geocode_engine")])
+
+  meta <- jsonlite::fromJSON(entry_metadata_json(entry), simplifyVector = FALSE)
+  meta$geocode_engine <- NULL
+  back <- entry_from_metadata_json(to_json(meta))
+  expect_true(is.na(back$geocode_engine))
+  expect_identical(back$dataset, entry$dataset)
 })
