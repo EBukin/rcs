@@ -13,6 +13,10 @@ test_that("store_sync() checks its arguments", {
     store_sync(st, to = paths[[1]])
     store_sync(st, to = "elsewhere")
     store_sync(st, dry_run = NA)
+    store_sync(st, from = "elsewhere")
+    store_sync(st, from = paths[[2]], to = paths[[2]])
+    store_sync(st, delete = "yes")
+    store_sync(st, force = NA)
     store_sync(list())
   })
 })
@@ -156,6 +160,339 @@ test_that("an unavailable secondary is skipped by store_sync()", {
   store_set_location(st, location)
   out <- g_quiet(store_sync(st))
   expect_identical(out$status, c("unavailable", "same"))
+})
+
+# store_sync() in both directions (plan 0002, D29) ---------------------------------
+
+# Current versions stored at each path, named by dataset and sorted.
+s_versions <- function(paths) {
+  lapply(paths, function(p) {
+    catalog <- location_read(g_plain_backend(p))$catalog
+    v <- stats::setNames(catalog$version, catalog$dataset)
+    v[sort(names(v), method = "radix")]
+  })
+}
+
+# Data files of a state (from `g_state()`) that the location at `path`
+# lacks; works for every backend.
+s_missing <- function(path, state) {
+  files <- state$files
+  if (nrow(files) == 0) {
+    return(0L)
+  }
+  stored <- be_md5(g_plain_backend(path), files$path)
+  sum(is.na(stored) | stored != files$md5)
+}
+
+s_catalog_md5 <- function(paths) {
+  files <- c("_catalog.parquet", "_files.parquet", "_history.parquet")
+  lapply(paths, function(p) md5_file(file.path(p, files)))
+}
+
+# Test (a): a dataset deleted on the primary alone is deleted on the
+# secondaries only with `delete = TRUE`; its index table goes with it.
+s_check_delete <- function(paths) {
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  suppressMessages(store_write(st, rcs_sim_polygons(30, seed = 2), "shapes/polygons",
+    title = "Polygons", description = "d"
+  ))
+  expect_store_valid(st)
+  g_quiet(store_delete(g_connect(paths[[1]]), "shapes/polygons", confirm = "shapes/polygons"))
+  store_refresh(st)
+
+  out <- g_quiet(store_sync(st))
+  expect_identical(out$status, c("same", "same"))
+  expect_identical(out$deleted, list(character(), character()))
+  status <- store_status(st)
+  expect_identical(status$status[status$dataset == "shapes/polygons"], c("extra", "extra"))
+  for (p in paths[-1]) {
+    expect_true("shapes/polygons__h3" %in% location_read(g_plain_backend(p))$catalog$dataset)
+  }
+  expect_store_valid(st)
+
+  out <- g_quiet(store_sync(st, delete = TRUE))
+  expect_identical(out$status, c("synced", "synced"))
+  expect_identical(out$deleted, list("shapes/polygons", "shapes/polygons"))
+  expect_identical(out$datasets, list(character(), character()))
+  for (p in paths) {
+    expect_identical(location_read(g_plain_backend(p))$catalog$dataset, "sales/daily")
+    expect_length(be_list(g_plain_backend(p), "shapes")$path, 0)
+  }
+  expect_true(all(store_status(st)$status == "same"))
+  expect_store_valid(st)
+}
+
+# Test (b): a write through a connection whose primary is the first
+# secondary, then a sync from it reaches the primary and the second
+# secondary, sending only the files they lack.
+s_check_offline <- function(paths, stub = NULL) {
+  st <- g_connect(paths)
+  g_write(st, g_sim(30, 1))
+  offline <- g_connect(paths[[2]])
+  g_write(offline, g_sim(12, 5, years = 2025L), mode = "update")
+  g_write(offline, g_sim(15, 6), "sales/summary")
+  state <- g_state(paths[2])[[1]]
+  missing <- c(s_missing(paths[[1]], state), s_missing(paths[[3]], state))
+  expect_identical(missing, c(3L, 3L))
+  store_refresh(st)
+  if (!is.null(stub)) stub_reset(stub)
+
+  expect_warning(
+    out <- suppressMessages(store_sync(st, from = paths[[2]])),
+    class = "rcs_warning_sync_overwrite"
+  )
+  expect_identical(out$location, paths[c(1, 3)])
+  expect_identical(out$status, c("synced", "synced"))
+  expect_identical(out$datasets, list(c("sales/daily", "sales/summary"), c("sales/daily", "sales/summary")))
+  expect_identical(out$files, as.numeric(missing))
+  if (!is.null(stub)) expect_identical(g_data_puts(stub), sum(missing))
+  versions <- s_versions(paths)
+  expect_identical(versions[[1]], versions[[2]])
+  expect_identical(versions[[3]], versions[[2]])
+  expect_rows_same(store_read(st, "sales/daily"), g_read_at(paths[[2]], "sales/daily"))
+  expect_true(all(store_status(st)$status == "same"))
+  expect_store_valid(st)
+}
+
+# Three local locations: sales/daily, sales/summary and old/gone written
+# everywhere; then the primary alone replaces sales/daily and sales/summary
+# and deletes old/gone; later the first secondary alone replaces
+# sales/daily (a conflict: the target is newer).
+s_scenario <- function(frame = parent.frame()) {
+  paths <- g_paths(secondaries = 2L, frame = frame)
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  g_write(st, g_sim(20, 2), "sales/summary")
+  g_write(st, g_sim(10, 7), "old/gone")
+  primary <- g_connect(paths[[1]])
+  g_write(primary, g_sim(20, 3), mode = "replace")
+  g_write(primary, g_sim(20, 4), "sales/summary", mode = "replace")
+  g_quiet(store_delete(primary, "old/gone", confirm = "old/gone"))
+  g_write(g_connect(paths[[2]]), g_sim(20, 5), mode = "replace")
+  store_refresh(st)
+  list(paths = paths, st = st, root = dirname(paths[[1]]), before = s_versions(paths))
+}
+
+test_that("store_sync(delete = TRUE) removes a dataset deleted on the primary, with its index table", {
+  skip_below_level("default")
+  skip_if_no_h3()
+  s_check_delete(g_paths(secondaries = 2L))
+})
+
+test_that("store_sync(from = ) brings offline work on a secondary to every other location", {
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 2L)
+  stub <- local_backend_stub(uri = paths, generic = "be_put", path = "part-")
+  s_check_offline(paths, stub)
+})
+
+test_that("store_sync() stops at a conflict, copies the rest, and force = TRUE copies over it", {
+  skip_below_level("default")
+  sc <- s_scenario()
+  st <- sc$st
+  before <- sc$before
+  warnings <- list()
+  err <- tryCatch(
+    withCallingHandlers(
+      suppressMessages(store_sync(st)),
+      warning = function(w) {
+        warnings[[length(warnings) + 1L]] <<- w
+        invokeRestart("muffleWarning")
+      }
+    ),
+    rcs_error_sync_conflict = function(e) e
+  )
+  expect_s3_class(err, "rcs_error_sync_conflict")
+  expect_match(conditionMessage(err), "sales/daily", fixed = TRUE)
+  out <- err$result
+  expect_s3_class(out, "tbl_df")
+  expect_identical(out$location, sc$paths[2:3])
+  expect_identical(out$status, c("conflict", "synced"))
+  expect_identical(out$conflicts, list("sales/daily", character()))
+  expect_identical(out$datasets, list("sales/summary", c("sales/daily", "sales/summary")))
+  expect_identical(out$deleted, list(character(), character()))
+
+  # The conflicting version stays; everything else is copied.
+  after <- s_versions(sc$paths)
+  expect_identical(after[[2]][["sales/daily"]], before[[2]][["sales/daily"]])
+  expect_identical(after[[2]][["sales/summary"]], before[[1]][["sales/summary"]])
+  expect_identical(after[[3]][c("sales/daily", "sales/summary")], before[[1]])
+  expect_store_valid(st)
+
+  # Source newer: one warning lists every target version overwritten.
+  expect_length(warnings, 1)
+  expect_s3_class(warnings[[1]], "rcs_warning_sync_overwrite")
+  text <- conditionMessage(warnings[[1]])
+  for (v in c(before[[2]][["sales/summary"]], before[[3]][["sales/daily"]], before[[3]][["sales/summary"]])) {
+    expect_match(text, v, fixed = TRUE)
+  }
+  expect_no_match(text, before[[2]][["sales/daily"]], fixed = TRUE)
+
+  # force = TRUE copies the source over the newer target.
+  expect_warning(
+    out <- suppressMessages(store_sync(st, force = TRUE)),
+    class = "rcs_warning_sync_overwrite"
+  )
+  expect_identical(out$status, c("synced", "same"))
+  expect_identical(out$conflicts, list(character(), character()))
+  expect_identical(s_versions(sc$paths)[[2]][c("sales/daily", "sales/summary")], before[[1]])
+  expect_store_valid(st)
+})
+
+test_that("store_sync(from = <secondary>, delete = TRUE) deletes on the primary only with force = TRUE", {
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 2L)
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  g_write(st, g_sim(20, 2), "sales/summary")
+  g_quiet(store_delete(g_connect(paths[[2]]), "sales/summary", confirm = "sales/summary"))
+  store_refresh(st)
+
+  out <- g_quiet(store_sync(st, from = paths[[2]], delete = TRUE))
+  expect_identical(out$location, paths[c(1, 3)])
+  expect_identical(out$status, c("same", "synced"))
+  expect_identical(out$kept, list("sales/summary", character()))
+  expect_identical(out$deleted, list(character(), "sales/summary"))
+  expect_identical(g_listed(paths[[1]]), c("sales/daily", "sales/summary"))
+  expect_identical(g_listed(paths[[3]]), "sales/daily")
+  expect_store_valid(st)
+
+  out <- g_quiet(store_sync(st, from = paths[[2]], delete = TRUE, force = TRUE))
+  expect_identical(out$status, c("synced", "same"))
+  expect_identical(out$deleted, list("sales/summary", character()))
+  expect_identical(out$kept, list(character(), character()))
+  for (p in paths) expect_identical(g_listed(p), "sales/daily")
+  expect_store_valid(st)
+
+  # `datasets` restricts deletions too.
+  g_write(st, g_sim(20, 2), "sales/summary")
+  g_write(st, g_sim(10, 7), "old/gone")
+  g_quiet(store_delete(g_connect(paths[[1]]), "sales/summary", confirm = "sales/summary"))
+  g_quiet(store_delete(g_connect(paths[[1]]), "old/gone", confirm = "old/gone"))
+  store_refresh(st)
+  out <- g_quiet(store_sync(st, datasets = "old/gone", delete = TRUE))
+  expect_identical(out$deleted, list("old/gone", "old/gone"))
+  for (p in paths[-1]) expect_identical(g_listed(p), c("sales/daily", "sales/summary"))
+  expect_store_valid(st)
+})
+
+test_that("a dry run of store_sync() reports copies, deletions and conflicts per target and changes nothing", {
+  skip_below_level("default")
+  sc <- s_scenario()
+  md5 <- s_catalog_md5(sc$paths)
+  g_snapshot_output()
+  expect_snapshot(dry <- store_sync(sc$st, delete = TRUE, dry_run = TRUE), transform = g_scrub(sc$root))
+  expect_identical(dry$status, c("to sync", "to sync"))
+  expect_identical(dry$datasets, list("sales/summary", c("sales/daily", "sales/summary")))
+  expect_identical(dry$deleted, list("old/gone", "old/gone"))
+  expect_identical(dry$conflicts, list("sales/daily", character()))
+  expect_identical(dry$kept, list(character(), character()))
+  expect_identical(s_catalog_md5(sc$paths), md5)
+  expect_identical(s_versions(sc$paths), sc$before)
+
+  # From a secondary holding older versions: conflicts in the primary.
+  expect_snapshot(dry <- store_sync(sc$st, from = sc$paths[[3]], delete = TRUE, dry_run = TRUE),
+    transform = g_scrub(sc$root)
+  )
+  expect_identical(dry$location, sc$paths[1:2])
+  expect_identical(dry$kept, list(character(), character()))
+  expect_identical(s_catalog_md5(sc$paths), md5)
+})
+
+test_that("store_sync() reports kept datasets, conflicts and deletions in its result and summary", {
+  skip_below_level("default")
+  sc <- s_scenario()
+  st <- sc$st
+  g_snapshot_output()
+  expect_snapshot(store_sync(st, delete = TRUE), error = TRUE, transform = g_scrub(sc$root))
+  expect_identical(lapply(sc$paths[-1], g_listed), list(
+    c("sales/daily", "sales/summary"), c("sales/daily", "sales/summary")
+  ))
+
+  # The primary gains a dataset; a sync from the second secondary with
+  # delete = TRUE keeps it, and the first secondary is still in conflict.
+  g_write(g_connect(sc$paths[[1]]), g_sim(10, 8), "new/one")
+  store_refresh(st)
+  expect_snapshot(
+    err <- tryCatch(store_sync(st, from = sc$paths[[3]], delete = TRUE), rcs_error_sync_conflict = function(e) e),
+    transform = g_scrub(sc$root)
+  )
+  out <- err$result
+  expect_named(out, c("location", "status", "datasets", "deleted", "kept", "conflicts", "files", "bytes", "seconds"))
+  expect_identical(out$location, sc$paths[1:2])
+  expect_identical(out$status, c("same", "conflict"))
+  expect_identical(out$kept, list("new/one", character()))
+  expect_identical(out$conflicts, list(character(), "sales/daily"))
+  expect_identical(out$deleted, list(character(), character()))
+  expect_identical(g_listed(sc$paths[[1]]), c("new/one", "sales/daily", "sales/summary"))
+  expect_store_valid(st)
+})
+
+test_that("failures in each phase of store_sync(from = <secondary>, delete = TRUE) keep the invariants; a repeat completes", {
+  skip_below_level("default")
+  g_no_wait()
+  phases <- list(
+    copy = list(generic = "be_put", path = "part-", fail_at = 1:3, warning = "rcs_warning_secondary_behind"),
+    `copy switch` = list(generic = "be_put", path = "^_catalog", fail_at = 1:3, warning = "rcs_warning_secondary_behind"),
+    deletion = list(generic = "be_delete", path = "^old/gone", fail_at = 1, warning = "rcs_warning_delete"),
+    `deletion switch` = list(generic = "be_put", path = "^_catalog", fail_at = 2:4, warning = "rcs_warning_secondary_behind")
+  )
+  for (phase in names(phases)) {
+    p <- phases[[phase]]
+    paths <- g_paths(secondaries = 2L)
+    st <- g_connect(paths)
+    g_write(st, g_sim(20, 1))
+    g_write(st, g_sim(10, 7), "old/gone")
+    offline <- g_connect(paths[[2]])
+    g_write(offline, g_sim(12, 5, years = 2025L), mode = "update")
+    g_quiet(store_delete(offline, "old/gone", confirm = "old/gone"))
+    stub <- local_backend_stub(uri = paths[[3]], generic = p$generic, path = p$path, fail_at = p$fail_at)
+    st <- g_connect(paths)
+
+    res <- g_capture(store_sync(st, from = paths[[2]], delete = TRUE, force = TRUE))
+    expect(is.null(res$error), paste0(phase, ": the sync aborts: ", conditionMessage(res$error %||% simpleError(""))))
+    classes <- unlist(lapply(res$warnings, class))
+    expect(p$warning %in% classes, paste0(phase, ": no warning of class ", p$warning))
+    expect_identical(stub$log$failed[stub$log$failed], rep(TRUE, length(p$fail_at)), label = phase)
+    g_expect_valid(st, phase, orphans_ok = TRUE)
+
+    stub$fail_at <- NULL
+    missing <- s_missing(paths[[3]], g_state(paths[2])[[1]])
+    stub_reset(stub)
+    again <- g_capture(store_sync(st, from = paths[[2]], delete = TRUE, force = TRUE))
+    expect(is.null(again$error) && !again$behind, paste0(phase, ": the repeated sync fails"))
+    expect(g_data_puts(stub) <= missing, paste0(phase, ": the repeat sent more files than were missing"))
+    versions <- s_versions(paths)
+    expect_identical(versions[[1]], versions[[2]], label = phase)
+    expect_identical(versions[[3]], versions[[2]], label = phase)
+    g_expect_valid(st, phase, orphans_ok = phase == "deletion")
+  }
+})
+
+test_that("store_sync() in both directions works with a GCS secondary", {
+  skip_below_level("full")
+  uri <- Sys.getenv("RCS_TEST_GCS")
+  skip_if(!nzchar(uri), "RCS_TEST_GCS is not set.")
+  skip_if_not(arrow::arrow_with_gcs(), "Arrow is built without GCS.")
+  skip_if_no_h3()
+  gcs_paths <- function(frame = parent.frame()) {
+    prefix <- paste0("rcs-test-", paste(sample(c(letters, 0:9), 12, TRUE), collapse = ""))
+    gcs <- paste0(sub("/+$", "", uri), "/", prefix)
+    be <- be_new(gcs)
+    withr::defer(
+      {
+        left <- be_list(be)$path
+        if (length(left) > 0) be_delete(be, left)
+      },
+      envir = frame
+    )
+    local <- g_paths(secondaries = 1L, frame = frame)
+    suppressMessages(store_create(gcs))
+    c(local[[1]], be_new(gcs)$uri, local[[2]])
+  }
+  s_check_delete(gcs_paths())
+  s_check_offline(gcs_paths())
 })
 
 # store_copy() -------------------------------------------------------------------
