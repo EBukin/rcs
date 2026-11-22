@@ -54,7 +54,8 @@ test_that("print() shows the class, the length and hex", {
 })
 
 test_that("tibbles and sf print cells as hex", {
-  x <- tibble::tibble(id = 1:4, h3 = test_cells())
+  cells <- c(test_cells(), new_rcs_h3(bit64::NA_integer64_), new_rcs_h3(bit64::as.integer64(42)))
+  x <- tibble::tibble(id = 1:6, h3 = cells)
   expect_snapshot(print(x))
 
   p <- rcs_sim_points(4)
@@ -178,7 +179,7 @@ test_that("rcs_h3_hex() converts every input form", {
 test_that("rcs_h3_hex() warns for doubles and validates them", {
   expect_identical(rcs_h3_hex(NA_real_), NA_character_)
   # a double cannot hold a resolution-5 cell: its last bits are lost
-  d <- as.double(bit64::as.integer64(test_cells()[1]))
+  d <- suppressWarnings(as.double(bit64::as.integer64(test_cells()[1])))
   expect_snapshot(rcs_h3_hex(d), error = TRUE)
   expect_warning(
     expect_error(rcs_h3_hex(d), class = "rcs_error_h3_input"),
