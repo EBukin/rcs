@@ -194,6 +194,9 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   max_files <- check_count(max_files, call = call)
   rows_per_group <- check_count(rows_per_group, call = call)
   kind <- write_kind(x, call)
+  if (kind == "duckdb") {
+    check_duckdb_mode(mode, call)
+  }
 
   # Step 1: fresh catalogs of every location, then the mode.
   failed <- write_refresh(st, call)
@@ -231,6 +234,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   )
   plan <- if (kind == "raster") {
     stage_raster(args)
+  } else if (kind == "duckdb") {
+    stage_duckdb(args)
   } else if (mode == "update") {
     args$h3_given <- !missing(h3_res) || !missing(geocode)
     stage_update(st, args)
@@ -286,7 +291,15 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
 
 # Arguments and mode ------------------------------------------------------------
 
+# The kind of `x`: "geospatial", "raster", "table", or "duckdb" for a lazy
+# table on a DuckDB connection (written as a table, plan 0002, D36).
 write_kind <- function(x, call = caller_env()) {
+  if (inherits(x, "tbl_lazy")) {
+    if (is_duckdb_lazy(x)) {
+      return("duckdb")
+    }
+    abort_lazy_backend(x, call)
+  }
   if (inherits(x, "sf")) {
     "geospatial"
   } else if (inherits(x, "SpatRaster")) {
@@ -451,7 +464,7 @@ stage_full <- function(a) {
 # when it exceeds `rows_per_group * 100` rows.
 stage_index <- function(index, a, h3_res) {
   index <- index[c(".rcs_id", "h3", "h3_main", "share")]
-  index <- index[vctrs::vec_order(tibble::tibble(h3 = index$h3, id = index$.rcs_id)), ]
+  index <- index[order_radix(tibble::tibble(h3 = index$h3, id = index$.rcs_id)), ]
   large <- nrow(index) > a$rows_per_group * 100
   staged <- files_stage(
     index, index_name(a$dataset),
@@ -665,11 +678,17 @@ stage_update <- function(st, a) {
     old_data <- lapply(kept$path, function(p) {
       restore_types(read_stored(be, p), spec_old)
     })
-    old_data <- vctrs::vec_rbind(!!!old_data)
-    old_data <- old_data[setdiff(names(old_data), old_partition)]
-    all <- vctrs::vec_rbind(old_data, data[names(old_data)])
+    new_data <- data[setdiff(names(data), old_partition)]
+    all <- if (length(old_data) == 0) {
+      # every old file is replaced: only the new rows remain
+      new_data
+    } else {
+      old_data <- vctrs::vec_rbind(!!!old_data)
+      old_data <- old_data[setdiff(names(old_data), old_partition)]
+      vctrs::vec_rbind(old_data, new_data[names(old_data)])
+    }
     order_cols <- c(list(h3 = all$h3), lapply(stats::setNames(key, key), function(k) all[[k]]), list(id = all$.rcs_id))
-    all <- all[vctrs::vec_order(tibble::new_tibble(order_cols, nrow = nrow(all)), na_value = "largest"), ]
+    all <- all[order_radix(tibble::new_tibble(order_cols, nrow = nrow(all))), ]
     staged <- stage(all, NULL, res_old - 1L)
     reference <- all
     cli::cli_inform(c(
@@ -1097,7 +1116,12 @@ check_staged <- function(plan, entry, call) {
   if (nrow(files) == 0) {
     return(invisible())
   }
-  results <- check_serialization(be, entry, files, plan$reference, n = 20L, columns = NULL)
+  # DuckDB input: the plan carries its own check (plan 0002, D40)
+  results <- if (!is.null(plan[["check"]])) {
+    plan[["check"]](be, files, entry)
+  } else {
+    check_serialization(be, entry, files, plan$reference, n = 20L, columns = NULL)
+  }
   bad <- results[results$status == "failed", ]
   if (nrow(bad) > 0) {
     lines <- gsub("([{}])", "\\1\\1", paste0(bad$path, ": ", bad$problem))

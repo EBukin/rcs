@@ -42,18 +42,23 @@ check_key <- function(data, key, call = caller_env()) {
   dup <- vctrs::vec_duplicate_detect(keys)
   if (any(dup)) {
     values <- vctrs::vec_unique(keys[dup, , drop = FALSE])
-    n <- nrow(values)
-    shown <- format_key_values(utils::head(values, 5L))
-    cli::cli_abort(
-      c(
-        "The key {.field {key}} does not identify the rows: {n} key value{?s} repeat{?s/}.",
-        rlang::set_names(shown, "x"),
-        i = if (n > 5) "And {n - 5} more."
-      ),
-      class = c("rcs_error_key", "rcs_error_argument"), call = call
-    )
+    abort_key_repeats(key, utils::head(values, 5L), nrow(values), call)
   }
   invisible(data)
+}
+
+# The abort of repeated key values: `values` holds the first five of the
+# `n` repeated values (also used by the writer of DuckDB tables).
+abort_key_repeats <- function(key, values, n, call) {
+  shown <- format_key_values(values)
+  cli::cli_abort(
+    c(
+      "The key {.field {key}} does not identify the rows: {n} key value{?s} repeat{?s/}.",
+      rlang::set_names(shown, "x"),
+      i = if (n > 5) "And {n - 5} more."
+    ),
+    class = c("rcs_error_key", "rcs_error_argument"), call = call
+  )
 }
 
 # One line per row: `col = value, col = value`.
@@ -238,7 +243,7 @@ check_supplied_partition <- function(supplied, parents, column, call) {
 partition_groups <- function(data, columns) {
   keys <- tibble::as_tibble(as.list(data)[columns])
   loc <- vctrs::vec_group_loc(keys)
-  loc$loc[vctrs::vec_order(loc$key)]
+  loc$loc[order_radix(loc$key)]
 }
 
 # Sorting ---------------------------------------------------------------------
@@ -257,7 +262,22 @@ sort_rows <- function(data, key = NULL) {
   if (length(key) == 0 || nrow(data) < 2) {
     return(data)
   }
-  data[vctrs::vec_order(tibble::as_tibble(as.list(data)[key])), , drop = FALSE]
+  data[order_radix(tibble::as_tibble(as.list(data)[key])), , drop = FALSE]
+}
+
+#' Row order of a data frame in byte order
+#'
+#' The order of the rows by the columns, left to right: characters by their
+#' bytes (C locale, as DuckDB `ORDER BY` on varchar), whatever the session's
+#' collation; `NA` last (`NULLS LAST`); ties in input order. Unlike
+#' `vctrs::vec_order()`, which collates characters by the session locale.
+#'
+#' @param data A data frame (or a vector).
+#' @return Integer row indices.
+#' @noRd
+order_radix <- function(data) {
+  rank <- vctrs::vec_rank(data, ties = "sequential", incomplete = "rank", na_value = "largest")
+  order(rank)
 }
 
 # Schema and columns ----------------------------------------------------------
@@ -534,25 +554,17 @@ files_stage <- function(data, dataset, title, description,
     call = call,
     cells_by_name = kind == "geospatial" || !is.na(index_of)
   )
-  columns_json <- columns_to_json(spec)
-  # the files embed `integer64` for an `rcs_h3` column, so that writing a
-  # column as `rcs_h3` or as `integer64` gives the same files and version;
-  # the catalog and the manifest keep `rcs_h3` (D8)
-  provisional <- new_entry(
+  meta <- files_meta(
     dataset = dataset, kind = kind, title = title, description = description,
-    version = strrep("0", 16), n_files = 0, rows = 0, bytes = 0,
-    columns = columns_to_json(columns_spec_embedded(spec)), key = key, sorted_by = sorted_by,
-    partition = plan$partition, source = source, inputs = inputs, crs = crs,
-    h3_res = h3_res, geocode_engine = geocode_engine, index_of = index_of,
-    history = history
+    spec = spec, key = key, sorted_by = sorted_by, partition = plan$partition,
+    source = source, inputs = inputs, crs = crs, h3_res = h3_res,
+    geocode_engine = geocode_engine, index_of = index_of, history = history
   )
-  rcs_json <- entry_metadata_json(provisional)
+  rcs_json <- files_rcs_json(meta)
   geospatial <- kind == "geospatial" && "geometry" %in% names(data)
   has_cells <- inherits(data[["h3"]], "integer64")
 
-  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
-  tmp_dir <- file.path(dir, paste0(".rcs-tmp-", md5_string(paste(dataset, Sys.getpid(), as.numeric(Sys.time())))))
-  dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+  tmp_dir <- files_tmp_dir(dir, dataset)
   on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
 
   new <- lapply(seq_along(plan$groups), function(i) {
@@ -562,21 +574,113 @@ files_stage <- function(data, dataset, title, description,
     tmp <- file.path(tmp_dir, paste0("part-", i, ".parquet"))
     geo <- if (geospatial) geo_metadata(part, crs)
     files_write_parquet(part, tmp, schema, rcs_json, geo, rows_per_group)
-    range <- if (has_cells) cell_range(part$h3)
-    list(
-      tmp = tmp,
-      values = values,
-      partition_values = partition_values_json(values),
-      rows = nrow(part),
-      bytes = file.size(tmp),
-      md5 = md5_file(tmp),
-      bbox = if (geospatial) bbox_extent(part$bbox) else NULL,
-      h3_min = range[[1]],
-      h3_max = range[[2]]
+    files_file_facts(
+      tmp, values, nrow(part),
+      bbox = if (geospatial) part$bbox,
+      h3 = if (has_cells) part$h3
     )
   })
   rm(data)
 
+  files_finish(meta, new, keep, created, geospatial, has_cells, dir)
+}
+
+# Shared by `files_stage()` and the writer of DuckDB tables
+# (`duckdb_stage_table()`, plan 0002, D38): the entry fields that do not
+# depend on the files, the embedded `rcs` JSON, the facts of one written
+# file, and the version, file names, file rows, entry and manifest.
+
+#' The entry fields of a version that do not depend on its files
+#'
+#' @param spec The `columns` specification (`files_columns_spec()`).
+#' @param partition The partition columns as written.
+#' @inheritParams files_stage
+#' @return A list of the arguments of `new_entry()`, with `columns` (the
+#'   catalog's JSON, `rcs_h3` kept) and `columns_embedded` (the files' JSON,
+#'   `rcs_h3` recorded as `integer64`, D8).
+#' @noRd
+files_meta <- function(dataset, kind, title, description, spec, key, sorted_by,
+                       partition, source, inputs, crs, h3_res, geocode_engine,
+                       index_of, history) {
+  list(
+    dataset = dataset, kind = kind, title = title, description = description,
+    columns = columns_to_json(spec),
+    columns_embedded = columns_to_json(columns_spec_embedded(spec)),
+    key = key, sorted_by = sorted_by, partition = partition, source = source,
+    inputs = inputs, crs = crs, h3_res = h3_res, geocode_engine = geocode_engine,
+    index_of = index_of, history = history
+  )
+}
+
+# The `rcs` JSON every data file of the version embeds: the entry without
+# anything that depends on the files, the time or the session. The files
+# embed `integer64` for an `rcs_h3` column, so that writing a column as
+# `rcs_h3` or as `integer64` gives the same files and version; the catalog
+# and the manifest keep `rcs_h3` (D8).
+files_rcs_json <- function(meta) {
+  provisional <- new_entry(
+    dataset = meta$dataset, kind = meta$kind, title = meta$title,
+    description = meta$description, version = strrep("0", 16), n_files = 0,
+    rows = 0, bytes = 0, columns = meta$columns_embedded, key = meta$key,
+    sorted_by = meta$sorted_by, partition = meta$partition, source = meta$source,
+    inputs = meta$inputs, crs = meta$crs, h3_res = meta$h3_res,
+    geocode_engine = meta$geocode_engine, index_of = meta$index_of,
+    history = meta$history
+  )
+  entry_metadata_json(provisional)
+}
+
+# A fresh folder inside the staging folder for files not yet named; the
+# caller removes it.
+files_tmp_dir <- function(dir, dataset) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  id <- md5_string(paste(dataset, Sys.getpid(), as.numeric(Sys.time()), stats::runif(1)))
+  tmp_dir <- file.path(dir, paste0(".rcs-tmp-", id))
+  dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+  tmp_dir
+}
+
+#' The facts of one data file written to a temporary path
+#'
+#' @param tmp The written file.
+#' @param values The partition values of the file (a named list), or `NULL`.
+#' @param rows Its number of rows.
+#' @param bbox The `bbox` column of its rows (geospatial), or `NULL`.
+#' @param h3 The `h3` column of its rows (with cells), or `NULL`.
+#' @return A list: `tmp`, `values`, `partition_values`, `rows`, `bytes`,
+#'   `md5`, `bbox` (a one-row extent, or `NULL`), `h3_min`, `h3_max`.
+#' @noRd
+files_file_facts <- function(tmp, values, rows, bbox = NULL, h3 = NULL) {
+  range <- if (!is.null(h3)) cell_range(h3)
+  list(
+    tmp = tmp,
+    values = values,
+    partition_values = partition_values_json(values),
+    rows = rows,
+    bytes = file.size(tmp),
+    md5 = md5_file(tmp),
+    bbox = if (!is.null(bbox)) bbox_extent(bbox),
+    h3_min = range[[1]],
+    h3_max = range[[2]]
+  )
+}
+
+#' Name the new files of a version and build its entry and manifest
+#'
+#' Computes the version over the kept and the new files, moves each new
+#' file from its temporary path to its final name in `dir`, and writes the
+#' manifest next to them.
+#'
+#' @param meta `files_meta()`.
+#' @param new A list of `files_file_facts()`, one per new file.
+#' @param keep `NULL`, or the file rows of kept partitions.
+#' @param created `POSIXct`, the `created` of the entry.
+#' @param geospatial,has_cells Whether the files carry boxes and cells.
+#' @param dir The staging folder.
+#' @return The result of `files_stage()`.
+#' @noRd
+files_finish <- function(meta, new, keep, created, geospatial, has_cells, dir) {
+  dataset <- meta$dataset
   keep <- keep %||% files_empty()
   new_pv <- vapply(new, function(f) f$partition_values, character(1))
   if (any(new_pv %in% keep$partition_values)) {
@@ -599,7 +703,7 @@ files_stage <- function(data, dataset, title, description,
   new_rows <- new_file_rows(
     dataset = dataset, version = version, path = paths,
     partition_values = new_pv,
-    rows = vapply(new, function(f) f$rows, numeric(1)),
+    rows = vapply(new, function(f) as.numeric(f$rows), numeric(1)),
     bytes = vapply(new, function(f) as.numeric(f$bytes), numeric(1)),
     md5 = new_md5,
     bbox = if (geospatial) vctrs::vec_rbind(!!!lapply(new, function(f) f$bbox)),
@@ -613,14 +717,15 @@ files_stage <- function(data, dataset, title, description,
   files <- files[order(files$path, method = "radix"), ]
 
   entry <- new_entry(
-    dataset = dataset, kind = kind, title = title, description = description,
-    version = version, n_files = nrow(files), rows = sum(files$rows),
-    bytes = sum(files$bytes), columns = columns_json, key = key,
-    sorted_by = sorted_by, partition = plan$partition, source = source,
-    inputs = inputs, crs = crs,
+    dataset = dataset, kind = meta$kind, title = meta$title,
+    description = meta$description, version = version, n_files = nrow(files),
+    rows = sum(files$rows), bytes = sum(files$bytes), columns = meta$columns,
+    key = meta$key, sorted_by = meta$sorted_by, partition = meta$partition,
+    source = meta$source, inputs = meta$inputs, crs = meta$crs,
     bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
-    h3_res = h3_res, geocode_engine = geocode_engine, index_of = index_of,
-    history = history, created = created, updated = now
+    h3_res = meta$h3_res, geocode_engine = meta$geocode_engine,
+    index_of = meta$index_of, history = meta$history, created = created,
+    updated = now
   )
   manifest <- new_manifest(entry, files, written = now)
   manifest_local <- file.path(dir, manifest_path(dataset, version))
@@ -632,7 +737,7 @@ files_stage <- function(data, dataset, title, description,
     staged = tibble::tibble(path = paths, local = local),
     manifest = manifest,
     manifest_local = manifest_local,
-    partition = plan$partition
+    partition = meta$partition
   )
 }
 

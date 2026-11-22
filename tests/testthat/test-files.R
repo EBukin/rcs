@@ -166,6 +166,30 @@ test_that("sort_rows() orders by the key in radix order", {
   expect_identical(as.character(sort_rows(big, "k")$k), c("5", "9007199254740993", "9007199254740995"))
 })
 
+test_that("sort_rows() and partition_groups() use byte order whatever the collation locale", {
+  x <- tibble::tibble(code = c("b", "B", "a", "A", NA), qty = 1:5)
+  # testthat runs in the C collation; also try locales that collate by language
+  locales <- c("C", "en_US.UTF-8", "English_United States.utf8", "English_United States.1252")
+  tried <- 0L
+  for (locale in locales) {
+    got <- suppressWarnings(withr::with_collate(locale, {
+      if (!identical(Sys.getlocale("LC_COLLATE"), locale)) {
+        NULL
+      } else {
+        list(
+          sorted = sort_rows(x, "code")$code,
+          groups = vapply(partition_groups(x, "code"), function(i) x$code[[i[[1]]]], character(1))
+        )
+      }
+    }))
+    if (is.null(got)) next
+    tried <- tried + 1L
+    expect_identical(got$sorted, c("A", "B", "a", "b", NA), label = locale)
+    expect_identical(got$groups, c("A", "B", "a", "b", NA), label = locale)
+  }
+  expect_gte(tried, 2L)
+})
+
 test_that("files_columns_spec() records the R types Arrow does not restore", {
   x <- sim_table()
   spec <- files_columns_spec(x, files_arrow_schema(x), c(qty = "Quantity sold"))
