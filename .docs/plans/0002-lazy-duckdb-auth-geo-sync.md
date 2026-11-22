@@ -248,6 +248,12 @@ Implementer: files and functions built; the red step; test results (filtered and
 
 Verifier: one row per acceptance item (item, how checked, pass or fail, evidence); files changed outside ownership (`git diff --stat main...HEAD`); decisions contradicted; acceptance items without a test; roxygen tags of new methods; `session closed`.
 
+### Owner change of 2026-11-22 (from wave 5 on)
+
+- Implementers and verifiers run only the tests relevant to their package (own test files and every test file that calls a function they changed), never the whole suite; "whole suite at default passes" in a package's acceptance is read as "its relevant tests pass".
+- The whole suite runs only at the gates of waves 6, 8 and 11. At the other gates step 3 runs the wave's filtered tests and `devtools::check(cran = TRUE, args = "--no-tests")` (0/0/0).
+- Up to 6 R sessions at once (instead of 3).
+
 ### Wave gate
 
 1. Merge the wave's branches into `main`.
