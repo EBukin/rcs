@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-4 done (2026-11-22)
+- **Status:** in execution; waves 0-5 done, T2, T3 and U merged (2026-11-22)
 
 ## Goal
 
@@ -438,12 +438,12 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 5: T1, V1
 
-- [ ] **T1. DuckDB views (in memory) and `store_tables()`.** D10–D15, D19, D12 guards, D22 (secrets via P2); facts 1, 4, 5, 7–10. Prototype: `dev/prototype/duckdb.R`.
+- [x] **T1. DuckDB views (in memory) and `store_tables()`.** D10–D15, D19, D12 guards, D22 (secrets via P2); facts 1, 4, 5, 7–10. Prototype: `dev/prototype/duckdb.R`.
   - Owns: new `R/duckdb.R`, new `tests/testthat/test-duckdb.R`, new `_snaps/duckdb.md`.
   - Tests first (skip without `duckdb`, `DBI`; `local_duckdb()`): (a) `store_duckdb(st)` on a local store with a table, a table partitioned by `year`, a geospatial dataset partitioned by `"h3"` with an empty geometry (an `h3_p<r>=null` partition) and its index table: views with D12 names in both modes; `duckdb_views()` lists them and `duckdb_tables()` holds none of them; `rcs.views`, `rcs.store` contents; (b) column types of each native view equal the Arrow schema of the dataset for every column except `geometry` (`h3_p<r>` `BIGINT`); counts and an integer sum per view equal `store_open() |> collect()`; BIGINT returns `integer64`; `rcs_h3_hex(h3)` in SQL equals `rcs_h3_hex()` in R; (c) `datasets =` upserts only those rows and drops nothing; `datasets = NULL` drops views of deleted datasets; a second store on the same connection aborts; (d) guards of D12 (collisions, `rcs`, schema equal to a database name) and D11 (`con` without `bigint = "integer64"`); (e) `store_tables()` for a store, a prepared connection (views and a user table), with `st` (`current`), a plain DuckDB connection, and an invalid input; (f) native mode on the test bucket at `full` (secret from `auth_duckdb_secret()`, `local_duckdb_spatial()`-style skip for `httpfs`) and arrow mode: counts of (b); no environment variable changed; (g) `spatial = TRUE` (skip via `local_duckdb_spatial()`): `geom` in arrow mode.
   - Acceptance: a–g pass; whole suite at default passes.
 
-- [ ] **V1. Writing from DuckDB, tables: writer.** D36–D38, D40; fact 24. Prototype: none.
+- [x] **V1. Writing from DuckDB, tables: writer.** D36–D38, D40; fact 24. Prototype: none.
   - Owns: new `R/write-duckdb.R`, `R/write.R` (`write_kind()`, the dispatch, the `check_staged()` branch for DuckDB input), `R/files.R` (the shared internal of D38 extracted from `files_stage()`), new `tests/testthat/test-write-duckdb.R`, new `_snaps/write-duckdb.md`.
   - Builds `duckdb_batches()` and `write_progress()` (contracts), the materialised table, the key and partition checks, the streaming writer for one file and for partitions, the landing.
   - Tests first (skip without `duckdb`, `DBI`, `dbplyr`): b, c, g below.
@@ -463,14 +463,29 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
     f. `check = TRUE` detects an altered staged file (writer mocked to change one value).
     g. Landing in a local primary and a local secondary with MD5 verification; the temporary DuckDB table is gone afterwards, also after an error.
 
+#### Results of wave 5 (with T2, T3 of wave 6 and U of wave 7, started early)
+
+- Scheduling: T2, T3 (wave 6) and U (wave 7) depend only on T1 and N2 and own no V1 file, so they started as soon as T1 was merged. V2 and DW1 both own `R/write-duckdb.R`, so they run one after the other (V2 first).
+- T1, T2, T3, U passed at the first verification; V1 needed one fixer round. No decision contradicted.
+- T1 (`R/duckdb.R`): `path` aborted `rcs_error_not_implemented` until T2. Part of D16 done early (an existing table, or a view not in `rcs.views`, with a view's name aborts). The collision check covers the datasets shown plus views already listed. `store_tables(<store>)` is `store_datasets()` plus `duckdb_view` (index tables not listed, rasters `NA`). `rcs.store` is written when missing even with `datasets` given. `rcs.views.refreshed` is a `TIMESTAMP` in UTC.
+- T2: a file created by a call that then aborts is removed (with its `.wal`); a pre-existing file never is. The D17 guard compares paths without case on Windows. Test (f) reads the user table with `DBI::dbReadTable()` and its "join on `h3`" joins the index table and groups by `h3` (loose readings, accepted).
+- T3 (`R/duckdb-tbl.R`): `collect()` turns STRUCT `bbox` into tibbles (as the Arrow path) and drops `.rcs_id`/`geom` in SQL. Known engine difference: a timestamp without time zone (`ts_local`) comes back with tzone `"UTC"` from DuckDB and `""` from Arrow (same instants; D5 does not cover it). The D18 finalizer is checked by hand only. dbplyr's print goes through `collect.rcs_duckdb_tbl`, so it shows restored types.
+- U (`R/duckdb-intersects.R`): new fact, correcting fact 9 for `BIGINT`: in an arrow-mode view DuckDB pushes `h3 IN (<BIGINT literals>)` into the Arrow scan as doubles and Arrow fails above 2^53; arrow mode therefore writes the literals as `IN (SELECT unnest([...]::BIGINT[]))` (native mode keeps the plain list). Temporary cell tables (above 10,000 cells) stay in the connection until it closes (collecting a query twice needs them). The roxygen of `store_intersects()` gained the DuckDB paragraph and `exact = "sql"` (X1 may rework it).
+- V1 (`R/write-duckdb.R`, `R/files.R`, `R/write.R`):
+  - First verification failed on (c): `sort_rows()` used `vctrs::vec_order()`, which orders characters by the session locale, while DuckDB orders by bytes, so a mixed-case varchar key gave different files and versions. Orchestrator decision (plan 0001's intent): R orders file content in byte order whatever the locale, through `order_radix()` (`vctrs::vec_rank()`), used by `sort_rows()`, `partition_groups()`, `stage_index()` and the repartition re-sort. No existing version or snapshot changed. `geo_encode()` still orders with `vec_order()`: assigned to DW1.
+  - Byte identity of (c) reached for integer, double, varchar, date and boolean columns. D40 sample rows are matched by position within the partition. `files_stage()` split into shared internals; MD5s and versions unchanged.
+  - The pre-existing `stage_update()` bug is fixed: when no old file is kept, the new rows alone are re-partitioned (every old partition is replaced, as the update rule says).
+  - Known limitation, pre-existing: partition values that differ only by case collide on a case-insensitive file system (Windows); `store_write()` then fails MD5 verification. Not fixed.
+- Interim gate (main at ede1423): `document()` added `export(store_duckdb)`, `export(store_tables)`, `S3method(dplyr::collect,rcs_duckdb_tbl)`, their Rd pages, `store_open.Rd` and `store_intersects.Rd` updates. No non-ASCII in `R/`. Filtered tests (`duckdb|write|files|query|intersects`): 9 files, 1,441 expectations, 0 failed, 1 skipped. `devtools::check(cran = TRUE, args = "--no-tests")`: 0/0/0. The whole suite runs at the wave 6 gate, after V2.
+
 ### Wave 6: V2, T2, T3
 
-- [ ] **T2. DuckDB file database and reopening.** D16, D17; facts 5, 6. Prototype: `dev/prototype/duckdb.R`.
+- [x] **T2. DuckDB file database and reopening.** D16, D17; facts 5, 6. Prototype: `dev/prototype/duckdb.R`.
   - Owns: `R/duckdb.R`, new `tests/testthat/test-duckdb-file.R`.
   - Tests first: (a) `path`: views and a user table survive closing and reopening with `DBI::dbConnect()` (native); (b) after a new write and a deletion in the store, `store_duckdb(st, path)` adds and drops views, updates `rcs.views`, keeps the user table; (c) `store_duckdb(path = )` without `st` reconnects through `rcs.store`; a file without it aborts; (d) `path` inside a local location aborts; a file stem equal to a used schema aborts; a table or unlisted view with a view's name aborts naming it; (e) arrow mode with `path` informs about refreshing; (f) the local-first workflow: a local store with `auth_token()` and `auth_arrow_fs()` mocked to fail; `store_duckdb()` with a file; an aggregation and a join on `h3` into user tables; a result written back with `store_write()` (from `collect()`); the file reopened; zero calls to the mocked functions; (g) the database file stays under 1 MB after views on a 1e5-row dataset.
   - Acceptance: a–g pass; whole suite at default passes.
 
-- [ ] **T3. DuckDB tables from `store_open()`.** D18, D20, D3; facts 2, 3. Prototype: `dev/prototype/duckdb.R`.
+- [x] **T3. DuckDB tables from `store_open()`.** D18, D20, D3; facts 2, 3. Prototype: `dev/prototype/duckdb.R`.
   - Owns: new `R/duckdb-tbl.R`, `R/query.R` (`store_open()` signature and dispatch only), new `tests/testthat/test-duckdb-tbl.R`.
   - Tests first: lazy result; dbplyr verbs keep the `rcs` field; `collect()` restores factor, ordered, difftime, `integer64`, `rcs_h3` and gives `sf` with the catalog CRS from both `BLOB` and `GEOMETRY` columns; `.rcs_id` and `geom` dropped; equals `store_open() |> collect()` for the same dataset (ordered by key); `version =` aborts; the package-level connection is reused per store and closed by `store_duckdb_close()`; a user `con` without `bigint = "integer64"` aborts.
   - Acceptance: all pass; whole suite at default passes.
@@ -482,7 +497,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
   - Tests first: `rcs_sim_polygons(5000)` and `rcs_sim_points(5000)` loaded into DuckDB as WKB, written with `crs = 4326` in batches of 1,000: data, index table, `geo` metadata and catalog equal those of `store_write()` of the same `sf` (same `h3`, index rows, `.rcs_id` order, same version); the test input holds only integer, double and character attributes; if byte identity cannot be reached, the criterion becomes equal rows and an equal entry except `version`, reported as a deviation; missing `crs` aborts; the polygons of fact 18 warn per D32 with their keys; a spy on `duckdb_batches()` shows batches of at most 1,000 rows.
   - Acceptance: all pass; whole suite at default passes.
 
-- [ ] **U. DuckDB spatial filter.** D28, D35 (through `exact_keep()`). Prototype: `dev/prototype/duckdb-intersects.R`.
+- [x] **U. DuckDB spatial filter.** D28, D35 (through `exact_keep()`). Prototype: `dev/prototype/duckdb-intersects.R`.
   - Owns: new `R/duckdb-intersects.R`, `R/intersects.R` (dispatch at the top of `store_intersects()` only), `R/duckdb-tbl.R` (pending exact test in `collect.rcs_duckdb_tbl()` only), new `tests/testthat/test-duckdb-intersects.R`.
   - Tests first: polygons (2,000) and points (20,000, `partition = "h3"`); queries: 3 H3 cells, a thin diagonal strip (forces cells and index), a polygon with a hole, a bbox, an antimeridian query on the special rows; both modes: `exact = TRUE` returns exactly the rows of the Arrow `store_intersects()`; `exact = FALSE` the same candidate count; `exact = "sql"` (skip via `local_duckdb_spatial()`) the rows of the Arrow path with `exact_engine = "planar"` for every query except the antimeridian one; the SQL holds the index subquery only when `spatial_use_cells()` is `TRUE`; above 10,000 cells a temporary table is used; several calls combine; a table without `bbox` aborts; an aggregate after a pending exact test informs about the candidate set; round trip: for a dataset written by `store_write()` from `sf`, `store_open(engine = "duckdb") |> store_intersects(cells) |> collect()` equals the Arrow read.
   - Acceptance: all pass; whole suite at default passes.

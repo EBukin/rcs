@@ -4,7 +4,15 @@
 \alias{store_open}
 \title{Open a dataset as a lazy query}
 \usage{
-store_open(st, dataset, version = NULL)
+store_open(
+  st,
+  dataset,
+  version = NULL,
+  engine = c("arrow", "duckdb"),
+  con = NULL,
+  mode = "native",
+  spatial = FALSE
+)
 }
 \arguments{
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}.}
@@ -13,7 +21,20 @@ store_open(st, dataset, version = NULL)
 that is unique in the store.}
 
 \item{version}{\code{NULL} for the current version, or the 16 hex characters of
-an earlier version kept in the history (see \code{store_history()}).}
+an earlier version kept in the history (see \code{store_history()}).
+Only \code{NULL} with \code{engine = "duckdb"}.}
+
+\item{engine}{\code{"arrow"} (the default) for a lazy Arrow query of class
+\code{rcs_query}; \code{"duckdb"} for a dbplyr table on the dataset's DuckDB view
+(see \code{\link[=store_duckdb]{store_duckdb()}}), of class \code{rcs_duckdb_tbl}. Its \code{collect()}
+restores the R types and the geometry as for the Arrow engine; it
+needs the packages duckdb, DBI and dbplyr.}
+
+\item{con}{With \code{engine = "duckdb"}: \code{NULL} for an in-memory connection
+that the package keeps, one per store, or a DuckDB connection made with
+\code{bigint = "integer64"}.}
+
+\item{mode, spatial}{With \code{engine = "duckdb"}: as in \code{\link[=store_duckdb]{store_duckdb()}}.}
 }
 \value{
 A lazy query of class \code{rcs_query}. Print it to see the dataset,

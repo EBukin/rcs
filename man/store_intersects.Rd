@@ -7,7 +7,8 @@
 store_intersects(q, y, exact = TRUE, exact_engine = NULL)
 }
 \arguments{
-\item{q}{A query made by \code{\link[=store_open]{store_open()}} on a geospatial dataset.}
+\item{q}{A query made by \code{\link[=store_open]{store_open()}} on a geospatial dataset, with
+either engine.}
 
 \item{y}{The query: an \code{sf}, \code{sfc} or \code{bbox} object with a coordinate
 reference system (in any CRS; several geometries are combined), or H3
@@ -25,7 +26,11 @@ the plane otherwise. A query valid only in the plane can be used with
 \item{exact}{\code{TRUE} runs the exact test in \code{collect()}. \code{FALSE} returns
 the candidate rows, a superset of the intersecting rows, with a
 message saying so. The candidate set is also returned, with the same
-message, when the geometry is not collected.}
+message, when the geometry is not collected. On a DuckDB table, \code{"sql"}
+runs the exact test in DuckDB instead (\code{ST_Intersects()} of its
+\code{spatial} extension, loaded and installed when needed, which needs the
+network once): the query stays lazy, and the test is in the plane of
+the coordinates, as \code{exact_engine = "planar"}, whatever \code{exact_engine}.}
 
 \item{exact_engine}{How the exact test reads the geometries. \code{NULL} (the
 default) follows the geocoding engine the dataset was written with
@@ -56,6 +61,11 @@ touch \code{y}.
 \details{
 The filter applies to the rows of the dataset, before the other verbs of
 the query. Several calls combine: a row must intersect every query.
+
+On a DuckDB table (\code{store_open(engine = "duckdb")}) the candidate test is
+added to the table's SQL (\code{bbox}, and \code{h3} with the index view when the
+cell filter is used), so it needs those columns: call
+\code{store_intersects()} before a \code{\link[dplyr:select]{dplyr::select()}} that drops them.
 }
 \examples{
 location <- file.path(tempdir(), "rcs-example-intersects")
