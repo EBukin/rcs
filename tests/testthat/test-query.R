@@ -78,6 +78,10 @@ test_that("a spatial filter prints its description and a footer that allows more
   out <- print_lines(q, n = 3)
   expect_true("# Filter:   (with spatial predicate)" %in% out)
   expect_identical(utils::tail(out, 2)[[1]], "# i more rows may exist")
+  # printing is quiet, also when collect() would say the result is a candidate set
+  nested <- dplyr::select(utils::head(q, 50), id)
+  expect_message(dplyr::collect(nested), "candidate set")
+  expect_silent(print_lines(nested))
 })
 
 test_that("a query with no rows prints its header and 0 rows", {

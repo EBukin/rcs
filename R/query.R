@@ -567,6 +567,8 @@ print.rcs_query <- function(x, ..., n = NULL) {
     )
   }
   n <- as.integer(n)
+  # the footer says what the messages of collect() would say
+  withr::local_options(rcs.quiet = TRUE)
   data <- query_collect(head.rcs_query(x, n + 1L))
   more <- nrow(data) > n
   data <- utils::head(data, n)
