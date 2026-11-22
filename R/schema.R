@@ -66,6 +66,7 @@ catalog_schema <- function() {
     crs = arrow::utf8(),
     bbox = bbox_type(),
     h3_res = arrow::int32(),
+    geocode_engine = arrow::utf8(),
     index_of = arrow::utf8(),
     history = arrow::boolean(),
     writer = arrow::utf8(),
@@ -128,6 +129,29 @@ schema_kinds <- function(which = c("catalog", "files", "history")) {
 }
 
 dataset_kinds <- c("table", "geospatial", "raster")
+
+# Values of the catalog column `geocode_engine` (besides `NA`).
+catalog_geocode_engines <- c("auto", "s2", "planar")
+
+# Columns added to a schema after stores were first written. A catalog file
+# without them is read with the column filled with `NA` (in schema position),
+# validates, and is written back with it.
+schema_optional <- list(catalog = "geocode_engine", files = character(), history = character())
+
+# `x` with the missing optional columns of `which` added as `NA`, in schema
+# order (other columns keep their order and are not checked here).
+schema_fill_optional <- function(x, which) {
+  kinds <- schema_kinds(which)
+  missing <- setdiff(schema_optional[[which]], names(x))
+  if (length(missing) == 0 || !is.data.frame(x)) {
+    return(x)
+  }
+  for (name in missing) {
+    x[[name]] <- vctrs::vec_init(empty_column(kinds[[name]]), nrow(x))
+  }
+  present <- intersect(names(kinds), names(x))
+  x[c(present, setdiff(names(x), present))]
+}
 
 # In-memory form --------------------------------------------------------------
 
@@ -222,6 +246,7 @@ schema_empty <- function(which) {
 schema_as_arrow <- function(x, which = c("catalog", "files", "history")) {
   which <- rlang::arg_match(which)
   schema_validate(x, which)
+  x <- schema_fill_optional(x, which)
   arrow::arrow_table(x, schema = schema_get(which))
 }
 
@@ -231,6 +256,7 @@ schema_as_tibble <- function(x, which = c("catalog", "files", "history")) {
   kinds <- schema_kinds(which)
   withr::local_options(arrow.int64_downcast = FALSE)
   x <- tibble::as_tibble(as.data.frame(x))
+  x <- schema_fill_optional(x, which)
   missing <- setdiff(names(kinds), names(x))
   if (length(missing) > 0) {
     cli::cli_abort(
@@ -258,7 +284,9 @@ schema_as_tibble <- function(x, which = c("catalog", "files", "history")) {
 #' file: `catalog`: `dataset` unique and not `NA`, `kind` one of `table`,
 #' `geospatial`, `raster`, `version` 16 hex characters; `files` and
 #' `history`: `dataset`, `version`, `path` and `md5` not `NA`, and in `files`
-#' no `path` twice.
+#' no `path` twice. A catalog table may lack the optional column
+#' `geocode_engine` (stores written before it existed); when present its
+#' values are `NA` or one of `"auto"`, `"s2"`, `"planar"`.
 #'
 #' @param x A tibble.
 #' @param which `"catalog"`, `"files"` or `"history"`.
@@ -279,6 +307,8 @@ schema_validate <- function(x, which = c("catalog", "files", "history"),
   if (!is.data.frame(x)) {
     fail("It must be a data frame, not {.obj_type_friendly {x}}.")
   }
+  absent <- setdiff(schema_optional[[which]], names(x))
+  kinds <- kinds[!names(kinds) %in% absent]
   if (!identical(names(x), names(kinds))) {
     fail(c(
       "Its columns must be {.field {names(kinds)}}, in this order.",
@@ -314,6 +344,10 @@ schema_validate <- function(x, which = c("catalog", "files", "history"),
     }
     if (!all(grepl("^[0-9a-f]{16}$", x$version))) {
       problems <- c(problems, "{.field version} must be 16 hex characters.")
+    }
+    engine <- x[["geocode_engine"]]
+    if (!is.null(engine) && !all(is.na(engine) | engine %in% catalog_geocode_engines)) {
+      problems <- c(problems, "{.field geocode_engine} must be missing or one of {.val {catalog_geocode_engines}}.")
     }
   } else {
     if (anyNA(x$dataset) || anyNA(x$version) || anyNA(x$path) || anyNA(x$md5)) {
@@ -358,6 +392,9 @@ as_bbox_row <- function(bbox) {
 #' @param bbox Named numeric `c(xmin, ymin, xmax, ymax)` in the data CRS, or
 #'   `NULL`.
 #' @param h3_res Integer or `NA` (not geospatial, or `geocode = FALSE`).
+#' @param geocode_engine The geocoding engine of the write (`"auto"`, `"s2"`
+#'   or `"planar"`), or `NA` (tables, index tables, rasters,
+#'   `geocode = FALSE`, datasets written before the column existed).
 #' @param index_of For an index table, the dataset it indexes; else `NA`.
 #' @param history Dataset-level history setting: `TRUE`, `FALSE` or `NA` (not
 #'   set).
@@ -374,6 +411,7 @@ new_entry <- function(dataset, kind, title, description, version,
                       partition = character(),
                       source = NA_character_, inputs = NA_character_,
                       crs = NA_character_, bbox = NULL, h3_res = NA_integer_,
+                      geocode_engine = NA_character_,
                       index_of = NA_character_, history = NA,
                       created = now_utc(), updated = created) {
   check_dataset_name(dataset, allow_index = !is.na(index_of))
@@ -404,6 +442,7 @@ new_entry <- function(dataset, kind, title, description, version,
     crs = as.character(crs %||% NA),
     bbox = as_bbox_row(bbox),
     h3_res = as.integer(h3_res),
+    geocode_engine = as.character(geocode_engine %||% NA),
     index_of = as.character(index_of),
     history = as.logical(history),
     writer = writer,
@@ -616,13 +655,28 @@ entry_not_embedded <- c(
   "writer", "r_version", "rcs_version", "created", "updated"
 )
 
+# Entry fields left out of the embedded metadata and of the manifest when they
+# are `NA`, so that adding them kept the file MD5s and versions of datasets
+# that do not use them (plan 0002, D30).
+entry_omitted_when_na <- "geocode_engine"
+
+# `row_to_list()` of an entry without the fields of `entry_omitted_when_na`
+# that are `NULL` (`NA`).
+entry_to_list <- function(entry, kinds) {
+  out <- row_to_list(entry, kinds)
+  drop <- intersect(entry_omitted_when_na, names(out))
+  drop <- drop[vapply(out[drop], is.null, logical(1))]
+  out[setdiff(names(out), drop)]
+}
+
 #' The `rcs` key-value metadata of a Parquet data file
 #'
 #' The JSON of the catalog entry without `version`, the totals (`n_files`,
 #' `rows`, `bytes`), the dataset's `bbox`, `history`, `writer`, `r_version`,
 #' `rcs_version`, `created` and `updated`: nothing that changes when the same
 #' data are written again, by any version of R or of the package and under
-#' any history setting, so that file MD5s are reproducible.
+#' any history setting, so that file MD5s are reproducible. `geocode_engine`
+#' is embedded only when it is not `NA`.
 #' `entry_from_metadata_json()` parses it back; the left-out columns are `NA`
 #' (`version` is `NA` too, so the result does not pass `schema_validate()`
 #' until `store_rebuild()` has filled it).
@@ -635,7 +689,7 @@ entry_not_embedded <- c(
 #' @noRd
 entry_metadata_json <- function(entry) {
   kinds <- schema_kinds("catalog")
-  to_json(row_to_list(entry, kinds[setdiff(names(kinds), entry_not_embedded)]))
+  to_json(entry_to_list(entry, kinds[setdiff(names(kinds), entry_not_embedded)]))
 }
 
 #' @noRd
@@ -652,7 +706,8 @@ entry_from_metadata_json <- function(json) {
 #' `{"entry": {...}, "files": [{...}, ...], "written": "<UTC timestamp>"}`.
 #' In the JSON every `int64` is a string, every timestamp is text
 #' (`time_to_text()`), `bbox` is an object or null, `NA` is null, and
-#' `entry$columns` stays the JSON string of the catalog.
+#' `entry$columns` stays the JSON string of the catalog. `geocode_engine` is
+#' left out when `NA` and read back as `NA` when absent.
 #'
 #' In memory a manifest is a list of class `rcs_manifest` with `entry` (a
 #' one-row tibble of `catalog_schema()`), `files` (a tibble of
@@ -693,7 +748,7 @@ manifest_to_json <- function(manifest) {
   entry_kinds <- schema_kinds("catalog")
   file_kinds <- schema_kinds("files")
   to_json(list(
-    entry = row_to_list(manifest$entry, entry_kinds),
+    entry = entry_to_list(manifest$entry, entry_kinds),
     files = lapply(
       seq_len(nrow(manifest$files)),
       function(i) row_to_list(manifest$files[i, ], file_kinds)

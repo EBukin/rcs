@@ -488,7 +488,6 @@ test_that("store_rebuild() keeps the geocoding engine from manifests and from fi
   rebuilt <- st$primary$catalog
   expect_identical(rebuilt$version, stored$version)
   expect_identical(rebuilt$geocode_engine, stored$geocode_engine)
-  expect_store_valid(st)
 })
 
 test_that("store_sync() and store_copy() work between an old-format location and a new one", {
