@@ -2,28 +2,28 @@
 #
 # Methods of the generics in `R/backend.R` for class `rcs_backend_gcs`.
 #
-# Clients and what each needs
-# ---------------------------
+# Credentials
+# -----------
+# Every GCS backend holds its credential in the field `auth` (an
+# `rcs_auth_gcs` object, `R/auth.R`), set by `be_new(uri, auth)`. Each client
+# is built from it:
 #   * Arrow `GcsFileSystem` (streaming reads, uploads, downloads, listing,
-#     deletes). Uses Google's C++ client and its default credential lookup:
-#     `GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file), else the
-#     application-default credentials written by
-#     `gcloud auth application-default login` (`%APPDATA%/gcloud/` on
-#     Windows, `~/.config/gcloud/` elsewhere), else the metadata server on
-#     Google Cloud. Needs an Arrow build with GCS (`arrow::arrow_with_gcs()`).
-#   * JSON API through gargle + httr2 (object metadata: `md5Hash`). Token from
-#     `gargle::credentials_app_default()` with the scope `cloud-platform`; it
-#     reads the same `GOOGLE_APPLICATION_CREDENTIALS` file or the same
-#     application-default credentials. gargle refuses user (`authorized_user`)
-#     credentials for any narrower scope, so the scope is `cloud-platform`.
-#   * GDAL `/vsigs/` (rasters, `be_gdal_path()`). Does not read the
-#     application-default credentials of gcloud on Windows (it tries the
-#     metadata server and fails with "Could not resolve host:
-#     metadata.google.internal"). Works when `GOOGLE_APPLICATION_CREDENTIALS`
-#     points to a service-account key or to the application-default
-#     credentials file itself, or with `GS_OAUTH2_REFRESH_TOKEN`,
-#     `GS_OAUTH2_CLIENT_ID` and `GS_OAUTH2_CLIENT_SECRET`, or with
-#     `GS_ACCESS_KEY_ID` / `GS_SECRET_ACCESS_KEY` (HMAC keys).
+#     deletes): `auth_arrow_fs()`, made with the credential's access token and
+#     its expiry, rebuilt when the token is renewed; ambient credentials use
+#     Arrow's own defaults. Needs an Arrow build with GCS
+#     (`arrow::arrow_with_gcs()`).
+#   * JSON API through httr2 (object metadata: `md5Hash`): bearer token from
+#     `auth_token()`, scope `cloud-platform`.
+#   * GDAL `/vsigs/` (rasters, `be_gdal_path()`), not yet built from the
+#     credential: it does not read the application-default credentials of
+#     gcloud on Windows (it tries the metadata server and fails with "Could
+#     not resolve host: metadata.google.internal"). Works when
+#     `GOOGLE_APPLICATION_CREDENTIALS` points to a service-account key or to
+#     the application-default credentials file itself, or with
+#     `GS_OAUTH2_REFRESH_TOKEN`, `GS_OAUTH2_CLIENT_ID` and
+#     `GS_OAUTH2_CLIENT_SECRET`.
+# `gcs_reset_clients()` clears the tokens and file systems cached in every
+# credential.
 #
 # Transfer method (decided in work package A, measured 2026-11-20 on the test
 # bucket with arrow 26.0.1, gargle 1.7.0, httr2 1.3.0, GDAL 3.12.1, Windows):
@@ -46,15 +46,11 @@
 # here would be found before a test's `local_mocked_s3_method()` for the same
 # class (`tests/testthat/test-backend.R`). The clients are checked at first
 # use instead: `gcs_fs()` and `gcs_token()` abort with class
-# `rcs_error_backend` and the bullets of `be_auth_hint()`. Both are cached for
-# the session in `the_gcs`.
-
-the_gcs <- new.env(parent = emptyenv())
+# `rcs_error_backend` and the bullets of `be_auth_hint()`.
 
 gcs_scope <- "https://www.googleapis.com/auth/cloud-platform"
 gcs_api <- "https://storage.googleapis.com/storage/v1"
 gcs_chunk <- 8 * 1024^2
-gcs_token_life <- 45 * 60
 
 # Object name of relative paths inside the bucket, and the same path inside
 # Arrow's file system.
@@ -105,30 +101,32 @@ gcs_try <- function(expr, be, what, call = caller_env()) {
 
 # Clients ---------------------------------------------------------------------
 
-# Arrow file system of the session, created once.
-gcs_fs <- function(be) {
-  if (is.null(the_gcs$fs)) {
-    if (!arrow::arrow_with_gcs()) {
-      abort_gcs(
-        c(
-          "This build of Arrow cannot reach Google Cloud Storage.",
-          i = "Install an Arrow build with GCS support (see {.code arrow::arrow_with_gcs()})."
-        ),
-        be = be
-      )
-    }
-    the_gcs$fs <- gcs_try(arrow::GcsFileSystem$create(), be, "Creating the Arrow file system")
-  }
-  the_gcs$fs
+# Credential of a backend (one made without `be_new()` uses the default).
+gcs_auth <- function(be) {
+  be$auth %||% rcs_auth_gcs()
 }
 
-# Access token for the JSON API, renewed after `gcs_token_life` seconds.
-gcs_token <- function(be) {
-  fresh <- !is.null(the_gcs$token) &&
-    as.numeric(difftime(Sys.time(), the_gcs$token_time, units = "secs")) < gcs_token_life
-  if (fresh) {
-    return(the_gcs$token)
+# Arrow file system of the backend's credential.
+gcs_fs <- function(be) {
+  if (!arrow::arrow_with_gcs()) {
+    abort_gcs(
+      c(
+        "This build of Arrow cannot reach Google Cloud Storage.",
+        i = "Install an Arrow build with GCS support (see {.code arrow::arrow_with_gcs()})."
+      ),
+      be = be
+    )
   }
+  tryCatch(auth_arrow_fs(gcs_auth(be)), error = function(e) {
+    abort_gcs(
+      "Creating the Arrow file system for {.val {be$uri}} failed.",
+      be = be, parent = e, auth = TRUE
+    )
+  })
+}
+
+# Access token for the JSON API.
+gcs_token <- function(be) {
   if (!gcs_clients_installed()) {
     abort_gcs(
       c(
@@ -138,33 +136,22 @@ gcs_token <- function(be) {
       be = be
     )
   }
-  token <- tryCatch(gcs_fetch_token(), error = function(e) e)
-  if (inherits(token, "error") || is.null(token)) {
+  tryCatch(auth_token(gcs_auth(be)), error = function(e) {
     abort_gcs(
-      "No credentials found for the Google Cloud Storage JSON API.",
-      be = be, parent = if (inherits(token, "error")) token, auth = TRUE
+      "No access token for the Google Cloud Storage JSON API.",
+      be = be, parent = e, auth = TRUE
     )
-  }
-  the_gcs$token <- token
-  the_gcs$token_time <- Sys.time()
-  token
+  })
 }
 
 gcs_clients_installed <- function() {
   rlang::is_installed(c("gargle", "httr2"))
 }
 
-gcs_fetch_token <- function() {
-  token <- gargle::credentials_app_default(scopes = gcs_scope)
-  if (is.null(token)) {
-    return(NULL)
-  }
-  token$credentials$access_token
-}
-
+# Clear the cached clients: the tokens and Arrow file systems of every
+# credential.
 gcs_reset_clients <- function() {
-  rm(list = ls(the_gcs), envir = the_gcs)
-  invisible()
+  auth_reset()
 }
 
 # JSON API: metadata of objects. Returns a list per path with `status`
@@ -359,9 +346,15 @@ gcs_exists <- function(be, fs, paths) {
 
 #' @export
 be_auth_hint.rcs_backend_gcs <- function(be) {
+  in_use <- cli_escape(auth_describe(gcs_auth(be)))
   c(
-    i = "Arrow (reading and transfers) uses Google's default credentials: {.envvar GOOGLE_APPLICATION_CREDENTIALS} (a service-account key file), or {.code gcloud auth application-default login}.",
-    i = "The JSON API (MD5 of stored files) uses the same credentials through {.pkg gargle} with the scope {.val cloud-platform}; it needs the packages {.pkg gargle} and {.pkg httr2}.",
-    i = "GDAL ({.code /vsigs/}, rasters) does not find the credentials of {.code gcloud auth application-default login} by itself: set {.envvar GOOGLE_APPLICATION_CREDENTIALS} to a service-account key or to that credentials file, or set {.envvar GS_OAUTH2_REFRESH_TOKEN}, {.envvar GS_OAUTH2_CLIENT_ID} and {.envvar GS_OAUTH2_CLIENT_SECRET}."
+    i = paste0("Credentials in use: ", in_use, "."),
+    i = "Pass other credentials with {.arg auth} of {.fn store_connect} or {.fn store_create}: a key file path, {.code rcs_auth_gcs(key = )}, {.code rcs_auth_gcs(token = )} or {.code rcs_auth_gcs(fun = )}.",
+    i = "Without {.arg auth}, the default lookup uses {.envvar GOOGLE_APPLICATION_CREDENTIALS}, else the login of {.code gcloud auth application-default login}; see {.fn rcs_auth_gcs}."
   )
+}
+
+# Text shown literally inside a cli message.
+cli_escape <- function(x) {
+  gsub("([{}])", "\\1\\1", x)
 }

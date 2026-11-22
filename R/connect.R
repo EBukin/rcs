@@ -42,10 +42,16 @@
 #'   [store_create()]); `NULL` uses it. A dataset's own setting, given to
 #'   `store_write()`, overrides both.
 #' @param create `TRUE` initialises locations that hold no catalogs yet.
+#' @param auth Credentials for Google Cloud Storage locations (local
+#'   folders need none): `NULL` uses [rcs_auth_gcs()], the default lookup;
+#'   an object made by [rcs_auth_gcs()] applies to every GCS location; a
+#'   string is the path of a key file; a list named by address (as given in
+#'   the call) gives each location any of these, and locations left out use
+#'   the default.
 #' @return An object of class `rcs_store`. Print it to see its locations and
 #'   datasets.
 #' @seealso [store_create()], [store_refresh()], [store_datasets()],
-#'   [store_status()].
+#'   [store_status()], [rcs_auth_gcs()].
 #' @export
 #' @examples
 #' primary <- file.path(tempdir(), "rcs-example-connect")
@@ -60,7 +66,7 @@
 #' withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
 #' unlink(primary, recursive = TRUE)
 store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
-                          history = NULL, create = FALSE) {
+                          history = NULL, create = FALSE, auth = NULL) {
   local_trace("store_connect")
   call <- rlang::current_env()
   check_string(env)
@@ -87,8 +93,10 @@ store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
   }
   secondary <- secondary %||% character()
 
-  primary_be <- be_new(primary)
-  secondary_be <- lapply(secondary, be_new)
+  auths <- auth_for_addresses(auth, c(primary, secondary), call)
+  primary_be <- be_new(primary, auth = auths[[1]])
+  secondary_be <- Map(be_new, secondary, auths[-1])
+  names(secondary_be) <- NULL
   uris <- c(primary_be$uri, vapply(secondary_be, function(be) be$uri, character(1)))
   if (anyDuplicated(uris) > 0) {
     cli::cli_abort(
@@ -125,6 +133,9 @@ store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
 #'   datasets, `FALSE` unless switched on. A connection
 #'   (`store_connect(history = )`) and a dataset (`store_write(history = )`)
 #'   can override it.
+#' @param auth Credentials when `location` is on Google Cloud Storage: `NULL`
+#'   uses [rcs_auth_gcs()], the default lookup; else an object made by
+#'   [rcs_auth_gcs()] or the path of a key file.
 #' @return The normalised address of the location, invisibly.
 #' @seealso [store_connect()].
 #' @export
@@ -138,12 +149,12 @@ store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
 #' )
 #' st
 #' unlink(location, recursive = TRUE)
-store_create <- function(location, history = FALSE) {
+store_create <- function(location, history = FALSE, auth = NULL) {
   local_trace("store_create")
   call <- rlang::current_env()
   check_string(location)
   check_flag(history)
-  be <- be_new(location)
+  be <- be_new(location, auth = auth_check_one(auth, "auth", call))
   uri <- be$uri
   if (reach(location_exists(be), be, "", call)) {
     cli::cli_abort(
@@ -209,6 +220,47 @@ check_addresses <- function(x, arg = rlang::caller_arg(x), call = caller_env()) 
     )
   }
   invisible(x)
+}
+
+# Credential of each address (`NULL` for the default), from `auth =` of
+# `store_connect()`: one value for all, or a list named by address.
+auth_for_addresses <- function(auth, addresses, call) {
+  if (!is.list(auth) || inherits(auth, "rcs_auth_gcs")) {
+    one <- auth_check_one(auth, "auth", call)
+    return(rep(list(one), length(addresses)))
+  }
+  given <- names(auth)
+  if (length(auth) > 0 && (is.null(given) || anyNA(given) || !all(nzchar(given)))) {
+    cli::cli_abort(
+      "A list given to {.arg auth} must be named by address.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  unknown <- setdiff(given, addresses)
+  if (length(unknown) > 0) {
+    cli::cli_abort(
+      c(
+        "{.arg auth} names {?an address/addresses} not given in the call: {.val {unknown}}.",
+        i = "Name each credential by its address exactly as given to {.arg primary} or {.arg secondary}."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  lapply(addresses, function(a) {
+    auth_check_one(auth[[a]], paste0("auth[[\"", a, "\"]]"), call)
+  })
+}
+
+auth_check_one <- function(auth, arg, call) {
+  ok <- is.null(auth) || inherits(auth, "rcs_auth_gcs") ||
+    (rlang::is_string(auth) && !is.na(auth) && nzchar(auth))
+  if (!ok) {
+    cli::cli_abort(
+      "{.arg {arg}} must be {.code NULL}, an object made by {.fn rcs_auth_gcs} or the path of a key file, not {.obj_type_friendly {auth}}.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  auth
 }
 
 # Addresses of an environment variable: separated by `;`, blanks trimmed,

@@ -316,8 +316,10 @@ test_that("print() shows source, type, file, identity and validity, never a secr
   clock$now <- clock$now + 20 * 60
   expect_snapshot(print(auth), transform = scrub)
   clock$now <- clock$now + 60 * 60
-  out <- expect_output(print(auth), "renewed at the next use")
-  expect_invisible(print(auth))
+  expect_output(print(auth), "renewed at the next use")
+  capture.output(shown <- withVisible(print(auth)))
+  expect_false(shown$visible)
+  expect_identical(shown$value, auth)
   printed <- paste(capture.output(print(auth)), collapse = "\n")
   for (s in secrets) expect_no_match(printed, s, fixed = TRUE)
 
@@ -422,7 +424,7 @@ test_that("auth_http_token() posts the form and auth_tokeninfo() reads the e-mai
   got <- auth_http_token(list(grant_type = "refresh_token", refresh_token = "r"))
   expect_identical(got, list(access_token = "t", expires_in = 3599L))
   expect_identical(sent$url, "https://oauth2.googleapis.com/token")
-  expect_identical(sent$body$data$grant_type, "refresh_token")
+  expect_identical(unclass(sent$body$data$grant_type), "refresh_token")
   expect_identical(auth_tokeninfo("abc"), "someone@example.com")
   expect_match(sent$url, "^https://oauth2.googleapis.com/tokeninfo\\?access_token=abc$")
 

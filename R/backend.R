@@ -56,17 +56,22 @@ backend_type <- function(uri, call = caller_env()) {
 #' | `root` | the same path | `bucket[/prefix]` |
 #' | `bucket` | `NA` | the bucket |
 #' | `prefix` | `NA` | the prefix without slashes at either end, `""` when none |
+#' | `auth` | no field | the credential, an `rcs_auth_gcs` object |
 #'
 #' Two addresses name the same location exactly when their `uri` are equal.
-#' Nothing is created or contacted by the parsing itself.
+#' Nothing is created or contacted by the parsing itself (the default
+#' credential lookup only reads local files).
 #'
 #' @param uri One string: a local folder or `gs://bucket[/prefix]`.
+#' @param auth Credential of a GCS location: `NULL` (the default lookup,
+#'   `rcs_auth_gcs()`), an `rcs_auth_gcs` object or the path of a key file.
+#'   Ignored for local folders.
 #' @return The backend object. Aborts with class
 #'   `rcs_error_unsupported_location` for any other scheme, and with
 #'   `rcs_error_argument` for an empty address or a `gs://` address without a
-#'   bucket.
+#'   bucket or an invalid `auth`.
 #' @noRd
-be_new <- function(uri) {
+be_new <- function(uri, auth = NULL) {
   type <- backend_type(uri)
   if (type == "local") {
     root <- sub("/+$", "", normalizePath(path.expand(uri), winslash = "/", mustWork = FALSE))
@@ -82,7 +87,10 @@ be_new <- function(uri) {
       )
     }
     prefix <- sub("^[^/]*/?", "", root)
-    fields <- list(type = type, uri = paste0("gs://", root), root = root, bucket = bucket, prefix = prefix)
+    fields <- list(
+      type = type, uri = paste0("gs://", root), root = root, bucket = bucket, prefix = prefix,
+      auth = auth_resolve(auth)
+    )
   }
   be_init(structure(fields, class = c(paste0("rcs_backend_", type), "rcs_backend")))
 }
