@@ -1,0 +1,401 @@
+---
+title: "Regions and households: a worked example"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Regions and households: a worked example}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE, comment = "#>",
+  fig.align = "center", out.width = "100%", dpi = 150
+)
+# Show stores below the temporary folder as `<tempdir>/...`, use UTC and a
+# fixed width so that the output is the same on every machine.
+local({
+  dirs <- unique(c(
+    normalizePath(tempdir(), winslash = "/", mustWork = FALSE),
+    normalizePath(tempdir(), winslash = "\\", mustWork = FALSE),
+    tempdir()
+  ))
+  hide <- function(x) {
+    for (d in dirs) x <- gsub(d, "<tempdir>", x, fixed = TRUE)
+    x
+  }
+  for (h in c("output", "message", "warning", "error")) {
+    old <- knitr::knit_hooks$get(h)
+    knitr::knit_hooks$set(stats::setNames(
+      list(local({
+        old <- old
+        function(x, options) old(hide(x), options)
+      })),
+      h
+    ))
+  }
+})
+old_options <- options(width = 80, cli.width = 120, cli.hyperlink = FALSE)
+old_tz <- Sys.getenv("TZ", unset = NA)
+Sys.setenv(TZ = "UTC")
+# Geocoding needs h3o and the figures need ggplot2: chunks that use them run
+# only when they are installed.
+has_h3o <- requireNamespace("h3o", quietly = TRUE)
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
+has_maps <- has_h3o && has_ggplot
+suppressPackageStartupMessages({
+  library(sf)
+  library(dplyr)
+})
+```
+
+This article walks through one common task from start to end: a few large
+polygons that stand for *regions*, and a household survey whose points must
+be matched to those regions. It keeps the steps few and shows each result
+on a map, so that the figures can be printed and read on their own. The
+details of every function are in `vignette("rcs")` and
+`vignette("geospatial")`.
+
+All data are simulated by `rcs_sim_polygons()` and `rcs_sim_points()`, in
+a box of open ocean, and the store lives in a temporary folder that is
+removed at the end. Geocoding needs the package h3o and the maps need
+ggplot2; without them the code below is shown but not run.
+
+```{r setup}
+library(rcs)
+library(sf)
+library(dplyr)
+```
+
+```{r, eval = has_ggplot}
+library(ggplot2)
+# One look for every map: white background, light grid, legend below.
+theme_set(
+  theme_minimal(base_size = 11) +
+    theme(
+      plot.background = element_rect(fill = "white", colour = NA),
+      panel.grid = element_line(colour = "grey92"),
+      plot.title = element_text(face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 10)
+    )
+)
+region_colours <- c(
+  "Region A" = "#0072B2", "Region B" = "#E69F00", "Region C" = "#009E73"
+)
+```
+
+## 1. Simulate regions and households
+
+The first three simulated polygons are large: a rectangle, a round shape
+with many vertices, and a square with a hole. They play the regions. The
+households are 2,000 simulated points spread over the whole box, with a
+household number `hh_id`, an `income`, a survey `stratum` and the survey
+`wave` they belong to. Most households lie outside every region, as in a
+survey that covers more ground than the regions of interest.
+
+```{r}
+regions <- rcs_sim_polygons(100, seed = 1) |>
+  filter(id %in% 1:3) |>
+  transmute(region_id = id, name = paste("Region", LETTERS[id]))
+regions
+
+households <- rcs_sim_points(2000, seed = 2) |>
+  transmute(hh_id = id, wave = 1L, income = value, stratum = cat)
+households
+```
+
+```{r fig-overview, eval = has_ggplot, fig.width = 7, fig.height = 4.2, fig.alt = "Map of the simulated area, longitudes -30 to -24 and latitudes 6 to 9. Three coloured polygons: Region A, a large rectangle on the left; Region B, a small rounded shape at the top right; Region C, a square with a square hole at the bottom right. 2,000 grey household points are spread evenly over the whole area, inside and outside the regions."}
+ggplot() +
+  geom_sf(data = households, colour = "grey55", size = 0.4) +
+  geom_sf(data = regions, aes(fill = name), alpha = 0.55, colour = "grey20") +
+  scale_fill_manual(values = region_colours, name = NULL) +
+  labs(
+    title = "Three regions and 2,000 surveyed households",
+    subtitle = "Simulated data in open ocean"
+  )
+```
+
+## 2. Create a local store and write the regions
+
+`store_connect(create = TRUE)` creates a store in a folder: a few catalog
+files (`_catalog.parquet`, `_files.parquet`, ...) that list what the store
+holds. `store_write()` then writes an `sf` object like a table. The dataset
+name `admin/regions` is also its folder; `key` names the column that
+identifies a row.
+
+Because the regions are geospatial, the write *geocodes* them: it adds the
+column `h3`, the H3 cell (resolution 5 by default, about 250 km² per cell)
+that holds the largest part of each region, and the column `bbox`, its
+bounding box. A region this large touches many cells, so the write also
+stores an *index table*, `admin/regions__h3`, with one row for every cell
+a region touches and the `share` of the region's area in that cell. Spatial
+reads use these columns to skip rows and files without opening any
+geometry.
+
+```{r, eval = has_h3o}
+root <- file.path(tempdir(), "regions-store")
+st <- store_connect(root, create = TRUE)
+
+store_write(st, regions, "admin/regions",
+  title = "Regions",
+  description = "Three large simulated polygons standing in for regions.",
+  key = "region_id"
+)
+```
+
+The folder now holds one Parquet file for the regions and one for their
+index table, each with a small manifest. `print(st, index = TRUE)` shows
+the index table, which is otherwise hidden:
+
+```{r, eval = has_h3o}
+list.files(root, recursive = TRUE, pattern = "parquet$")
+print(st, index = TRUE)
+```
+
+## 3. The regions as H3 cells
+
+The index table can be read like any dataset. Its column `.rcs_id` links
+each cell to a row of `admin/regions`; reads drop that column unless it is
+asked for, so here it is named in `columns`.
+
+```{r, eval = has_h3o}
+region_ids <- store_read(st, "admin/regions",
+  columns = c(.rcs_id, region_id, name), geometry = FALSE
+)
+region_cells <- store_read(st, "admin/regions__h3",
+  columns = c(.rcs_id, h3, share)
+) |>
+  inner_join(region_ids, by = ".rcs_id") |>
+  select(region_id, name, h3, share)
+region_cells
+count(region_cells, name)
+```
+
+To draw cells, h3o turns them into hexagons; `rcs_h3_hex()` gives the text
+form of the cells that h3o reads.
+
+```{r, eval = has_h3o}
+cell_polygons <- function(cells) {
+  st_set_crs(st_as_sfc(h3o::h3_from_strings(rcs_h3_hex(cells))), 4326)
+}
+region_hex <- st_sf(region_cells, geometry = cell_polygons(region_cells$h3)) |>
+  mutate(cover = share / max(share), .by = name)
+```
+
+```{r fig-cells, eval = has_maps, fig.width = 7, fig.height = 4.2, fig.alt = "Map of the three regions drawn over their H3 cells of resolution 5. Each region is covered by hexagons in its own colour; hexagons inside a region are fully coloured, and those along its edges are pale, because only a sliver of the region enters them. Region A is covered by about 200 hexagons, Regions B and C by a few dozen each."}
+ggplot() +
+  geom_sf(
+    data = region_hex, aes(fill = name, alpha = cover),
+    colour = "white", linewidth = 0.2
+  ) +
+  geom_sf(data = regions, fill = NA, colour = "grey15", linewidth = 0.5) +
+  scale_fill_manual(values = region_colours, name = NULL) +
+  scale_alpha_continuous(range = c(0.25, 1), guide = "none") +
+  labs(
+    title = "Every H3 cell (resolution 5) each region touches",
+    subtitle = "From the index table admin/regions__h3; pale cells hold only a sliver of a region"
+  )
+```
+
+The resolution is set by `h3_res` in `store_write()`. A coarser resolution
+gives fewer, larger cells, a finer one more and smaller cells.
+`rcs_geo_index()` computes the same cells in memory, without a store; here
+it covers Region A at three resolutions (`crossing_only = FALSE` keeps every
+cell, interior included).
+
+```{r, eval = has_h3o}
+region_a <- filter(regions, name == "Region A")
+by_res <- lapply(3:5, function(r) {
+  idx <- rcs_geo_index(region_a, "region_id", h3_res = r, crossing_only = FALSE)
+  st_sf(
+    resolution = paste0("Resolution ", r, ": ", nrow(idx), " cells"),
+    geometry = cell_polygons(idx$h3)
+  )
+})
+by_res <- do.call(rbind, by_res)
+```
+
+```{r fig-resolutions, eval = has_maps, fig.width = 7.5, fig.height = 3, fig.alt = "Three small maps side by side of Region A, a rectangle, outlined in black over the H3 cells it touches. At resolution 3, 10 very large hexagons cover it and reach far beyond its edges; at resolution 4, 39 smaller hexagons follow its outline more closely; at resolution 5, 212 small hexagons follow the rectangle tightly."}
+ggplot() +
+  geom_sf(data = by_res, fill = "#9ecae1", colour = "#3182bd", linewidth = 0.2) +
+  geom_sf(data = region_a, fill = NA, colour = "black", linewidth = 0.6) +
+  facet_wrap(vars(resolution)) +
+  labs(title = "Region A at three H3 resolutions") +
+  theme(axis.text = element_text(size = 7))
+```
+
+## 4. Read the regions back
+
+`store_read()` reads a dataset into R. Without more arguments it returns
+the whole `sf` object, with the columns `h3` and `bbox` the write added.
+`columns` picks columns (tidyselect, as in `dplyr::select()`) and
+`geometry = FALSE` leaves the geometry out, which makes a read of the
+attributes alone fast even when the polygons are large.
+
+```{r, eval = has_h3o}
+store_read(st, "admin/regions")
+store_read(st, "admin/regions", columns = c(region_id, name), geometry = FALSE)
+```
+
+`intersects` keeps only the regions that intersect a query shape, here a
+box between two regions. The read compares the boxes and cells first and
+tests the geometry exactly only for the rows left. `store_intersects()`
+does the same on a lazy query from `store_open()`.
+
+```{r, eval = has_h3o}
+query <- st_as_sfc(st_bbox(
+  c(xmin = -27.6, ymin = 6.4, xmax = -26.2, ymax = 7.3),
+  crs = st_crs(4326)
+))
+hit <- store_read(st, "admin/regions", intersects = query)
+hit$name
+```
+
+```{r fig-query, eval = has_maps, fig.width = 7, fig.height = 4.2, fig.alt = "Map of the three regions with a red rectangle, the query area, between Region A on the left and Region C on the right. The query overlaps the right edge of Region A and the left part of Region C, which are drawn in colour as the rows returned; Region B, at the top right, does not touch the query and is drawn in light grey."}
+ggplot() +
+  geom_sf(data = regions, fill = "grey90", colour = "grey60") +
+  geom_sf(data = hit, aes(fill = name), alpha = 0.7, colour = "grey20") +
+  geom_sf(data = query, fill = NA, colour = "#D7191C", linewidth = 1) +
+  scale_fill_manual(values = region_colours, name = "Returned") +
+  labs(
+    title = "A read by area returns only the regions that intersect it",
+    subtitle = "Red: the query box; grey: regions left out"
+  )
+```
+
+## 5. Write the survey
+
+The households are written as their own dataset, `survey/households`,
+with `partition = "wave"`: one folder per wave (`wave=1/`), so that later
+waves can be added without rewriting the first. Points get an `h3` cell
+and a `bbox` like the regions; a point never crosses a cell edge, so no
+index table is written. The cell is computed once, by this write, at the
+same resolution as the regions' cells.
+
+```{r, eval = has_h3o}
+store_write(st, households, "survey/households",
+  title = "Households",
+  description = "Simulated household survey, one point per household.",
+  key = "hh_id",
+  partition = "wave"
+)
+```
+
+A second wave comes in later. `mode = "update"` replaces the partitions
+whose values occur in the new rows and keeps the others: here `wave = 2`
+is new, so it is added and wave 1 is left as it is. Only the 300 new rows
+are geocoded, with the resolution and engine recorded for the dataset.
+
+```{r, eval = has_h3o}
+wave_2 <- rcs_sim_points(300, seed = 3) |>
+  transmute(hh_id = id + 10000L, wave = 2L, income = value, stratum = cat)
+
+store_write(st, wave_2, "survey/households",
+  title = "Households",
+  description = "Simulated household survey, one point per household.",
+  mode = "update"
+)
+```
+
+## 6. Match households to regions through H3 cells
+
+Both datasets now carry H3 cells of resolution 5, so a household can be
+matched to a region by a plain join on `h3`, with no geometry read at all:
+each household gets every region that touches its cell. The cells are read
+back from the store, not computed again.
+
+```{r, eval = has_h3o}
+hh_cells <- store_read(st, "survey/households",
+  columns = c(hh_id, wave, h3), geometry = FALSE
+)
+by_cell <- inner_join(hh_cells, select(region_cells, name, h3),
+  by = "h3", relationship = "many-to-many"
+)
+nrow(by_cell)
+```
+
+A cell on a region's edge lies partly outside it, so the join is a
+generous first step: it finds every household of a region, and some
+neighbours. The exact test then runs only on these candidates, a fraction
+of the survey:
+
+```{r, eval = has_h3o}
+candidates <- store_open(st, "survey/households") |>
+  filter(hh_id %in% !!by_cell$hh_id) |>
+  collect()
+inside <- st_join(candidates, select(regions, name), left = FALSE)
+count(st_drop_geometry(inside), name)
+```
+
+The same exact answer comes from a spatial read of each region,
+`store_read(st, "survey/households", intersects = region)`, which uses the
+cells and boxes the same way inside the store. For the map, every household
+is labelled by how it was matched:
+
+```{r, eval = has_h3o}
+hh_class <- store_read(st, "survey/households", columns = hh_id) |>
+  mutate(match = case_when(
+    hh_id %in% inside$hh_id ~ "Inside a region",
+    hh_id %in% by_cell$hh_id ~ "Same cell, outside",
+    .default = "Elsewhere"
+  ), match = factor(match, c(
+    "Inside a region", "Same cell, outside", "Elsewhere"
+  )))
+```
+
+```{r fig-join, eval = has_maps, fig.width = 7, fig.height = 4.6, fig.alt = "Map of the three regions outlined in black with 2,300 household points. Points inside a region are dark blue; points just outside a region's edge, but in an H3 cell the region touches, are orange and form a thin band around each region; all other points are light grey."}
+ggplot() +
+  geom_sf(
+    data = region_hex, fill = "grey85", colour = "white", linewidth = 0.2
+  ) +
+  geom_sf(data = hh_class, aes(colour = match), size = 0.6) +
+  geom_sf(data = regions, fill = NA, colour = "black", linewidth = 0.5) +
+  scale_colour_manual(
+    values = c(
+      "Inside a region" = "#08519C", "Same cell, outside" = "#E6550D",
+      "Elsewhere" = "grey75"
+    ),
+    name = NULL
+  ) +
+  guides(colour = guide_legend(override.aes = list(size = 2.5))) +
+  labs(
+    title = "Households matched to regions through H3 cells",
+    subtitle = paste(
+      "Grey hexagons: the cells the regions touch.",
+      "Orange: found by the cell join, dropped by the exact test.",
+      sep = "
+"
+    )
+  )
+```
+
+## 7. Without geocoding
+
+Geocoding takes time on large datasets. When spatial reads are rare, or
+the queries are compact boxes, `geocode = FALSE` stores the geometries with
+their `bbox` only: no `h3` column and no index table. A read by area still
+returns the right rows, filtered by boxes alone.
+
+```{r, eval = has_h3o}
+store_write(st, regions, "admin/regions_plain",
+  title = "Regions, boxes only",
+  description = "The same regions without H3 cells.",
+  key = "region_id",
+  geocode = FALSE
+)
+store_read(st, "admin/regions_plain", intersects = query)$name
+```
+
+## 8. Clean up
+
+The store is a folder; removing it removes everything written above.
+
+```{r, eval = has_h3o}
+unlink(root, recursive = TRUE)
+```
+
+```{r, include = FALSE}
+options(old_options)
+if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)
+```
