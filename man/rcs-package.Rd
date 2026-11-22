@@ -18,7 +18,7 @@ defaults.\tabular{lll}{
    \code{rcs.quiet} \tab \code{FALSE} \tab Silence informative messages. \cr
    \code{rcs.trace} \tab \code{FALSE} \tab Record work counters, see \code{\link[=rcs_trace]{rcs_trace()}}. \cr
    \code{rcs.staging_dir} \tab \code{tempdir()} \tab Folder where files are staged before upload. \cr
-   \code{rcs.chunk_size} \tab \code{1e5} \tab Rows per chunk in vectorised geospatial work. \cr
+   \code{rcs.chunk_size} \tab \code{1e4} \tab Rows per chunk in vectorised geospatial work; geocoding shows a progress bar over the chunks. \cr
    \code{rcs.workers} \tab \code{1} \tab Parallel workers for geocoding. \cr
    \code{rcs.lock_timeout} \tab \code{600} \tab Seconds after which a local lock is stale. \cr
    \code{rcs.record_writer} \tab \code{FALSE} \tab Record the user name in the catalog. \cr

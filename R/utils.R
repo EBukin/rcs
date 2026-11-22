@@ -22,7 +22,7 @@ rcs_option <- function(name) {
     rcs.quiet = FALSE,
     rcs.trace = FALSE,
     rcs.staging_dir = tempdir(),
-    rcs.chunk_size = 1e5,
+    rcs.chunk_size = 1e4,
     rcs.workers = 1,
     rcs.lock_timeout = 600,
     rcs.record_writer = FALSE,

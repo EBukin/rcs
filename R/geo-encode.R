@@ -661,9 +661,10 @@ geo_largest <- function(pairs, n) {
 #' Geocodes of rows by an engine
 #'
 #' Geocodes of all rows, in chunks of `rcs.chunk_size`, on mirai workers when
-#' `rcs.workers` is above 1 and mirai is installed. The engine applies to
-#' crossing rows whose cells come from s2 (plan 0002, D31); inside rows keep
-#' the cell of their box corners.
+#' `rcs.workers` is above 1 and mirai is installed. With more than one
+#' chunk a cli progress bar shows rows and chunks done, unless `rcs.quiet`
+#' is set. The engine applies to crossing rows whose cells come from s2
+#' (plan 0002, D31); inside rows keep the cell of their box corners.
 #'
 #' @param g Geometries in EPSG:4326 (`sfc`, or anything `wk` reads).
 #' @param h3_res One integer, 0 to 15.
@@ -688,10 +689,28 @@ geo_h3_rows <- function(g, h3_res, geocode_engine = "auto", tol = rcs_option("rc
     chunks <- list()
   }
   workers <- as.integer(rcs_option("rcs.workers"))
+  progress <- length(chunks) > 1 && !isTRUE(rcs_option("rcs.quiet"))
   pieces <- if (workers > 1 && length(chunks) > 1 && rlang::is_installed("mirai")) {
-    geo_map_mirai(lapply(chunks, function(at) g[at]), h3_res, workers, geocode_engine, tol)
+    geo_map_mirai(lapply(chunks, function(at) g[at]), h3_res, workers, geocode_engine, tol, progress)
   } else {
-    lapply(chunks, function(at) geo_h3_chunk(g[at], h3_res, geocode_engine, tol))
+    bar <- NULL
+    if (progress) {
+      bar <- cli::cli_progress_bar(
+        format = paste(
+          "Geocoding H3 res {h3_res} {cli::pb_bar} {cli::pb_current}/{cli::pb_total} rows",
+          "| chunk {cli::pb_extra$chunk}/{length(chunks)} | ETA {cli::pb_eta}"
+        ),
+        total = n, clear = TRUE, extra = list(chunk = 0L)
+      )
+    }
+    lapply(seq_along(chunks), function(i) {
+      at <- chunks[[i]]
+      piece <- geo_h3_chunk(g[at], h3_res, geocode_engine, tol)
+      if (!is.null(bar)) {
+        cli::cli_progress_update(id = bar, set = max(at), extra = list(chunk = i))
+      }
+      piece
+    })
   }
   h3 <- rep(NA_character_, n)
   index <- vector("list", length(chunks))
@@ -742,7 +761,8 @@ check_rebuild_tol <- function(tol, call = caller_env()) {
 # Runs `geo_h3_chunk()` over chunks on the mirai compute profile `rcs`. Uses
 # daemons already set for that profile; otherwise starts `workers` local
 # daemons for this call. The workers must be able to load rcs.
-geo_map_mirai <- function(chunks, h3_res, workers, geocode_engine = "auto", tol = 1e-3) {
+geo_map_mirai <- function(chunks, h3_res, workers, geocode_engine = "auto", tol = 1e-3,
+                          progress = FALSE) {
   if (!mirai::daemons_set(.compute = "rcs")) {
     mirai::daemons(workers, .compute = "rcs")
     on.exit(mirai::daemons(0, .compute = "rcs"), add = TRUE)
@@ -753,7 +773,7 @@ geo_map_mirai <- function(chunks, h3_res, workers, geocode_engine = "auto", tol 
     .args = list(h3_res = h3_res, geocode_engine = geocode_engine, tol = tol, chunk_fn = geo_h3_chunk),
     .compute = "rcs"
   )
-  m[mirai::.stop]
+  if (progress) m[mirai::.progress, mirai::.stop] else m[mirai::.stop]
 }
 
 # Encoding --------------------------------------------------------------------

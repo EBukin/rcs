@@ -37,7 +37,7 @@
 new_location <- function(uri = NULL, backend = be_new(uri),
                          catalog = catalog_empty(), files = files_empty(),
                          token = NA_character_, available = TRUE) {
-  validate_location(structure(
+  x <- structure(
     list(
       uri = backend$uri,
       backend = backend,
@@ -47,7 +47,10 @@ new_location <- function(uri = NULL, backend = be_new(uri),
       available = available
     ),
     class = "rcs_location"
-  ))
+  )
+  # the validator returns invisibly; the constructor must not
+  validate_location(x)
+  x
 }
 
 location_fields <- c("uri", "backend", "catalog", "files", "token", "available")
@@ -111,7 +114,9 @@ new_store <- function(primary, secondary = list(), history = NULL,
   st$history <- history
   st$store_history <- store_history
   st$connected_at <- connected_at
+  # the validator returns invisibly; store_connect() must print at the console
   validate_store(st)
+  st
 }
 
 #' @noRd
@@ -247,7 +252,7 @@ effective_history <- function(st, dataset_history = NA) {
 #' @noRd
 new_query <- function(store, entry, location, files, query,
                       spatial = NULL, geometry = TRUE) {
-  validate_query(structure(
+  x <- structure(
     list(
       store = store,
       entry = entry,
@@ -258,7 +263,10 @@ new_query <- function(store, entry, location, files, query,
       geometry = geometry
     ),
     class = "rcs_query"
-  ))
+  )
+  # the validator returns invisibly; store_open() must print at the console
+  validate_query(x)
+  x
 }
 
 query_fields <- c("store", "entry", "location", "files", "query", "spatial", "geometry")

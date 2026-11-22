@@ -13,7 +13,7 @@
 #' | `rcs.quiet` | `FALSE` | Silence informative messages. |
 #' | `rcs.trace` | `FALSE` | Record work counters, see [rcs_trace()]. |
 #' | `rcs.staging_dir` | `tempdir()` | Folder where files are staged before upload. |
-#' | `rcs.chunk_size` | `1e5` | Rows per chunk in vectorised geospatial work. |
+#' | `rcs.chunk_size` | `1e4` | Rows per chunk in vectorised geospatial work; geocoding shows a progress bar over the chunks. |
 #' | `rcs.workers` | `1` | Parallel workers for geocoding. |
 #' | `rcs.lock_timeout` | `600` | Seconds after which a local lock is stale. |
 #' | `rcs.record_writer` | `FALSE` | Record the user name in the catalog. |

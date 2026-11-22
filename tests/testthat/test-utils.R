@@ -7,7 +7,7 @@ test_that("rcs_option() knows the defaults and honours options", {
   expect_false(rcs_option("rcs.quiet"))
   expect_false(rcs_option("rcs.trace"))
   expect_identical(rcs_option("rcs.staging_dir"), tempdir())
-  expect_identical(rcs_option("rcs.chunk_size"), 1e5)
+  expect_identical(rcs_option("rcs.chunk_size"), 1e4)
   expect_identical(rcs_option("rcs.workers"), 1)
   expect_identical(rcs_option("rcs.lock_timeout"), 600)
   expect_false(rcs_option("rcs.record_writer"))
