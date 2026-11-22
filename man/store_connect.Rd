@@ -9,7 +9,8 @@ store_connect(
   secondary = NULL,
   env = "STORE",
   history = NULL,
-  create = FALSE
+  create = FALSE,
+  auth = NULL
 )
 }
 \arguments{
@@ -28,6 +29,13 @@ the order in which writes reach them. \code{NULL} reads them from
 \code{store_write()}, overrides both.}
 
 \item{create}{\code{TRUE} initialises locations that hold no catalogs yet.}
+
+\item{auth}{Credentials for Google Cloud Storage locations (local
+folders need none): \code{NULL} uses \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}}, the default lookup;
+an object made by \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}} applies to every GCS location; a
+string is the path of a key file; a list named by address (as given in
+the call) gives each location any of these, and locations left out use
+the default.}
 }
 \value{
 An object of class \code{rcs_store}. Print it to see its locations and
@@ -76,5 +84,5 @@ unlink(primary, recursive = TRUE)
 }
 \seealso{
 \code{\link[=store_create]{store_create()}}, \code{\link[=store_refresh]{store_refresh()}}, \code{\link[=store_datasets]{store_datasets()}},
-\code{\link[=store_status]{store_status()}}.
+\code{\link[=store_status]{store_status()}}, \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}}.
 }

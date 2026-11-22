@@ -4,7 +4,7 @@
 \alias{store_create}
 \title{Initialise an empty store}
 \usage{
-store_create(location, history = FALSE)
+store_create(location, history = FALSE, auth = NULL)
 }
 \arguments{
 \item{location}{Address of the location: a local folder (created when
@@ -14,6 +14,10 @@ missing) or \verb{gs://bucket/prefix}.}
 datasets, \code{FALSE} unless switched on. A connection
 (\code{store_connect(history = )}) and a dataset (\code{store_write(history = )})
 can override it.}
+
+\item{auth}{Credentials when \code{location} is on Google Cloud Storage: \code{NULL}
+uses \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}}, the default lookup; else an object made by
+\code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}} or the path of a key file.}
 }
 \value{
 The normalised address of the location, invisibly.

@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; wave 0 done (2026-11-21)
+- **Status:** in execution; waves 0-1 done (2026-11-21)
 
 ## Goal
 
@@ -281,7 +281,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 1: N1a, N1c, P1
 
-- [ ] **N1a. Geocoding engines: algorithm.** D31, D32 (counts only), D33, D34; facts 17–20. Prototype: none. Plan 0001: "Geospatial encoding", "Results of wave 1" (B).
+- [x] **N1a. Geocoding engines: algorithm.** D31, D32 (counts only), D33, D34; facts 17–20. Prototype: none. Plan 0001: "Geospatial encoding", "Results of wave 1" (B).
   - Owns: `R/geo-encode.R`, `tests/testthat/test-geo-encode.R`, new `tests/testthat/test-geo-engine.R`, new `tests/testthat/helper-geo-invalid.R` (the WKT of facts 18 and 20 as functions), `tests/testthat/test-hooks.R` (pinned `geo_encode` signature updated to the contract), `_snaps/geo-encode.md`.
   - Tests first (at `geo_encode()` and `geo_h3_rows()` level):
     a. Both polygons of fact 18 among 20 valid rows: `"auto"` and `"s2"` report them in `rebuilt`; their `h3` equals the cell holding the largest share of the rebuilt polygon computed by brute force on the sphere (`s2::s2_intersection()` with the cell polygons, `s2::s2_area()`); with `"planar"` it equals the planar brute force (cell polygons intersected under `sf_use_s2(FALSE)`, areas in EPSG:6933); shares sum to 1 (±1e-6). Under `sf_use_s2(TRUE)` and `FALSE`.
@@ -294,13 +294,13 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
     h. Brute-force reference of `helper-geo-reference.R` for a sample of 200 valid simulated rows under `"auto"` (unchanged results).
   - Acceptance: a–h pass; `test-geo-encode.R`, `test-geo-cells.R`, `test-hooks.R` pass; whole suite at default passes; coverage of `R/geo-encode.R` ≥ 80%.
 
-- [ ] **N1c. Geocoding engines: catalog column.** D30 (storage), fact 23. Plan 0001: "Catalog schema", handoff decisions 1–5.
+- [x] **N1c. Geocoding engines: catalog column.** D30 (storage), fact 23. Plan 0001: "Catalog schema", handoff decisions 1–5.
   - Owns: `R/schema.R`, `R/catalog.R`, `R/files.R`, `tests/testthat/test-schema.R`, `tests/testthat/test-catalog.R`, `tests/testthat/test-files.R`, their snapshots. `tests/testthat/helper-store.R` stays unchanged (the default `NA` keeps it valid).
   - Steps: `catalog_schema()` gains `geocode_engine` after `h3_res`; `new_entry()` and `files_stage()` gain the argument (default `NA`); `entry_metadata_json()` leaves the key out when `NA`; `schema_as_tibble()` and `schema_validate()` accept catalog files without the column (filled with `NA`).
   - Tests first: (a) a catalog file written with the old schema (column dropped in the test) is read, validated, rewritten with the column; (b) a manifest and file metadata without the key give `NA`; (c) for a table and a geospatial dataset staged with `geocode_engine = NA`, the `rcs` key-value metadata read from the file footer holds no key `geocode_engine` and equals `to_json(row_to_list(entry, kinds))` over the catalog fields other than `entry_not_embedded` and `geocode_engine`; in the red step the implementer records the file MD5 of `rcs_sim_table(200, seed = 1)` staged by the unchanged code and asserts the same MD5 after the change, in the same session (not a literal in the test file); (d) with `geocode_engine = "auto"` the embedded JSON and the manifest hold it; (e) `store_rebuild()` from manifests and from file metadata keeps it; (f) `store_sync()` and `store_copy()` between an old-format location and a new one work (old catalog rewritten with the column).
   - Acceptance: a–f pass; whole suite at default passes.
 
-- [ ] **P1. Credentials: object, Arrow and JSON clients.** D21, D22 (all but the DuckDB part), D25; facts 11, 12, 14. Prototype: `dev/prototype/auth.R` (reference only). Plan 0001: "Backends", "Results of wave 1" (A).
+- [x] **P1. Credentials: object, Arrow and JSON clients.** D21, D22 (all but the DuckDB part), D25; facts 11, 12, 14. Prototype: `dev/prototype/auth.R` (reference only). Plan 0001: "Backends", "Results of wave 1" (A).
   - Owns: new `R/auth.R`, `R/backend-gcs.R`, `R/backend.R`, `R/connect.R`, `R/objects.R` (only if validators need the field), new `tests/testthat/test-auth.R`, `tests/testthat/test-backend-gcs.R`, `tests/testthat/test-backend.R`, `tests/testthat/test-connect.R`, `_snaps/auth.md`, `_snaps/backend-gcs.md`, `_snaps/connect.md`.
   - Tests first:
     a. Offline with the seams mocked: default lookup order (`GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, platform path, ambient); key types; a file of another type aborts; at most one argument; same source → identical object; renewal five minutes before expiry (`auth_now()` mocked); token source not renewed (print says so); print never contains the token, refresh token or client secret and makes no network call (snapshot; `auth_http_token` mocked to fail if called).
@@ -310,6 +310,21 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
     e. `gcs_reset_clients()` clears the caches.
     f. At `full` with `RCS_TEST_GCS`: create a store with default credentials, write and read a table; a token expired by setting the cache expiry in the past is renewed and reads continue; `rcs_auth_gcs(token = "invalid")` aborts `rcs_error_backend` with the new hint; existing GCS tests pass; prefix removed.
   - Acceptance: a–f pass; whole suite at default passes; `R/auth.R` coverage ≥ 80% at default.
+
+#### Results of wave 1
+
+- Worktrees: the harness's own worktree isolation refused to start (drive-letter case of the path), so the orchestrator creates one worktree per package with `git worktree add` under `../rcs-wt/<package>` on branch `p2/<package>`, and agents run without isolation in that folder. Same for every later wave.
+- All three verifiers: PASS, no decision contradicted, nothing outside ownership.
+- N1a (`R/geo-encode.R`): coverage 94.9%. Deviations accepted by the verifier as completions of D31, now binding:
+  - "auto" check: a rebuilt copy larger than a hemisphere on the sphere also falls back (needed by test c: the complement has the same planar WKB area as the original, so the area check alone accepts it; a crossing row's box is under 180 degrees, so a faithful rebuild is never larger than a hemisphere).
+  - "s2": a rebuild that errors falls back to planar and is reported in `fallback`.
+  - Invalid special rows (box >= 180 degrees) are rebuilt on the sphere for every engine and reported in `rebuilt`; no planar fallback.
+  - `rebuilt` and `fallback` never overlap.
+  - The rebuilt spike of fact 18 stays `s2_is_valid() == FALSE` and is used as is (its s2 area and intersections are correct).
+  - Test (d) cannot fail against the old chunk-level rebuild with this data (cells and shares of valid rows do not change); it is a regression guard. Known gap: the special-row rebuild calls `s2::s2_rebuild()` directly, not through the `geo_rebuild()` seam (no test of an invalid special row whose rebuild errors).
+- N1c: red-step MD5 of `rcs_sim_table(200, seed = 1)` staged `4657dfb62cc9c2d4b1a56716a1e3ad24` before and after (verifier reproduced it, and identical MD5s and versions for 50 geospatial files). Added: `schema_validate()` rejects engine values other than `NA`, `auto`, `s2`, `planar`. A rebuild from file metadata writes no manifests (existing behaviour), so `expect_store_valid()` is not called after it.
+- P1 (`R/auth.R`, coverage 97.8%): the constructor never contacts the network, so test (f) checks `store_connect(uri, auth = rcs_auth_gcs(token = "invalid"))`. `GOOGLE_APPLICATION_CREDENTIALS` naming a missing file aborts `rcs_error_backend`; `CLOUDSDK_CONFIG` set without a file gives ambient (the gcloud folder is not tried). A plain token gets a nominal 3600 s Arrow expiry. The credential id is kept in `cache$id` (P2 uses it to know which credential GDAL holds). Every `be_new("gs://...")` without `auth` runs the default lookup (local files only). Snapshots `_snaps/backend-gcs.md` and `_snaps/connect.md` changed for the D25 hint; the connect snapshot passes `auth = rcs_auth_gcs(token = "some-token")` so it does not depend on the machine.
+- Gate: merges clean; `document()` added `export(rcs_auth_gcs)`, `S3method(print, rcs_auth_gcs)`, `man/rcs_auth_gcs.Rd`, `auth` in `store_connect.Rd` and `store_create.Rd`; no non-ASCII in `R/`. Whole suite at default: 31 files, 11,912 expectations, 0 failed, 0 errors, 13 skipped. `devtools::check(cran = TRUE)`: 0/0/0.
 
 ### Wave 2: N1b, O1, P2
 
