@@ -22,7 +22,8 @@ store_write(
   inputs = NULL,
   columns = NULL,
   check = TRUE,
-  rows_per_group = 50000L
+  rows_per_group = 50000L,
+  crs = NULL
 )
 }
 \arguments{
@@ -84,6 +85,10 @@ that still exist.}
 before anything is uploaded (see \code{\link[=store_check]{store_check()}}).}
 
 \item{rows_per_group}{Rows per Parquet row group.}
+
+\item{crs}{The coordinate reference system of the WKB column \code{geometry}
+of a lazy DuckDB table (anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, e.g. \code{4326});
+required for such a table, ignored otherwise.}
 }
 \value{
 A tibble with one row per location, invisibly: \code{location},

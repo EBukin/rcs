@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-6 done, U merged (2026-11-22)
+- **Status:** in execution; waves 0-7 done, X2 merged (2026-11-22)
 
 ## Goal
 
@@ -499,7 +499,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 7: DW1, U
 
-- [ ] **DW1. Writing from DuckDB, geospatial, one file.** D39, D31/D32 in batches. Prototype: none.
+- [x] **DW1. Writing from DuckDB, geospatial, one file.** D39, D31/D32 in batches. Prototype: none.
   - Owns: `R/write-duckdb.R` (geospatial part), `R/geo-encode.R` only for the variant of `geo_metadata()` taking types and extent, new `tests/testthat/test-write-duckdb-geo.R`.
   - Tests first: `rcs_sim_polygons(5000)` and `rcs_sim_points(5000)` loaded into DuckDB as WKB, written with `crs = 4326` in batches of 1,000: data, index table, `geo` metadata and catalog equal those of `store_write()` of the same `sf` (same `h3`, index rows, `.rcs_id` order, same version); the test input holds only integer, double and character attributes; if byte identity cannot be reached, the criterion becomes equal rows and an equal entry except `version`, reported as a deviation; missing `crs` aborts; the polygons of fact 18 warn per D32 with their keys; a spy on `duckdb_batches()` shows batches of at most 1,000 rows.
   - Acceptance: all pass; whole suite at default passes.
@@ -508,6 +508,15 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
   - Owns: new `R/duckdb-intersects.R`, `R/intersects.R` (dispatch at the top of `store_intersects()` only), `R/duckdb-tbl.R` (pending exact test in `collect.rcs_duckdb_tbl()` only), new `tests/testthat/test-duckdb-intersects.R`.
   - Tests first: polygons (2,000) and points (20,000, `partition = "h3"`); queries: 3 H3 cells, a thin diagonal strip (forces cells and index), a polygon with a hole, a bbox, an antimeridian query on the special rows; both modes: `exact = TRUE` returns exactly the rows of the Arrow `store_intersects()`; `exact = FALSE` the same candidate count; `exact = "sql"` (skip via `local_duckdb_spatial()`) the rows of the Arrow path with `exact_engine = "planar"` for every query except the antimeridian one; the SQL holds the index subquery only when `spatial_use_cells()` is `TRUE`; above 10,000 cells a temporary table is used; several calls combine; a table without `bbox` aborts; an aggregate after a pending exact test informs about the candidate set; round trip: for a dataset written by `store_write()` from `sf`, `store_open(engine = "duckdb") |> store_intersects(cells) |> collect()` equals the Arrow read.
   - Acceptance: all pass; whole suite at default passes.
+
+#### Results of wave 7 (with X2 of wave 10, started early)
+
+- U is recorded under wave 5. DW1 passed at the first verification; X2 needed one fixer round. No decision contradicted except the D36 point below, handed to DW2.
+- Scheduling: DW1 started on V2's branch (both own `R/write-duckdb.R`); X2 started as soon as every feature it documents was merged.
+- DW1 (`R/write-duckdb.R`, `R/geo-encode.R`): byte identity with `store_write()` of the same `sf` (data, index, `geo` metadata, catalog, version), also with fact-18 rows (identical D32 warning). `store_write()` gained `crs = NULL` as its last argument (`R/write.R`, outside DW1's files, accepted: D39 requires it). `geo_encode()` now orders rows with `order_radix()` (byte order, as tables); no existing version changed. `geo_metadata()` delegates to `geo_metadata_of(types, extent, crs)`.
+- D36 deviation left by DW1, assigned to DW2: an index above `rows_per_group * 100` rows is collected into R to stay identical to `stage_index()`.
+- X2 (vignettes `locations`, `geospatial`, article `testing`, `_pkgdown.yml`, roxygen): first verification found nine text inaccuracies, all fixed (Arrow cannot evaluate `rcs_h3_hex()` lazily, only DuckDB can; the default credential lookup is a chain, not a fall-through; test credits; `collect()` restores `rcs_h3` only for `store_open(engine = "duckdb")`; `geocode = FALSE` datasets follow the session rule). `_pkgdown.yml` already lists the `duckdb` article, which X1 creates; `check_pkgdown()` passes once it exists. The orchestrator rewrapped one long vignette line and named `geocode = FALSE` datasets in the `exact_engine` help of `store_read()` and `store_intersects()`.
+- Gate (main at 28319d6): `document()` regenerated the Rd pages of the X2 roxygen and `crs` in `store_write.Rd`. No non-ASCII in `R/`. Filtered tests (`write-duckdb|duckdb-intersects|intersects|geo-encode|geo-engine|write|files|read`): 9 files, 2,227 expectations, 0 failed. `devtools::check(cran = TRUE, args = "--no-tests")`: 0/0/0.
 
 ### Wave 8: DW2
 
@@ -525,7 +534,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 10: X2
 
-- [ ] **X2. Documentation: locations, geospatial, site index.** D21–D27, D29–D35, D44.
+- [x] **X2. Documentation: locations, geospatial, site index.** D21–D27, D29–D35, D44.
   - Owns: `vignettes/locations.Rmd`, `vignettes/geospatial.Rmd`, `vignettes/articles/testing.Rmd` (new test files and helpers), `_pkgdown.yml` (reference index for every export, the `rcs_h3` page, `print.rcs_auth_gcs`), roxygen of `rcs_auth_gcs()`, `store_auth_check()`, `store_sync()`, `store_status()`, `store_restore_types()`, `rcs_h3_hex()`, `rcs_geo_*()`.
   - Content: credentials (`auth =`, sources, renewal, GDAL being process-wide, `store_auth_check()`); sync in both directions, deletion and conflicts; H3 class and `rcs_h3_hex()`; the verbs and the round trip; prepared writes; geocoding engines and `exact_engine`.
   - Acceptance: `devtools::build_vignettes()` succeeds; `pkgdown::check_pkgdown()` passes; check 0/0/0; verifier reading as in X1.
