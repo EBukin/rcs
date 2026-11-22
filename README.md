@@ -19,6 +19,12 @@ ones: local folders or Google Cloud Storage buckets.
   passed to the Parquet reader. Spatial filters use H3 cells and
   bounding boxes stored with the data, so an area is read without
   scanning every geometry.
+- **Lazy first.** `store_open()` opens a dataset without reading it;
+  dplyr verbs describe the rows you want, and `collect()` reads them
+  into R.
+- **DuckDB in one call.** `store_duckdb()` turns every dataset into a
+  DuckDB view, in memory or in a database file next to your own tables,
+  and `store_write()` stores a DuckDB result without loading it into R.
 - **Same data, same version.** Writing identical data again changes
   nothing and copies nothing.
 
@@ -29,9 +35,9 @@ ones: local folders or Google Cloud Storage buckets.
 pak::pak("EBukin/rcs")
 ```
 
-Geospatial datasets need the package h3o, rasters need terra, and Google
-Cloud Storage needs gargle and httr2 and an arrow build with GCS
-support.
+Geospatial datasets need the package h3o, rasters need terra, DuckDB
+needs duckdb, DBI and dbplyr, and Google Cloud Storage needs gargle and
+httr2 and an arrow build with GCS support.
 
 ## Example
 
@@ -50,7 +56,7 @@ store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/my-store  2/2 files sent  38.2 kB  0.2s
+#> ✔ primary  <tempdir>/my-store  2/2 files sent  38.2 kB  0.4s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -65,15 +71,45 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   500  38.2 kB      2  2026-11-20 20:10
+#>     daily  table   500  38.2 kB      2  2026-11-22 13:26
 ```
 
-Read part of a dataset. Only the file of the year 2024 is opened.
+Open a dataset. Nothing is read yet; printing shows a header and the
+first rows.
 
 ``` r
-store_read(st, "sales/daily", year == 2024, qty > 45,
-  columns = c(shop_id, date, product, qty)
-)
+q <- store_open(st, "sales/daily")
+q
+#> # Dataset:  sales/daily [500 x 15] (table)
+#> # Location: primary (local)
+#> # Version:  b454e301 (current)
+#> # Files:    2 of 2
+#>    shop_id date        year product   qty price promo grade delivered      big
+#>      <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
+#>  1       1 2023-01-22  2023 p07        31  69.1 FALSE low   NA           9 e15
+#>  2       1 2023-01-24  2023 p19        42 182.  FALSE low   2023-01-28   3 e 2
+#>  3       1 2023-01-28  2023 p17        12  83.4 TRUE  mid   2023-01-29   2 e 2
+#>  4       1 2023-03-12  2023 p07        21 129.  FALSE low   NA           6 e 2
+#>  5       1 2023-03-15  2023 p18        29 157.  FALSE mid   2023-03-25   9 e15
+#>  6       1 2023-03-27  2023 p08        NA  81.9 FALSE high  2023-04-03   9 e15
+#>  7       1 2023-04-14  2023 p06        10 152.  TRUE  high  2023-04-16   3.e 2
+#>  8       1 2023-05-11  2023 p04        39 180.  TRUE  mid   2023-05-18   9 e15
+#>  9       1 2023-05-30  2023 p18        43 193.  FALSE high  2023-06-09   9 e15
+#> 10       1 2023-06-04  2023 p08        28 153.  FALSE low   2023-06-13   8 e 2
+#> # ℹ 5 more variables: wait <drtn>, note <chr>, tags <list>, ts <dttm>,
+#> #   ts_local <dttm>
+#> # ℹ 490 more rows
+#> # ℹ Use `collect()` to read the rows into R.
+```
+
+Describe the rows you want with dplyr verbs and read them with
+`collect()`. Only the file of the year 2024 is opened.
+
+``` r
+q |>
+  dplyr::filter(year == 2024, qty > 45) |>
+  dplyr::select(shop_id, date, product, qty) |>
+  dplyr::collect()
 #> # A tibble: 20 × 4
 #>    shop_id date       product   qty
 #>      <int> <date>     <fct>   <int>
@@ -99,6 +135,21 @@ store_read(st, "sales/daily", year == 2024, qty > 45,
 #> 20      20 2024-10-10 p09        48
 ```
 
+`store_read(st, "sales/daily", year == 2024, qty > 45)` does the same in
+one call.
+
+Query the whole store with SQL in DuckDB, without copying any data:
+
+``` r
+con <- store_duckdb(st)
+#> ✔ DuckDB view (native mode, nothing read yet): `sales.daily`.
+DBI::dbGetQuery(con, "SELECT year, sum(qty) AS qty FROM sales.daily GROUP BY year ORDER BY year")
+#>   year  qty
+#> 1 2023 5851
+#> 2 2024 6065
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
 Keep the same store in a bucket and in a local copy; writes reach both
 and reads use the local copy:
 
@@ -108,9 +159,14 @@ st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
 
 ## Learn more
 
-- `vignette("rcs")`: getting started with a local store.
+- `vignette("rcs")`: getting started with a local store: write, open,
+  read, update, keep versions.
+- `vignette("duckdb")`: datasets as DuckDB views, database files,
+  spatial filters in DuckDB, writing from DuckDB, the local-first
+  workflow.
 - `vignette("locations")`: primary and secondary locations, environment
-  variables, cloud credentials.
-- `vignette("geospatial")`: `sf` objects, spatial filters, rasters.
+  variables, cloud credentials, sync.
+- `vignette("geospatial")`: `sf` objects, spatial filters, geocoding
+  engines, rasters.
 
 The package is developed and tested on simulated data only.

@@ -1,0 +1,525 @@
+---
+title: "Querying a store with DuckDB"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Querying a store with DuckDB}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+# Show stores below the temporary folder as `<tempdir>/...`, use UTC and a
+# fixed width so that the output is the same on every machine.
+local({
+  dirs <- unique(c(
+    normalizePath(tempdir(), winslash = "/", mustWork = FALSE),
+    normalizePath(tempdir(), winslash = "\\", mustWork = FALSE),
+    tempdir()
+  ))
+  hide <- function(x) {
+    for (d in dirs) x <- gsub(d, "<tempdir>", x, fixed = TRUE)
+    x
+  }
+  for (h in c("output", "message", "warning", "error")) {
+    old <- knitr::knit_hooks$get(h)
+    knitr::knit_hooks$set(stats::setNames(
+      list(local({
+        old <- old
+        function(x, options) old(hide(x), options)
+      })),
+      h
+    ))
+  }
+})
+old_options <- options(width = 80, cli.width = 120, cli.hyperlink = FALSE)
+old_tz <- Sys.getenv("TZ", unset = NA)
+Sys.setenv(TZ = "UTC")
+# The chunks that run need duckdb, DBI and dbplyr, and h3o for the
+# geospatial dataset; without them the vignette shows the code only.
+has_duckdb <- requireNamespace("duckdb", quietly = TRUE) &&
+  requireNamespace("DBI", quietly = TRUE) &&
+  requireNamespace("dbplyr", quietly = TRUE) &&
+  requireNamespace("h3o", quietly = TRUE)
+# Load sf here, so that its start-up message does not break the output of
+# the first geospatial write.
+if (has_duckdb) suppressPackageStartupMessages(library(sf))
+```
+
+[DuckDB](https://duckdb.org) is a database that runs inside the R process
+and reads Parquet files directly. rcs opens a whole store in DuckDB with one
+call: every dataset becomes a *view*, a named query over the dataset's
+files. No data is copied; DuckDB reads the files when a query runs, and only
+the columns and row groups the query needs. SQL and dbplyr then work on the
+store, joins between datasets included, and results can be written back to
+the store without passing through R as a whole.
+
+This vignette needs the packages duckdb, DBI and dbplyr. It works with a
+store in a local folder; the last sections say what changes on Google Cloud
+Storage. `vignette("rcs")` introduces stores and `store_open()`.
+
+```{r setup}
+library(rcs)
+```
+
+## A store to work with
+
+A store with two datasets: a table of simulated daily sales, one file per
+year, and simulated polygons, a geospatial dataset with its H3 index
+table.
+
+```{r, eval = has_duckdb}
+path <- file.path(tempdir(), "duckdb-store")
+st <- store_connect(path, create = TRUE)
+
+store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year"
+)
+store_write(st, rcs_sim_polygons(300, seed = 3), "shapes/polygons",
+  title = "Polygons",
+  description = "Simulated polygons in open ocean.",
+  key = "id"
+)
+```
+
+## Views in memory
+
+`store_duckdb()` creates a DuckDB connection, here an in-memory database,
+with one view per dataset of the store (rasters excluded, index tables
+included), and returns the connection invisibly.
+
+```{r, eval = has_duckdb}
+con <- store_duckdb(st)
+```
+
+The first part of a dataset's name is the schema, the other parts, joined
+with `__`, are the view: `sales/daily` is the view `sales.daily`, and the
+index table of `shapes/polygons` is `shapes.polygons__h3`. A dataset with a
+one-part name goes to the schema `main`. Two datasets that would get the
+same view name abort, as does a first part `rcs` or one equal to the name
+of an attached database (such as `memory`).
+
+Views are queried with SQL like tables:
+
+```{r, eval = has_duckdb}
+DBI::dbGetQuery(con, "
+  SELECT year, count(*) AS n, sum(qty) AS qty
+  FROM sales.daily
+  GROUP BY year
+  ORDER BY year
+")
+```
+
+and can be joined. Here each polygon is joined with its rows in the index
+table, the H3 cells it touches; the macro `rcs_h3_hex()`, defined on every
+connection the package prepares, shows a cell, stored as a 64-bit integer,
+as its hex code:
+
+```{r, eval = has_duckdb}
+DBI::dbGetQuery(con, '
+  SELECT p.id, count(*) AS cells, rcs_h3_hex(min(i.h3)) AS first_cell
+  FROM shapes.polygons AS p
+  JOIN shapes.polygons__h3 AS i USING (".rcs_id")
+  GROUP BY p.id
+  ORDER BY cells DESC, p.id
+  LIMIT 3
+')
+```
+
+H3 cells are `BIGINT` columns. The connections the package makes use
+`bigint = "integer64"`, so that cells reach R as `bit64::integer64`
+values: a double cannot hold a cell exactly. A connection you make
+yourself and pass to the package must use the same setting, or the call
+aborts.
+
+## What a connection holds
+
+`store_tables()` lists the views of a connection, with the dataset and the
+version each one shows. Given the store as well, the column `current` says
+whether a view shows the version in the store's catalog.
+
+```{r, eval = has_duckdb}
+store_tables(con, st)
+```
+
+Given a store, it lists the datasets with the name of the view each one
+gets:
+
+```{r, eval = has_duckdb}
+store_tables(st)[c("dataset", "kind", "rows", "duckdb_view")]
+```
+
+The connection records its views in the table `rcs.views` and the store's
+locations in `rcs.store`. Neither holds a credential. A connection serves
+one store: preparing it for a second store aborts.
+
+```{r, eval = has_duckdb}
+DBI::dbGetQuery(con, "SELECT view, dataset, mode FROM rcs.views")
+```
+
+`store_duckdb(st, datasets = )` adds or refreshes the views of some datasets
+only (with their index tables) and leaves the others alone; without
+`datasets`, every view is refreshed and the views of datasets no longer in
+the catalog are dropped.
+
+## Two modes
+
+`store_duckdb()` has two modes, which differ in who reads the files.
+
+- `mode = "native"` (the default): each view is a `read_parquet()` query
+  over the dataset's file list, and DuckDB reads the files itself. The
+  views are plain query text, so they keep working in a database file
+  after it is reopened (see below). The `geometry` column of a geospatial
+  dataset has the DuckDB type `GEOMETRY`. On a bucket, DuckDB needs a
+  credential of its own, which the package gives it (see "Buckets").
+- `mode = "arrow"`: the Arrow dataset that the package opens for its own
+  reads is registered in DuckDB, and the view selects from it. DuckDB needs
+  no credential, filters are passed into the Arrow scan, and `geometry` is
+  WKB (a `BLOB`). The registration lives only as long as the connection.
+
+```{r, eval = has_duckdb}
+con_arrow <- store_duckdb(st, mode = "arrow")
+DBI::dbGetQuery(con_arrow, "SELECT count(*) AS n FROM sales.daily WHERE year = 2024")
+DBI::dbDisconnect(con_arrow, shutdown = TRUE)
+```
+
+In both modes each dataset is read from the location a read with
+`store_read()` would use, and the views show the versions of the catalog
+held by `st`. After `store_refresh(st)` or a write through another
+connection, call `store_duckdb()` again.
+
+`spatial = TRUE` also installs and loads DuckDB's `spatial` extension
+(downloaded on first use), and in arrow mode adds a column `geom` of type
+`GEOMETRY` to geospatial views, for DuckDB's spatial functions.
+
+```{r, eval = FALSE}
+con_spatial <- store_duckdb(st, mode = "arrow", spatial = TRUE)
+DBI::dbGetQuery(con_spatial, "SELECT id, ST_Area(geom) AS area FROM shapes.polygons LIMIT 3")
+DBI::dbDisconnect(con_spatial, shutdown = TRUE)
+```
+
+## dbplyr tables
+
+`store_open(engine = "duckdb")` returns a dbplyr table on a dataset's view.
+With `con`, the view is made (or refreshed) on that connection; without
+it, on an in-memory connection the package keeps for the store until the
+end of the session. Every dbplyr verb works, and the table prints as any
+dbplyr table.
+
+```{r, eval = has_duckdb}
+daily <- store_open(st, "daily", engine = "duckdb", con = con)
+daily |>
+  dplyr::filter(year == 2024) |>
+  dplyr::count(product, sort = TRUE) |>
+  head(3) |>
+  dplyr::collect()
+```
+
+Inside DuckDB, values keep the types they are stored with: a factor is
+text, a time difference a number. `collect()` on a table made by
+`store_open()` restores the R types from the catalog, as the Arrow engine
+does: factor levels, difftime units, 64-bit integers, and H3 cells as
+`rcs_h3` vectors printed as hex. A geospatial dataset comes back as an `sf`
+object with the catalog's coordinate reference system, without the row
+identifier `.rcs_id`.
+
+```{r, eval = has_duckdb}
+daily |>
+  dplyr::filter(year == 2024, qty > 48) |>
+  dplyr::select(shop_id, date, product, grade, wait) |>
+  dplyr::collect()
+```
+
+A plain `dplyr::tbl(con, DBI::Id(schema = "sales", table = "daily"))` gives
+the same rows with DuckDB's types. `store_restore_types()` restores the
+types of any data frame from a dataset's catalog entry.
+
+## Spatial filter in DuckDB
+
+`store_intersects()` works on a table made by `store_open(engine =
+"duckdb")`. The candidate test is added to the table's SQL: the box test on
+`bbox` and, for thin or long queries, the H3 cells with the index view. The
+table must still hold those columns, so call it before a `select()` that
+drops them.
+
+```{r, eval = has_duckdb}
+area <- sf::st_as_sfc(sf::st_bbox(
+  c(xmin = -28, ymin = 7, xmax = -27, ymax = 8),
+  crs = sf::st_crs(4326)
+))
+polygons <- store_open(st, "polygons", engine = "duckdb", con = con)
+```
+
+`exact` says where the exact test runs:
+
+- `exact = TRUE` (the default): in R, in `collect()`, on the candidate rows,
+  with the same engine as the Arrow path. The rows are exactly those of
+  `store_open(st, "polygons") |> store_intersects(area) |> collect()`.
+- `exact = FALSE`: no exact test; the result is the candidate set, which
+  holds every intersecting row and may hold others, with a message saying
+  so.
+- `exact = "sql"`: in DuckDB, with `ST_Intersects()` of the `spatial`
+  extension (installed and loaded when needed). The query stays lazy, so
+  the result can be aggregated or joined in DuckDB. The test is in the
+  plane of the coordinates: the rows are those of the Arrow path with
+  `exact_engine = "planar"`, except for queries across the antimeridian or
+  around a pole.
+
+```{r, eval = has_duckdb}
+polygons |>
+  store_intersects(area) |>
+  dplyr::collect() |>
+  nrow()
+
+polygons |>
+  store_intersects(area, exact = FALSE) |>
+  dplyr::collect() |>
+  nrow()
+```
+
+```{r, eval = FALSE}
+polygons |>
+  store_intersects(area, exact = "sql") |>
+  dplyr::count(cat)
+```
+
+Several calls combine: a row must intersect every query. A count or other
+aggregate computed in DuckDB after a pending exact test (`exact = TRUE`)
+counts the candidate rows, since the exact test runs only in `collect()`;
+use `exact = "sql"` for that. A query of more than 10,000 H3 cells puts the
+cells in a temporary table on the connection, kept until it is closed.
+
+## Writing from DuckDB
+
+`store_write()` accepts a lazy table on a DuckDB connection: a dbplyr
+query on the views, on your own tables, or both. The result is stored
+without being collected into R as a whole.
+
+```{r, eval = has_duckdb}
+by_product <- dplyr::tbl(con, DBI::Id(schema = "sales", table = "daily")) |>
+  dplyr::group_by(year, product) |>
+  dplyr::summarise(
+    qty = as.integer(sum(qty, na.rm = TRUE)),
+    days = dplyr::n(),
+    .groups = "drop"
+  )
+
+store_write(st, by_product, "sales/by_product",
+  title = "Sales by product and year",
+  description = "Quantity sold and number of rows per product and year.",
+  key = c("year", "product")
+)
+```
+
+How it works:
+
+- The query runs once inside DuckDB into a temporary copy, a table
+  `rcs_write_<random>` on the same connection. Every later step reads that
+  copy, and it is dropped when the call ends, also after an error. It
+  needs room in DuckDB's memory or its temporary folder.
+- The key is checked and the partitions are listed in DuckDB. Then the rows
+  are fetched in batches of `getOption("rcs.duckdb_batch_rows")` rows
+  (`5e5` by default), sorted as the package sorts them, and streamed into
+  the Parquet files; R holds about one batch at a time. A progress bar
+  shows the batches of a long write.
+- The files are staged, checked and land in every location as for any
+  other write; DuckDB never uploads. They are identical to those written
+  from the same rows collected into R, so both give the same version.
+- Modes `"create"` and `"replace"` work; `"update"` aborts.
+- Types: integers, doubles, text, dates and logicals are stored as they
+  are, `BIGINT` as 64-bit integers (`bit64::integer64` in R),
+  `TIMESTAMP` without time zone and `TIMESTAMP WITH TIME ZONE` in UTC.
+  `HUGEINT`, `UHUGEINT`, `INTERVAL`, `UNION` and `MAP` columns abort,
+  naming the columns. DuckDB's `sum()` of an integer column is a
+  `HUGEINT`; that is why the query above casts it with `as.integer()`.
+- Values keep their DuckDB types: a factor read through a view is text,
+  and is stored as text.
+
+A table with a column `geometry`, WKB (`BLOB`) or `GEOMETRY`, is written
+as a geospatial dataset, and `crs` must give its coordinate reference
+system. The geometries pass through R in batches: per batch, the bounding
+boxes, the H3 cells and the index rows are computed as for an `sf` object,
+with the same geocoding engine and warning (see `?store_write`). The rows
+are then sorted and written from DuckDB. The columns `.rcs_id`, `h3`,
+`bbox` and `geom` of the input are the package's own: they are dropped
+with a message and computed again.
+
+```{r, eval = has_duckdb}
+cat_a <- polygons |>
+  dplyr::filter(cat == "a") |>
+  dplyr::select(id, area, geometry)
+
+store_write(st, cat_a, "shapes/cat_a",
+  title = "Polygons of category a",
+  description = "The polygons of category a, written from DuckDB.",
+  key = "id", crs = 4326
+)
+```
+
+`partition = "h3"`, `geocode = FALSE` and `geocode_engine` work as for an
+`sf` object.
+
+## A database file
+
+With `path`, the views live in a DuckDB database file, created when
+missing, together with any table or view you create in it. The file must
+lie outside the folders of the store (a sync would carry it along). A
+file `work.duckdb` is attached as the database `work`, so no dataset of
+the store may have the first part `work`.
+
+```{r, eval = has_duckdb}
+DBI::dbDisconnect(con, shutdown = TRUE)
+
+db <- file.path(tempdir(), "analysis.duckdb")
+con <- store_duckdb(st, path = db)
+```
+
+A view is query text, so the file stays small whatever the size of the
+datasets. Your own tables sit next to the views. The cell column is named `cell`
+here, because a column `h3` of a table written with `store_write()` is
+taken as the package's own and dropped.
+
+```{r, eval = has_duckdb}
+DBI::dbExecute(con, "
+  CREATE TABLE main.cell_counts AS
+  SELECT h3 AS cell, count(*) AS polygons
+  FROM shapes.polygons__h3
+  GROUP BY h3
+")
+store_tables(con, st)
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+### Reopening
+
+Call `store_duckdb(st, path = db)` again to reopen the file. It refreshes
+the file to the catalog of `st`: views of new datasets are added, views of
+deleted datasets dropped, every view points to the current version, the
+credentials are renewed, and your own tables and views are left as they
+are. A table or a view of yours that has the name of a dataset's view
+aborts, naming it.
+
+`store_duckdb(path = db)`, without `st`, reads the store's locations from
+the table `rcs.store` in the file, connects to the store with default
+credentials, and refreshes the same way:
+
+```{r, eval = has_duckdb}
+con <- store_duckdb(path = db)
+DBI::dbGetQuery(con, "SELECT * FROM main.cell_counts ORDER BY polygons DESC, cell LIMIT 3")
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+The file is also a plain DuckDB database:
+`DBI::dbConnect(duckdb::duckdb(dbdir = db), bigint = "integer64")` opens
+it without rcs. Your tables then work, and native views work as long as
+their files exist, with these limits:
+
+- the views show the versions of the last refresh. A store without history
+  deletes the files of a replaced version, so a view of a dataset written
+  since then fails until the file is refreshed;
+- views on Google Cloud Storage need a DuckDB secret first;
+- views in arrow mode do not work until `store_duckdb()` is called again
+  (it says so when it prepares them in a file).
+
+`store_tables(con, st)` shows which views are no longer current. Here the
+daily sales are written again with changed quantities, and the file is
+opened without rcs:
+
+```{r, eval = has_duckdb}
+sales <- rcs_sim_table(500, seed = 1)
+sales$qty <- sales$qty + 1L
+store_write(st, sales, "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+```
+
+```{r, eval = has_duckdb, message = FALSE}
+con <- DBI::dbConnect(duckdb::duckdb(dbdir = db), bigint = "integer64")
+store_tables(con, st)[c("schema", "name", "type", "current")]
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+`store_duckdb(st, path = db)` brings the view up to date.
+
+## The local-first workflow
+
+DuckDB and a local store together make a complete workplace on one
+machine, with no cloud credential:
+
+1. Keep the store in a local folder and write to it as usual.
+2. Open it in a DuckDB file with `store_duckdb(st, path = )`; build
+   aggregations, joins and your own tables in SQL or dbplyr.
+3. Write the results that should be kept back to the store with
+   `store_write()`, from DuckDB directly.
+4. Reopen the file any time with `store_duckdb()`, which refreshes the
+   views.
+
+```{r, eval = has_duckdb}
+con <- store_duckdb(st, path = db)
+cells <- dplyr::tbl(con, DBI::Id(schema = "main", table = "cell_counts")) |>
+  dplyr::filter(polygons > 1)
+store_write(st, cells, "shapes/shared_cells",
+  title = "Shared cells",
+  description = "H3 cells touched by more than one polygon.",
+  key = "cell"
+)
+DBI::dbDisconnect(con, shutdown = TRUE)
+```
+
+5. When the work is ready to share, add a bucket as a secondary location
+   and copy the store there with `store_sync()` (see
+   `vignette("locations")`). Only then are cloud credentials needed.
+
+```{r, eval = FALSE}
+st <- store_connect(path, secondary = "gs://my-bucket/store", create = TRUE)
+store_sync(st)
+```
+
+Afterwards every write reaches both locations, and reads, DuckDB views
+included, keep using the local copy.
+
+## Buckets
+
+On Google Cloud Storage nothing changes in the calls; only who reads the
+files does. In arrow mode, Arrow reads them with the connection's
+credentials (see `vignette("locations")`), as for any read. In native mode
+DuckDB reads them itself, through its `httpfs` extension (downloaded on
+first use), and needs a credential: `store_duckdb()` creates for each
+bucket location a temporary DuckDB secret from the location's credential.
+The secret lives only in this connection; it is never written to the
+database file, to the store or to an environment variable.
+
+```{r, eval = FALSE}
+st <- store_connect("gs://my-bucket/store")
+con <- store_duckdb(st, path = "~/work/analysis.duckdb")
+DBI::dbGetQuery(con, "SELECT year, sum(qty) AS qty FROM sales.daily GROUP BY year")
+```
+
+A secret holds an access token, not a key, and the token is valid for about
+an hour. After an hour of DuckDB work on a bucket, call `store_duckdb()`
+again: every call renews the secrets (and refreshes the views).
+
+```{r, eval = FALSE}
+con <- store_duckdb(st, path = "~/work/analysis.duckdb")
+```
+
+A credential that DuckDB cannot use (the ambient credential of a Google
+Cloud machine without a key file) aborts in native mode; use
+`mode = "arrow"` there. `store_auth_check(st)` reports whether DuckDB, and
+each other client, can read each location.
+
+```{r, include = FALSE, eval = has_duckdb}
+unlink(c(path, db, paste0(db, ".wal")), recursive = TRUE)
+```
+
+```{r, include = FALSE}
+options(old_options)
+if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)
+```

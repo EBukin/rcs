@@ -20,13 +20,16 @@
 
 #' Open a dataset as a lazy query
 #'
-#' Builds a lazy query on one dataset of a store, from the files its catalog
-#' names (the folder is never listed). The query is transformed with the
-#' dplyr verbs `filter()`, `select()`, `mutate()`, `rename()`, `arrange()`,
-#' `distinct()`, `head()`, and run with `collect()` (an R data frame),
-#' `compute()` (rows kept in memory as Arrow data), `pull()` or `glimpse()`.
-#' Arrow pushes filters and column selection into the scan, so only the
-#' needed files, row groups and columns are read.
+#' The usual way to work with a dataset: open it, describe the rows you want
+#' with dplyr verbs, and read them into R with `collect()`. Opening reads no
+#' data; the query is built from the files the dataset's catalog names (the
+#' folder is never listed). The query is transformed with the dplyr verbs
+#' `filter()`, `select()`, `mutate()`, `rename()`, `arrange()`, `distinct()`,
+#' `head()`, and run with `collect()` (an R data frame), `compute()` (rows
+#' kept in memory as Arrow data), `pull()` or `glimpse()`. Arrow pushes
+#' filters and column selection into the scan, so only the needed files, row
+#' groups and columns are read. [store_read()] is the shortcut for
+#' `store_open()`, `filter()`, `select()` and `collect()` in one call.
 #'
 #' * A filter whose columns are all partition columns is first evaluated on
 #'   the partition values recorded in the catalog: only the files of the
@@ -37,10 +40,35 @@
 #'   system. It restores the R types Arrow does not restore by itself
 #'   (difftime units, `bit64::integer64`, factor levels, plain list columns)
 #'   and drops the row identifier `.rcs_id` that the package adds to
-#'   geospatial data; the columns `h3`, `bbox` and `h3_p<r>` are returned.
+#'   geospatial data; the columns `h3`, `bbox` and `h3_p<r>` are returned,
+#'   the cells as [rcs_h3] vectors.
 #'
 #' The query reads from the location chosen as for [store_read()], with the
 #' catalogs held by the connection.
+#'
+#' @section Printing:
+#' Printing a query reads its first rows, and only those: `head(n + 1)` of
+#' the query, the exact test of a spatial filter included, so that it can
+#' tell whether more rows exist without counting them. It opens the data
+#' files it needs. The first `n` rows are shown as a tibble under a header:
+#'
+#' * `Dataset:` the full name, the number of rows and columns, and the kind.
+#'   The number of rows comes from the catalog when the query is the dataset
+#'   itself, with columns selected, renamed or computed; after a filter, a
+#'   spatial filter or any other verb it is shown as `??`. The number of
+#'   columns is that of the data frame `collect()` returns.
+#' * `Location:` the location read (`primary` or `secondary <n>`, local or
+#'   GCS).
+#' * `Version:` the first 8 characters of the version, current or earlier.
+#' * `Files:` the files kept of the dataset's files, `(pruned)` when a
+#'   filter on partition columns or a spatial filter dropped some.
+#' * `Spatial:` and `Filter:` the spatial filter and the row filter, when
+#'   set.
+#'
+#' The footer says how many rows are not shown (`more rows` when the total is
+#' not known, `more rows may exist` while an exact spatial test is pending)
+#' and reminds that `collect()` reads the rows into R. A table opened with
+#' `engine = "duckdb"` prints as any dbplyr table.
 #'
 #' @param st A store connection made by [store_connect()].
 #' @param dataset Name of the dataset: the full name, or its last part when
@@ -50,16 +78,26 @@
 #'   Only `NULL` with `engine = "duckdb"`.
 #' @param engine `"arrow"` (the default) for a lazy Arrow query of class
 #'   `rcs_query`; `"duckdb"` for a dbplyr table on the dataset's DuckDB view
-#'   (see [store_duckdb()]), of class `rcs_duckdb_tbl`. Its `collect()`
-#'   restores the R types and the geometry as for the Arrow engine; it
-#'   needs the packages duckdb, DBI and dbplyr.
+#'   (see [store_duckdb()] and `vignette("duckdb")`), of class
+#'   `rcs_duckdb_tbl`. Every dbplyr verb works on it; its `collect()`
+#'   restores the R types (factor levels, difftime units,
+#'   `bit64::integer64`, [rcs_h3] cells) and the geometry as for the Arrow
+#'   engine, and drops `.rcs_id`. It needs the packages duckdb, DBI and
+#'   dbplyr.
 #' @param con With `engine = "duckdb"`: `NULL` for an in-memory connection
-#'   that the package keeps, one per store, or a DuckDB connection made with
-#'   `bigint = "integer64"`.
+#'   that the package keeps, one per store, until the end of the session; or
+#'   a DuckDB connection made with `bigint = "integer64"`, on which the view
+#'   is created (or refreshed) as by `store_duckdb(st, con = con)`.
 #' @param mode,spatial With `engine = "duckdb"`: as in [store_duckdb()].
-#' @return A lazy query of class `rcs_query`. Print it to see the dataset,
-#'   the files left after pruning and the columns.
-#' @seealso [store_read()], [store_intersects()].
+#' @param x A query made by `store_open()` with `engine = "arrow"`.
+#' @param ... Passed to the tibble print method (for example `width`).
+#' @param n Number of rows to print; `NULL` uses the option `rcs.print_rows`
+#'   (10).
+#' @return `store_open()`: a lazy query of class `rcs_query`, or with
+#'   `engine = "duckdb"` a lazy dbplyr table of class `rcs_duckdb_tbl`.
+#'   `print()`: `x`, invisibly.
+#' @seealso [store_read()], [store_intersects()], [rcs_query-dplyr],
+#'   [store_duckdb()].
 #' @export
 #' @examples
 #' location <- file.path(tempdir(), "rcs-example-open")
@@ -70,6 +108,7 @@
 #' )
 #' q <- store_open(st, "daily")
 #' q
+#' print(q, n = 3)
 #' q |>
 #'   dplyr::filter(year == 2024, qty > 40) |>
 #'   dplyr::select(shop_id, date, qty) |>
@@ -568,22 +607,7 @@ glimpse.rcs_query <- function(x, width = NULL, ...) {
 
 # Printing --------------------------------------------------------------------
 
-#' Print a lazy query
-#'
-#' Reads the first rows of the query (`head(n + 1)`, so that it can tell
-#' whether more rows exist without counting them; the exact test of a
-#' spatial filter included) and prints `n` of them with pillar, under a
-#' header that names the dataset, the location, the version, the files kept
-#' and the filters. The number of rows is known only when the query is the
-#' dataset itself, with columns selected, renamed or computed; otherwise it
-#' is shown as `??`. Printing opens the data files it needs.
-#'
-#' @param x A query made by [store_open()].
-#' @param ... Passed to the tibble print method (for example `width`).
-#' @param n Number of rows to show; `NULL` uses the option `rcs.print_rows`
-#'   (10).
-#' @return `x`, invisibly.
-#' @noRd
+#' @rdname store_open
 #' @export
 print.rcs_query <- function(x, ..., n = NULL) {
   local_trace("print")
