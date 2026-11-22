@@ -80,15 +80,37 @@ duckdb_qualified <- function(con, name) {
 #' are dropped; with `datasets` given only those views and rows are
 #' replaced. [store_tables()] lists what a connection holds.
 #'
-#' @param st A store connection made by [store_connect()].
-#' @param path `NULL` for an in-memory database. A file database is not
-#'   supported yet.
+#' @section Database files:
+#' With `path`, the views, the `rcs` tables and the tables you create live in
+#' a DuckDB file, created when missing. A file `work.duckdb` is attached as
+#' the database `work`, so no dataset may have the first part `work`. The
+#' file must lie outside every local location of the store, which a sync
+#' would carry it to.
+#'
+#' Calling `store_duckdb(st, path)` again on the same file refreshes it:
+#' views are replaced to show the versions in `st`'s catalog, views of
+#' deleted datasets are dropped, secrets are recreated, and your own tables
+#' and views are left untouched (a table or a view not made by
+#' `store_duckdb()` with a view's name aborts). `store_duckdb(path = )`
+#' without `st` reconnects to the store recorded in `rcs.store`, with default
+#' credentials, and refreshes the same way.
+#'
+#' A plain `DBI::dbConnect(duckdb::duckdb(dbdir = path))` also opens the
+#' file: your tables work, and native views work while their files exist,
+#' but they show the versions of the last refresh, views on Google Cloud
+#' Storage need a secret first, and views in arrow mode do not work until
+#' `store_duckdb()` is called again.
+#'
+#' @param st A store connection made by [store_connect()]. It may be left
+#'   out only with `path`, to reopen a file prepared earlier.
+#' @param path `NULL` for an in-memory database, or the path of a DuckDB
+#'   database file (see "Database files").
 #' @param datasets `NULL` for every dataset, or full or short dataset names;
 #'   their index tables are added.
 #' @param mode `"native"` or `"arrow"`, see above.
 #' @param spatial `TRUE` loads the DuckDB `spatial` extension (downloaded on
 #'   first use).
-#' @param con `NULL` to create a new in-memory connection, or an existing
+#' @param con `NULL` to create a new connection, or an existing
 #'   DuckDB connection made with `bigint = "integer64"` (H3 cells do not fit
 #'   a double); `path` must then be `NULL`.
 #' @return The DuckDB connection, invisibly. Close it with
@@ -118,22 +140,17 @@ store_duckdb <- function(st, path = NULL, datasets = NULL, mode = c("native", "a
     )
   }
   check_string(path, allow_null = TRUE, call = call)
-  if (!is.null(path)) {
-    cli::cli_abort(
-      c(
-        "A DuckDB database file ({.arg path}) is not supported yet.",
-        i = "Leave {.arg path} as {.code NULL} for an in-memory database."
-      ),
-      class = "rcs_error_not_implemented", call = call
-    )
-  }
   if (missing(st)) {
-    cli::cli_abort(
-      "{.arg st} is missing; it may be left out only with {.arg path}.",
-      class = "rcs_error_argument", call = call
-    )
+    if (is.null(path)) {
+      cli::cli_abort(
+        "{.arg st} is missing; it may be left out only with {.arg path}.",
+        class = "rcs_error_argument", call = call
+      )
+    }
+    st <- NULL
+  } else {
+    validate_store(st, call = call)
   }
-  validate_store(st, call = call)
   mode <- rlang::arg_match(mode, error_call = call)
   check_flag(spatial, call = call)
   if (!is.null(datasets) && (!is.character(datasets) || anyNA(datasets))) {
@@ -146,16 +163,42 @@ store_duckdb <- function(st, path = NULL, datasets = NULL, mode = c("native", "a
   if (!is.null(con)) {
     duckdb_check_con(con, call = call)
   }
-
-  chosen <- duckdb_datasets(st, datasets, call = call)
-  made <- is.null(con)
-  if (made) {
-    # duckdb's once-per-session note about its storage folder is not ours.
-    con <- suppressMessages(DBI::dbConnect(duckdb::duckdb(), bigint = "integer64"))
-    done <- FALSE
-    on.exit(if (!done) DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  if (!is.null(path)) {
+    path <- duckdb_file_path(path)
+    if (is.null(st) && !file.exists(path)) {
+      cli::cli_abort(
+        c(
+          "{.arg st} is missing and the DuckDB file {.path {path}} does not exist.",
+          i = "Give {.arg st} to create the file."
+        ),
+        class = "rcs_error_argument", call = call
+      )
+    }
+    if (!is.null(st)) {
+      duckdb_check_path(st, path, call = call)
+    }
   }
 
+  made <- is.null(con)
+  if (made) {
+    created <- !is.null(path) && !file.exists(path)
+    con <- duckdb_connect(path, call = call)
+    done <- FALSE
+    on.exit(
+      if (!done) {
+        DBI::dbDisconnect(con, shutdown = TRUE)
+        # A file this call created and could not fill is removed.
+        if (created) unlink(paste0(path, c("", ".wal")))
+      },
+      add = TRUE
+    )
+  }
+  if (is.null(st)) {
+    st <- duckdb_reopen_store(con, path, call = call)
+    duckdb_check_path(st, path, call = call)
+  }
+
+  chosen <- duckdb_datasets(st, datasets, call = call)
   duckdb_check_store(con, st, call = call)
   duckdb_check_names(con, st, chosen, call = call)
   duckdb_check_objects(con, chosen, call = call)
@@ -184,12 +227,88 @@ store_duckdb <- function(st, path = NULL, datasets = NULL, mode = c("native", "a
     rcs_inform(c(i = "No dataset to show in DuckDB."))
   } else {
     rcs_inform(c(v = "DuckDB {cli::qty(length(views))}view{?s} ({mode} mode, nothing read yet): {.code {views}}."))
+    if (!is.null(path) && mode == "arrow") {
+      rcs_inform(c(
+        i = "Views in arrow mode do not work after the file is closed: call {.fn store_duckdb} again after reopening it."
+      ))
+    }
   }
   if (made) {
     done <- TRUE
   }
   invisible(con)
 }
+
+# Database files ------------------------------------------------------------------
+
+# Absolute path of a database file, with forward slashes.
+duckdb_file_path <- function(path) {
+  path <- path.expand(path)
+  dir <- normalizePath(dirname(path), winslash = "/", mustWork = FALSE)
+  paste0(sub("/+$", "", dir), "/", basename(path))
+}
+
+# A new connection, in memory (`path` NULL) or to a file created when missing.
+duckdb_connect <- function(path = NULL, call = caller_env()) {
+  dbdir <- path %||% ":memory:"
+  tryCatch(
+    # duckdb's once-per-session note about its storage folder is not ours.
+    suppressMessages(DBI::dbConnect(duckdb::duckdb(dbdir = dbdir), bigint = "integer64")),
+    error = function(e) {
+      cli::cli_abort(
+        "Opening the DuckDB database file {.path {path}} failed.",
+        class = "rcs_error_duckdb", parent = e, call = call
+      )
+    }
+  )
+}
+
+# D17: a file inside a local location would be carried by a sync.
+duckdb_check_path <- function(st, path, call = caller_env()) {
+  locations <- c(list(st$primary), st$secondary)
+  locals <- Filter(function(l) inherits(l$backend, "rcs_backend_local"), locations)
+  fold <- if (.Platform$OS.type == "windows") tolower else identity
+  file <- fold(path)
+  for (location in locals) {
+    root <- sub("/+$", "", normalizePath(location$backend$root, winslash = "/", mustWork = FALSE))
+    if (startsWith(file, paste0(fold(root), "/"))) {
+      uri <- location$uri
+      cli::cli_abort(
+        c(
+          "The DuckDB file {.path {path}} is inside the store location {.path {uri}}.",
+          i = "A sync would copy it; put it outside every location of the store."
+        ),
+        class = "rcs_error_argument", call = call
+      )
+    }
+  }
+  invisible()
+}
+
+# D16: the store a database file serves, connected from its rcs.store with
+# default credentials.
+duckdb_reopen_store <- function(con, path, call = caller_env()) {
+  if (!duckdb_has_table(con, "rcs", "store")) {
+    cli::cli_abort(
+      c(
+        "The DuckDB file {.path {path}} holds no table {.code rcs.store}.",
+        i = "Only a file prepared by {.fn store_duckdb} can be reopened without {.arg st}."
+      ),
+      class = "rcs_error_duckdb", call = call
+    )
+  }
+  stored <- DBI::dbGetQuery(con, "SELECT role, uri FROM rcs.store")
+  primary <- stored$uri[stored$role == "primary"]
+  if (length(primary) != 1) {
+    cli::cli_abort(
+      "The table {.code rcs.store} of {.path {path}} names {length(primary)} primary locations, not one.",
+      class = "rcs_error_duckdb", call = call
+    )
+  }
+  store_connect(primary, stored$uri[stored$role == "secondary"])
+}
+
+# Connections ---------------------------------------------------------------------
 
 # A connection passed in: DuckDB, open, and BIGINT as integer64 (fact 1).
 duckdb_check_con <- function(con, call = caller_env()) {

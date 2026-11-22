@@ -97,7 +97,7 @@ test_that("store_duckdb(st, path) on an existing file adds and drops views and k
   store_write(st, rcs_sim_table(10, seed = 3), "extra",
     title = "Extra", description = "Simulated table."
   )
-  store_write(st, rcs_sim_table(120, seed = 4), "sales/daily",
+  store_write(st, rcs_sim_table(120, seed = 4), "sales/daily", mode = "replace",
     title = "Daily", description = "Simulated daily table.",
     key = c("shop_id", "date", "product"), partition = "year"
   )
@@ -166,7 +166,7 @@ test_that("a path inside a local location aborts", {
   expect_false(file.exists(inside))
   deeper <- file.path(st$primary$backend$root, "sub", "work.duckdb")
   expect_error(store_duckdb(st, path = deeper), class = "rcs_error_argument")
-  expect_snapshot(store_duckdb(st, path = inside), error = TRUE, transform = function(x) gsub("<[^>]*>", "<path>", x))
+  expect_snapshot(store_duckdb(st, path = inside), error = TRUE, transform = function(x) gsub("'[^']*'", "<path>", x))
 })
 
 test_that("a file stem equal to a used schema aborts and leaves no file", {
