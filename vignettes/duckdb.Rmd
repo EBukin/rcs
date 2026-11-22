@@ -146,7 +146,8 @@ store_tables(con, st)
 ```
 
 Given a store, it lists the datasets with the name of the view each one
-gets:
+gets. Index tables are left out here, though the connection has views for
+them (`shapes.polygons__h3` above):
 
 ```{r, eval = has_duckdb}
 store_tables(st)[c("dataset", "kind", "rows", "duckdb_view")]
@@ -206,8 +207,17 @@ DBI::dbDisconnect(con_spatial, shutdown = TRUE)
 `store_open(engine = "duckdb")` returns a dbplyr table on a dataset's view.
 With `con`, the view is made (or refreshed) on that connection; without
 it, on an in-memory connection the package keeps for the store until the
-end of the session. Every dbplyr verb works, and the table prints as any
-dbplyr table.
+end of the session. The table prints as any dbplyr table.
+
+The dplyr verbs that dbplyr translates to SQL (`filter()`, `select()`,
+`mutate()`, `summarise()`, `arrange()`, joins, `head()` and others) stay
+lazy: they build a query that runs in DuckDB. Rows come into R only with
+`collect()`, or with verbs that collect, such as `pull()`. A verb or a
+function that dbplyr cannot translate, or that DuckDB does not know,
+gives an error, as for any dbplyr table. `compute()`
+returns a plain dbplyr table, whose `collect()` does not restore the R
+types described below. An earlier version cannot be opened this way:
+`version` must be `NULL` with `engine = "duckdb"`.
 
 ```{r, eval = has_duckdb}
 daily <- store_open(st, "daily", engine = "duckdb", con = con)
@@ -224,7 +234,8 @@ text, a time difference a number. `collect()` on a table made by
 does: factor levels, difftime units, 64-bit integers, and H3 cells as
 `rcs_h3` vectors printed as hex. A geospatial dataset comes back as an `sf`
 object with the catalog's coordinate reference system, without the row
-identifier `.rcs_id`.
+identifier `.rcs_id`. A column computed in DuckDB keeps its DuckDB type:
+a count, for example, comes back as a 64-bit integer.
 
 ```{r, eval = has_duckdb}
 daily |>
@@ -322,8 +333,9 @@ How it works:
   copy, and it is dropped when the call ends, also after an error. It
   needs room in DuckDB's memory or its temporary folder.
 - The key is checked and the partitions are listed in DuckDB. Then the rows
-  are fetched in batches of `getOption("rcs.duckdb_batch_rows")` rows
-  (`5e5` by default), sorted as the package sorts them, and streamed into
+  are fetched in batches of as many rows as the option
+  `rcs.duckdb_batch_rows` says (`5e5` by default), sorted as the package
+  sorts them, and streamed into
   the Parquet files; R holds about one batch at a time. A progress bar
   shows the batches of a long write.
 - The files are staged, checked and land in every location as for any

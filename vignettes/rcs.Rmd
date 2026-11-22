@@ -69,7 +69,10 @@ library(rcs)
   is stored as one file, or as one file per *partition* (for example one per
   year).
 - A **version** is a 16-character code computed from the content of a
-  dataset's files. The same data always give the same version.
+  dataset's files. Each file also embeds the dataset's metadata: its name,
+  title, description, key, partition and column types, among others. So
+  the same rows give the same version only with the same name and the
+  same metadata; a change of title alone gives a new version.
 
 ## Create a store
 
@@ -119,10 +122,11 @@ every file in the store is compared with the staged one. Only then is the
 catalog switched to the new version, so a reader never sees a half-written
 dataset.
 
-Writing the same data again changes nothing. The version is computed from
-the content, so the package sees that the store already holds it. A
-dataset that exists can only be written again with `mode = "replace"` or
-`mode = "update"`:
+A dataset that exists is written again only with `mode = "replace"` or
+`mode = "update"`. With the default `mode = "create"`, the write stops with
+an error (class `rcs_error_dataset_exists`). If the new data and metadata
+give the version the store already holds, nothing is uploaded and the
+summary says the dataset is unchanged. That is the case here:
 
 ```{r}
 store_write(st, sales, "sales/daily",
@@ -232,7 +236,8 @@ rcs_trace()[c("counter", "detail", "n")]
 options(rcs.trace = FALSE)
 ```
 
-One of the two files was opened.
+One of the two files was opened. The records are kept until the next call
+of a package function; `rcs_trace_reset()` clears them.
 
 ## Read in one call
 
@@ -275,9 +280,11 @@ store_sample(st, "daily", n = 5, qty > 40, columns = c(shop_id, date, qty),
 ## Update some partitions
 
 With `mode = "update"`, only the partitions whose values occur in the new
-data are replaced; the other partitions stay as they are. Here the rows of
-2024 are written again with corrected quantities. The key, the partition
-columns and the column types come from the stored dataset and must match.
+data are replaced; the other partitions stay as they are. It works only on
+a partitioned dataset: a dataset stored as one file must be written with
+`mode = "replace"`. Here the rows of 2024 are written again with corrected
+quantities. The key, the partition columns and the column types come from
+the stored dataset and must match.
 
 ```{r}
 fix <- sales[sales$year == 2024, ]
@@ -339,7 +346,10 @@ store_read(sth, "daily", year == 2024, columns = c(shop_id, date, qty),
 
 Old versions stay until `store_prune()` removes them. `keep` is the number
 of earlier versions to keep; `dry_run = TRUE` only reports. Files that the
-current version still uses are never deleted.
+current version still uses are never deleted. The count of files covers
+data files and the manifest of each removed version. Here the update
+replaced one partition, so the old version leaves one data file and one
+manifest.
 
 ```{r}
 store_prune(sth, keep = 0, dry_run = TRUE)
@@ -351,7 +361,9 @@ store_prune(sth, keep = 0)
 `store_check()` without data checks the integrity of a stored dataset:
 every file exists with the checksum and the number of rows its catalog
 records, and the catalog agrees with itself. Given the data the dataset was
-written from, it compares a sample of stored rows with them.
+written from, it compares a sample of stored rows with them. In a store
+with several locations, `locations` limits the check to some of them (see
+`vignette("locations")`).
 
 ```{r}
 store_check(st, "daily")

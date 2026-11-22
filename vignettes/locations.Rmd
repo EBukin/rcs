@@ -162,12 +162,23 @@ withr::with_envvar(c(STORE_PRIMARY = NA), store_connect())
 ## A secondary that cannot be reached
 
 A primary that cannot be reached stops `store_connect()`: nothing can be
-read or written without the truth. A secondary that cannot be reached only
-gives a warning; it is marked unavailable and skipped by reads and writes.
+read or written without the truth. For a secondary, it depends on what goes
+wrong:
+
+- The secondary cannot be reached (a network or credential error):
+  `store_connect()` gives a warning, marks it unavailable, and reads and
+  writes skip it.
+- The secondary answers but holds no catalogs (a local folder that does
+  not exist, say): `store_connect()` stops with an error of class
+  `rcs_error_no_catalog`, as for a primary. With `create = TRUE` it sets
+  the location up as a new, empty store instead.
+- `store_refresh()` reads the catalogs of a connection again. There, a
+  secondary that cannot be reached or holds no catalogs only gives a
+  warning and is marked unavailable.
 
 To show this, the folder of the second copy is moved away, as if a drive
 had been disconnected. `store_refresh()` reads the catalogs of all
-locations again and notices.
+locations again, notices, and warns.
 
 ```{r}
 file.rename(copy_2, paste0(copy_2, "-away"))
@@ -268,6 +279,11 @@ connection, in either direction. The first copy still lacks
 store_copy(st, "sales/weekly", from = copy_2, to = copy_1)
 store_status(st)[c("dataset", "location", "status")]
 ```
+
+To check that a copy is sound, `store_check(st, dataset)` checks the
+dataset's files in every available location. `locations` limits the check
+to some of them, for example `store_check(st, "sales/daily", locations =
+copy_2)`.
 
 Two more functions maintain locations. `store_delete()` removes a dataset
 from every location; it stops unless `confirm` repeats the full name.
@@ -521,7 +537,8 @@ store_auth_check(st)
 
 When a location cannot be reached, the error names the credential in use
 and how to pass another one with `auth`. A primary that cannot be reached
-stops `store_connect()`; a secondary gives a warning.
+stops `store_connect()`; a secondary that cannot be reached gives a
+warning and is skipped (see "A secondary that cannot be reached").
 
 ## History per connection
 
