@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-7 done, X2 merged (2026-11-22)
+- **Status:** in execution; waves 0-8 done, X2 merged (2026-11-22)
 
 ## Goal
 
@@ -520,10 +520,19 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 8: DW2
 
-- [ ] **DW2. Writing from DuckDB, geospatial, partitions and engines.** D39 (partition map), D30. Prototype: none.
+- [x] **DW2. Writing from DuckDB, geospatial, partitions and engines.** D39 (partition map), D30. Prototype: none.
   - Owns: `R/write-duckdb.R`, `tests/testthat/test-write-duckdb-geo.R`, `_snaps/write-duckdb.md`.
   - Tests first: `partition = "h3"` (resolution as `store_write()` chooses; files and version equal to the R path, with V1's fallback criterion; integer, double and character attributes only); `geocode = FALSE`; `geocode_engine = "planar"` stored; input as `GEOMETRY` (skip via `local_duckdb_spatial()`); a dataset written from DuckDB read back with `store_read(intersects = cells)` equals the same read of the dataset written from `sf`.
   - Acceptance: all pass; whole suite at default passes.
+
+#### Results of wave 8
+
+- DW2 passed at the first verification; no decision contradicted. It started on DW1's branch (both own `R/write-duckdb.R`).
+- DW2 (`R/write-duckdb.R`): `partition = "h3"` from DuckDB stages the cell map between the two passes; attribute partitions; `geocode = FALSE` and `geocode_engine` as for `sf`; `GEOMETRY` input. Files and version equal those of the R path; a dataset written from DuckDB reads back with `store_read(intersects = cells)` like the one written from `sf`. A user column `h3_p<r>` with the same cells serves as the partition column.
+- D36 deviation of DW1 removed: the index is streamed per H3 partition, never collected into R.
+- Gap of wave 6 closed: unsupported types are rejected also inside `STRUCT`, `LIST` and `MAP`. Known false positive: a struct field named in upper case `HUGEINT` (the check reads the type string).
+- Restrictions found: `"h3"` mixed with other partition columns aborts for DuckDB input only (the R path accepts it); the fetch of distinct cells for the partition map is one query and can exceed `rcs.duckdb_batch_rows`.
+- Gate (whole suite, main at 77a87f9): `document()` no change. No non-ASCII in `R/`. Whole suite at default: 40 files, 13,511 expectations, 0 failed, 0 errors, 16 skipped. `devtools::check(cran = TRUE)` with tests: one NOTE (`:=` not imported in `duckdb_stage_index()`); the orchestrator added `:=` to `@importFrom rlang` in `R/rcs-package.R`; re-run: `write-duckdb` tests 2 files, 273 expectations, 0 failed; check without tests 0/0/0.
 
 ### Wave 9: X1
 

@@ -112,5 +112,6 @@ export(store_tables)
 export(store_write)
 importFrom(rlang,
   "%||%",
+  ":=",
   caller_env
 )
