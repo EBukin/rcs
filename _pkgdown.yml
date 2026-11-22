@@ -29,6 +29,11 @@ reference:
       - store_connect
       - store_create
       - store_refresh
+  - title: Credentials
+    desc: Credentials for Google Cloud Storage, set once per connection, and a check of every client.
+    contents:
+      - rcs_auth_gcs
+      - store_auth_check
   - title: See what a store holds
     desc: These functions read the catalog only; they open no data file.
     contents:
@@ -47,8 +52,23 @@ reference:
       - store_intersects
       - store_sample
       - store_glimpse
-      - store_h3_hex
       - rcs_query-dplyr
+  - title: DuckDB
+    desc: The datasets of a store as DuckDB views, in memory or in a database file.
+    contents:
+      - store_duckdb
+      - store_tables
+  - title: Geospatial preparation
+    desc: Add, index and strip the package's geospatial columns in memory, without a store.
+    contents:
+      - rcs_geo_add
+  - title: Types and H3 cells
+    desc: H3 cells as 64-bit integers printed as hex, and the R types of data read by other tools.
+    contents:
+      - rcs_h3
+      - rcs_h3_hex
+      - store_h3_hex
+      - store_restore_types
   - title: Check and maintain
     desc: Verify stored files, keep secondary locations up to date, remove old versions.
     contents:
@@ -77,6 +97,7 @@ articles:
     navbar: ~
     contents:
       - rcs
+      - duckdb
       - locations
       - geospatial
   - title: Performance

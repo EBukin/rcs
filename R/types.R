@@ -30,6 +30,10 @@
 #' only: a computed column that reuses the name of a source column is
 #' restored as that column.
 #'
+#' `collect()` of a query from [store_open()], with either engine, already
+#' restores the types; this function is for data that reached R another
+#' way, such as a DuckDB query of your own on the views of [store_duckdb()].
+#'
 #' @param x A data frame, tibble or `sf` object.
 #' @param st A store connection made by [store_connect()].
 #' @param dataset Name of the dataset `x` comes from: the full name, or its
@@ -37,6 +41,7 @@
 #'   accepted.
 #' @return `x` with the columns restored, of the same class (data frame,
 #'   tibble or `sf`).
+#' @seealso [store_describe()] for the recorded types (`r_type`), [rcs_h3].
 #' @export
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-restore-types")

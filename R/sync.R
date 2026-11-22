@@ -34,8 +34,8 @@
 #'
 #' @section Conflicts:
 #' When a target holds another version of a dataset and its entry was
-#' updated later than the source's, the dataset is not copied there: it is
-#' a conflict. Every other copy and deletion goes ahead; after the last
+#' updated later than the source's (the times recorded in the catalogs),
+#' the dataset is not copied there: it is a conflict. Every other copy and deletion goes ahead; after the last
 #' target the call aborts with class `rcs_error_sync_conflict`, listing the
 #' conflicts, and the condition's field `result` holds the result tibble.
 #' `force = TRUE` copies the source over the newer version instead. Every
@@ -81,7 +81,8 @@
 #'   without `force`) and `conflicts`, then `files` (files sent, or to send),
 #'   `bytes` and `seconds`.
 #' @seealso [store_status()] to compare the locations, [store_copy()] for one
-#'   dataset between any two locations.
+#'   dataset between any two locations; `vignette("locations")` for syncs
+#'   from a secondary, conflicts and deletions.
 #' @export
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-sync")

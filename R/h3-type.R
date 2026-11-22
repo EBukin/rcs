@@ -21,9 +21,14 @@
 #' * A column of class `rcs_h3` is stored as a 64-bit integer, like an
 #'   `integer64` column; `class(x) <- "integer64"` or `bit64::as.integer64()`
 #'   drops the class.
+#' * Inside DuckDB cells stay 64-bit integers (`BIGINT`); the SQL macro
+#'   `rcs_h3_hex()` of connections prepared by [store_duckdb()] gives their
+#'   hex strings, and `collect()` gives `rcs_h3` again. Data read by other
+#'   tools get the class back with [store_restore_types()].
 #'
 #' @name rcs_h3
-#' @seealso [rcs_h3_hex()], [store_h3_hex()].
+#' @seealso [rcs_h3_hex()], [store_h3_hex()], [store_restore_types()];
+#'   `vignette("geospatial")`.
 #' @examples
 #' cells <- bit64::as.integer64(c("599686042433355775", "599686030622195711"))
 #' rcs_h3_hex(cells)

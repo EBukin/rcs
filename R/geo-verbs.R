@@ -25,6 +25,23 @@
 #' Geometries invalid on the sphere are handled as in [store_write()] (see
 #' its argument `geocode_engine`); one warning names their row numbers.
 #'
+#' @section Prepared writes:
+#' [store_write()] accepts the result of `rcs_geo_add()`: it drops
+#' `.rcs_id`, computes `h3` and `bbox` itself and compares them with the
+#' supplied ones. Equal values are accepted silently, so that raw and
+#' prepared writes of the same data give the same version; different
+#' values abort (class `rcs_error_prepared`) naming the first rows and the
+#' engine of the write. `h3_res` is taken from the supplied cells when the
+#' write does not give it. The `h3_p<r>` columns are stored as user
+#' columns; with `partition = "h3"`, one equal to the partition column the
+#' write chooses serves as it.
+#'
+#' @section Round trip:
+#' For `store_write(st, rcs_geo_add(raw), dataset, key = k)`,
+#' `rcs_geo_strip(collect(store_open(st, dataset)))` ordered by `k` equals
+#' `raw` ordered by `k`: the same attributes, identical WKB geometries and
+#' the same CRS.
+#'
 #' @param x An `sf` object with a CRS.
 #' @param h3_res H3 resolution of the cells, 0 to 15. For `rcs_geo_add()`,
 #'   `NULL` adds no cell column.
@@ -49,7 +66,8 @@
 #'   (a cell the row touches), `h3_main` (the row's own cell; both
 #'   [rcs_h3]) and `share` (the fraction of the row's area or length in that
 #'   cell; `1 / n` for points), ordered by row of `x`, then cell.
-#' @seealso [store_write()], which accepts prepared data and checks them.
+#' @seealso [store_write()], which accepts prepared data and checks them;
+#'   `vignette("geospatial")`.
 #' @export
 #' @examplesIf rlang::is_installed("h3o")
 #' raw <- rcs_sim_polygons(20, seed = 1)
