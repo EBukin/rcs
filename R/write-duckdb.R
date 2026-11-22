@@ -60,12 +60,21 @@ check_duckdb_write <- function() {
 # Columns the package computes; dropped from `x` (D36).
 duckdb_package_columns <- c(".rcs_id", "h3", "bbox", "geom")
 
-# DuckDB types Arrow cannot write (D38).
-duckdb_unsupported_type <- "^(HUGEINT|UHUGEINT|INTERVAL|UNION|MAP)\\b"
+# DuckDB types Arrow cannot write (D38), anywhere in a type string: at top
+# level or nested in a STRUCT, a LIST, an ARRAY or a MAP.
+duckdb_unsupported_type <- "\\b(HUGEINT|UHUGEINT|INTERVAL|UNION|MAP)\\b"
+
+# Does a DuckDB type string hold an unsupported type? Quoted field names
+# (`STRUCT("map" INTEGER)`) and quoted ENUM values are not types.
+duckdb_type_unsupported <- function(types) {
+  bare <- gsub("\"([^\"]|\"\")*\"", "\"\"", types)
+  bare <- gsub("'([^']|'')*'", "''", bare)
+  grepl(duckdb_unsupported_type, bare)
+}
 
 # D38: the columns of types Arrow cannot write abort, one line per column.
 check_duckdb_types <- function(cols, types, call) {
-  bad <- grepl(duckdb_unsupported_type, types)
+  bad <- duckdb_type_unsupported(types)
   if (!any(bad)) {
     return(invisible())
   }
@@ -520,13 +529,15 @@ write_progress <- function(bar = NULL, phase = NULL, total = NULL, batches = NUL
 #' `geo_encode()` computes them) and the geometry types, staged as Parquet
 #' and loaded into the temporary table `<tmp>_geo` (with `.rcs_id`, the row
 #' number in the order of `geo_encode()`: `h3`, the key, `.rcs_tmp`) and
-#' `<tmp>_index` (index rows with `.rcs_id`). Pass 2 streams the rows,
-#' joined in DuckDB, into the data file, and the index rows into the index
-#' file. The files equal those of `store_write()` of the same `sf`.
+#' `<tmp>_index` (index rows with `.rcs_id`). Between the passes, for
+#' `partition = "h3"`, the distinct cells come into R and the map
+#' `h3 -> h3_p<res>` is staged as `<tmp>_map`. Pass 2 streams the rows,
+#' joined in DuckDB and ordered by the partition and `.rcs_id`, into one
+#' file per partition, and the index rows into the index file(s). The files
+#' equal those of `store_write()` of the same `sf`.
 #'
-#' One file only: a `partition` aborts (work package DW2 adds the partition
-#' map between the passes; `duckdb_geo_file_meta()` takes the condition of
-#' one file).
+#' `partition` takes what `store_write()` takes for an `sf`: `"h3"` or
+#' attribute columns.
 #'
 #' @param a The arguments of `store_write()`.
 #' @param con The DuckDB connection.
@@ -564,16 +575,6 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
       class = "rcs_error_argument", call = call
     )
   }
-  partition <- as.character(a$partition %||% character())
-  if (length(partition) > 0) {
-    cli::cli_abort(
-      c(
-        "{.arg partition} is not implemented yet for a geospatial DuckDB table.",
-        i = "Write it as one file, or collect it into an {.cls sf} first."
-      ),
-      class = "rcs_error_not_implemented", call = call
-    )
-  }
   crs_json <- geo_crs_json(crs)
   geocode <- isTRUE(a$geocode)
   h3_res <- check_h3_res(a$h3_res, call = call)
@@ -592,13 +593,8 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
   proto_attrs$.rcs_one <- NULL
   check_key(proto_attrs, key, call = call)
   duckdb_check_key(con, q_tmp, key, call)
-  proto <- proto_attrs
-  proto$.rcs_id <- bit64::integer64()
-  if (geocode) {
-    proto$h3 <- bit64::integer64()
-  }
-  proto$bbox <- bbox_na(0L)
-  proto$geometry <- list()
+  total <- as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_tmp))$n)
+  partition <- duckdb_geo_partition_early(con, q_tmp, a, attrs, proto_attrs, geocode, total, call)
 
   # pass 1: geocodes in R, staged and loaded into DuckDB
   pass1 <- duckdb_geo_pass1(con, q_tmp, geom_sql, crs, geocode, h3_res, a$geocode_engine, file.path(a$dir, "pass1"))
@@ -624,7 +620,33 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
     fallback = duckdb_geo_keys(con, q_tmp, q_geo, key, pass1$fallback)
   )
 
-  # pass 2: the data file
+  # between the passes: the partition map of `partition = "h3"` (D39)
+  h3_part <- NULL
+  if (identical(partition, "h3")) {
+    h3_part <- duckdb_h3_partition(
+      con, paste("SELECT DISTINCT h3 FROM", q_geo), a, h3_res,
+      name = paste0(tmp, "_map"), path = file.path(a$dir, "pass1", "map.parquet")
+    )
+    partition <- h3_part$column
+    if (partition %in% attrs) {
+      duckdb_check_supplied_partition(con, q_tmp, q_geo, h3_part, types[[match(partition, cols)]], call)
+      attrs <- setdiff(attrs, partition)
+      select_attrs <- if (length(attrs) > 0) paste0("t.", duckdb_ident(con, attrs), collapse = ", ")
+      proto_attrs[[partition]] <- NULL
+    }
+  }
+
+  # pass 2: the data file(s)
+  proto <- proto_attrs
+  proto$.rcs_id <- bit64::integer64()
+  if (geocode) {
+    proto$h3 <- bit64::integer64()
+  }
+  if (!is.null(h3_part)) {
+    proto[[partition]] <- bit64::integer64()
+  }
+  proto$bbox <- bbox_na(0L)
+  proto$geometry <- list()
   descriptions <- a$columns %||% stored_descriptions(a$existing, names(proto))
   schema <- files_arrow_schema(proto)
   spec <- files_columns_spec(proto, schema, descriptions, call = call, cells_by_name = TRUE)
@@ -632,7 +654,7 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
     dataset = a$dataset, kind = "geospatial", title = a$title,
     description = a$description, spec = spec, key = key,
     sorted_by = c(if (geocode) "h3", if (length(key) > 0) key else ".rcs_id"),
-    partition = character(), source = a$source, inputs = a$inputs,
+    partition = partition, source = a$source, inputs = a$inputs,
     crs = crs_json, h3_res = if (geocode) h3_res else NA_integer_,
     geocode_engine = if (geocode) a$geocode_engine else NA_character_,
     index_of = NA_character_, history = a$history
@@ -643,26 +665,39 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
   bbox_sql <- paste0(
     "struct_pack(", paste0(bbox_names, " := g.", duckdb_ident(con, paste0(".rcs_", bbox_names)), collapse = ", "), ")"
   )
+  # the partition expressions, named by the columns they give
+  group <- if (!is.null(h3_part)) {
+    rlang::set_names(paste0("m.", duckdb_ident(con, partition)), partition)
+  } else if (length(partition) > 0) {
+    rlang::set_names(paste0("t.", duckdb_ident(con, partition)), partition)
+  } else {
+    character()
+  }
+  from <- paste0(
+    q_tmp, " AS t JOIN ", q_geo, " AS g USING (\".rcs_tmp\")",
+    if (!is.null(h3_part)) paste0(" LEFT JOIN ", h3_part$q_map, " AS m ON g.h3 = m.h3")
+  )
   data_sql <- function(where = "") {
     paste0(
-      "SELECT ", paste(c(select_attrs, "g.\".rcs_id\"", if (geocode) "g.h3", paste(bbox_sql, "AS bbox"),
-        paste(geom_sql, "AS geometry")), collapse = ", "),
-      " FROM ", q_tmp, " AS t JOIN ", q_geo, " AS g USING (\".rcs_tmp\")", where,
-      " ORDER BY g.\".rcs_id\""
+      "SELECT ", paste(c(select_attrs, "g.\".rcs_id\"", if (geocode) "g.h3",
+        if (!is.null(h3_part)) paste(group, "AS", duckdb_ident(con, partition)),
+        paste(bbox_sql, "AS bbox"), paste(geom_sql, "AS geometry")), collapse = ", "),
+      " FROM ", from, where,
+      " ORDER BY ", paste(c(if (length(group) > 0) paste(group, "NULLS LAST"), "g.\".rcs_id\""), collapse = ", ")
     )
   }
   new <- duckdb_write_files(
-    con, sql = data_sql(), partition = character(), proto = proto, schema = schema,
+    con, sql = data_sql(), partition = partition, proto = proto, schema = schema,
     rcs_json = files_rcs_json(meta), rows_per_group = a$rows_per_group,
     tmp_dir = tmp_dir, total = pass1$total,
-    file_meta = function(values) duckdb_geo_file_meta(con, q_geo, crs_json, geocode)
+    file_meta = duckdb_file_meta(con, from, group, h3 = if (geocode) "g.h3", crs_json = crs_json)
   )
   staged <- files_finish(meta, new, NULL, created_of(a$existing, a$now), TRUE, geocode, data_dir)
 
   # the index file
   index <- NULL
   if (geocode) {
-    index <- duckdb_stage_index(con, q_index, a, h3_res)
+    index <- duckdb_stage_index(con, q_index, a, h3_res, tmp)
   }
 
   check <- function(be, files, entry) {
@@ -802,59 +837,207 @@ duckdb_geo_keys <- function(con, q_tmp, q_geo, key, ids) {
   format_key_values(values)
 }
 
-#' The facts of one geospatial file from DuckDB
+#' The facts of every file written from DuckDB, in one aggregation
 #'
-#' One aggregation over the rows of the file: the distinct geometry types,
-#' the extent of the boxes and the range of the cells, for
-#' `geo_metadata_of()` and `files_file_facts()` (D39).
+#' One grouped aggregation over the rows of the output files: per file
+#' (a combination of partition values) the distinct geometry types and the
+#' extent of the boxes, for `geo_metadata_of()` and `files_file_facts()`,
+#' and the range of the cells (D39). Only one row per file reaches R.
 #'
 #' @param con The DuckDB connection.
-#' @param q_geo The quoted table of pass 1.
-#' @param crs_json The PROJJSON of the dataset.
-#' @param geocode Whether the rows have cells.
-#' @param where SQL condition selecting the rows of the file (`""`: all).
-#' @return A list as `file_meta()` of `duckdb_write_files()` returns it.
+#' @param from The SQL `FROM` clause of the rows; pass-1 columns of a
+#'   geospatial write under the alias `g`.
+#' @param group The partition expressions, named by the partition columns
+#'   (`character()`: one file).
+#' @param h3 SQL of the cell of a row, or `NULL` without cells.
+#' @param crs_json The PROJJSON of a geospatial dataset, or `NULL` (an index
+#'   table: no geometry facts).
+#' @return A function of the partition values of a file (a named list, or
+#'   `NULL`), as `file_meta` of `duckdb_write_files()` takes it.
 #' @noRd
-duckdb_geo_file_meta <- function(con, q_geo, crs_json, geocode, where = "") {
+duckdb_file_meta <- function(con, from, group, h3 = NULL, crs_json = NULL) {
   withr::local_options(arrow.int64_downcast = FALSE)
-  q <- duckdb_ident(con, paste0(".rcs_", bbox_names))
+  geospatial <- !is.null(crs_json)
+  q <- paste0("g.", duckdb_ident(con, paste0(".rcs_", bbox_names)))
+  aggs <- c(
+    if (length(group) > 0) paste(group, "AS", duckdb_ident(con, names(group))),
+    if (geospatial) c(
+      "list(DISTINCT g.\".rcs_gtype\") FILTER (WHERE g.\".rcs_gtype\" IS NOT NULL) AS \".rcs_types\"",
+      paste0("min(", q[[1]], ") AS \".rcs_xmin\""), paste0("min(", q[[2]], ") AS \".rcs_ymin\""),
+      paste0("max(", q[[3]], ") AS \".rcs_xmax\""), paste0("max(", q[[4]], ") AS \".rcs_ymax\"")
+    ),
+    if (!is.null(h3)) paste0("min(", h3, ") AS \".rcs_h3_min\", max(", h3, ") AS \".rcs_h3_max\"")
+  )
   agg <- duckdb_frame(con, paste0(
-    "SELECT list(DISTINCT \".rcs_gtype\") FILTER (WHERE \".rcs_gtype\" IS NOT NULL) AS types, ",
-    "min(", q[[1]], ") AS xmin, min(", q[[2]], ") AS ymin, max(", q[[3]], ") AS xmax, max(", q[[4]], ") AS ymax",
-    if (geocode) ", min(h3) AS h3_min, max(h3) AS h3_max",
-    " FROM ", q_geo, where
+    "SELECT ", paste(aggs, collapse = ", "), " FROM ", from,
+    if (length(group) > 0) paste(" GROUP BY", paste(group, collapse = ", "))
   ))
-  types <- unlist(agg$types[[1]]) %||% character()
-  extent <- c(agg$xmin, agg$ymin, agg$xmax, agg$ymax)
-  list(
-    geo = geo_metadata_of(types, extent, crs_json),
-    bbox = bbox_df(agg$xmin, agg$ymin, agg$xmax, agg$ymax),
-    h3 = if (geocode) c(agg$h3_min, agg$h3_max)
+  keys <- vapply(seq_len(nrow(agg)), function(i) {
+    partition_values_json(if (length(group) > 0) as.list(agg[i, names(group)]))
+  }, character(1))
+  function(values) {
+    i <- match(partition_values_json(values), keys)
+    if (is.na(i)) {
+      cli::cli_abort("No facts for the partition {partition_values_json(values)}.", .internal = TRUE)
+    }
+    row <- agg[i, ]
+    out <- list()
+    if (geospatial) {
+      types <- unlist(row$.rcs_types[[1]]) %||% character()
+      extent <- c(row$.rcs_xmin, row$.rcs_ymin, row$.rcs_xmax, row$.rcs_ymax)
+      out$geo <- geo_metadata_of(types, extent, crs_json)
+      out$bbox <- bbox_df(row$.rcs_xmin, row$.rcs_ymin, row$.rcs_xmax, row$.rcs_ymax)
+    }
+    if (!is.null(h3)) {
+      out$h3 <- c(row$.rcs_h3_min, row$.rcs_h3_max)
+    }
+    out
+  }
+}
+
+#' Partition checks of a geospatial DuckDB write that need no cells
+#'
+#' Before pass 1, so that a partition that cannot apply aborts before any
+#' geocoding: the checks and messages of `partition_plan()` for attribute
+#' columns (on their distinct values); `partition = "h3"` without cells or
+#' without rows aborts as for an `sf`. `"h3"` mixed with other columns, or
+#' other package columns, abort.
+#'
+#' @return The partition as given (`"h3"` is resolved between the passes).
+#' @noRd
+duckdb_geo_partition_early <- function(con, q_tmp, a, attrs, proto_attrs, geocode, total, call) {
+  partition <- as.character(a$partition %||% character())
+  if (length(partition) == 0) {
+    return(character())
+  }
+  if (identical(partition, "h3")) {
+    if (!geocode || total == 0) {
+      # the abort of `partition_plan()` for data without cells or rows
+      probe <- tibble::tibble(.rcs_one = rep(1, min(total, 1)))
+      if (geocode) probe$h3 <- bit64::as.integer64(probe$.rcs_one)
+      partition_plan(probe, "h3", a$max_files, 0L, call = call)
+    }
+    return(partition)
+  }
+  own <- intersect(partition, c(".rcs_id", "h3", "bbox", "geometry"))
+  if (length(own) > 0) {
+    cli::cli_abort(
+      c(
+        "A geospatial DuckDB table cannot be partitioned by {.field {own}}.",
+        i = "Use {.code partition = \"h3\"} alone, or attribute columns of {.arg x}."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  values <- if (all(partition %in% attrs)) {
+    duckdb_frame(con, paste(
+      "SELECT DISTINCT", paste(duckdb_ident(con, partition), collapse = ", "), "FROM", q_tmp
+    ))
+  } else {
+    vctrs::vec_init(proto_attrs, 1L)
+  }
+  partition_plan(values, partition, a$max_files, call = call)$partition
+}
+
+#' The H3 partition map of a DuckDB write
+#'
+#' D39: the distinct cells come into R, the resolution is chosen by the
+#' rule of `partition_plan_h3()` (the finest at or below `h3_res` with at
+#' most `max_files` parents), and the two-column map `h3 -> h3_p<res>` is
+#' staged as a temporary table for joins in DuckDB.
+#'
+#' @param sql The query of the distinct cells.
+#' @param name,path Name of the temporary table, staging file of the map.
+#' @return A list: `column` (`"h3_p<res>"`), `res`, `q_map` (the quoted
+#'   table, dropped when `store_write()` ends).
+#' @noRd
+duckdb_h3_partition <- function(con, sql, a, h3_res, name, path) {
+  cells <- duckdb_frame(con, sql)
+  plan <- partition_plan(cells, "h3", a$max_files, h3_res, call = a$call)
+  column <- plan$partition
+  res <- plan$res
+  map <- plan$data[c("h3", column)]
+  rm(cells, plan)
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  arrow::write_parquet(map, path)
+  rm(map)
+  q_map <- duckdb_ident(con, name)
+  withr::defer(duckdb_drop(con, q_map), envir = a$call)
+  duckdb_exec(con, paste0(
+    "CREATE TEMPORARY TABLE ", q_map, " AS SELECT * FROM ", duckdb_parquet_list(con, path)
+  ))
+  list(column = column, res = res, q_map = q_map)
+}
+
+# D27: a column of `x` named as the chosen partition column serves as it
+# when it holds the same cells; a different one aborts, as for an `sf`.
+duckdb_check_supplied_partition <- function(con, q_tmp, q_geo, h3_part, type, call) {
+  q_col <- duckdb_ident(con, h3_part$column)
+  n <- if (identical(type, "BIGINT")) {
+    as.numeric(DBI::dbGetQuery(con, paste0(
+      "SELECT count(*) AS n FROM ", q_tmp, " AS t JOIN ", q_geo, " AS g USING (\".rcs_tmp\")",
+      " LEFT JOIN ", h3_part$q_map, " AS m ON g.h3 = m.h3",
+      " WHERE t.", q_col, " IS DISTINCT FROM m.", q_col
+    ))$n)
+  } else {
+    as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_tmp))$n)
+  }
+  if (n == 0) {
+    return(invisible())
+  }
+  column <- h3_part$column
+  cli::cli_abort(
+    c(
+      "The column {.field {column}} of {.arg x} differs from the partition column the write computes ({n} row{?s}).",
+      i = "With {.code partition = \"h3\"} the write partitions by {.field {column}}.",
+      i = "Remove the column with {.fn rcs_geo_strip}, or prepare it with {.fn rcs_geo_add} from the same cells."
+    ),
+    class = "rcs_error_prepared", call = call
   )
 }
 
 #' Stage the index table of a geospatial DuckDB write
 #'
 #' The files, names, entry and manifest of `stage_index()` for the same
-#' rows: streamed from DuckDB in the order `h3`, `.rcs_id` when the index
-#' fits one file; an index above `rows_per_group * 100` rows, which
-#' `stage_index()` partitions by H3, is collected and staged by it.
+#' rows, streamed from DuckDB in the order `h3`, `.rcs_id`: one file, or,
+#' above `rows_per_group * 100` rows, one file per H3 parent (the partition
+#' map of `duckdb_h3_partition()` on the index cells), ordered by the
+#' parent. Index rows never come into R as a whole (D36).
 #'
+#' @param tmp The name of the materialised table (prefix of the map).
 #' @return A version source (`staged_src()`), or `NULL` without index rows.
 #' @noRd
-duckdb_stage_index <- function(con, q_index, a, h3_res) {
+duckdb_stage_index <- function(con, q_index, a, h3_res, tmp) {
   rows <- as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_index))$n)
   if (rows == 0) {
     return(NULL)
-  }
-  sql <- paste("SELECT \".rcs_id\", h3, h3_main, share FROM", q_index, "ORDER BY h3, \".rcs_id\"")
-  if (rows > a$rows_per_group * 100) {
-    return(stage_index(duckdb_frame(con, sql), a, h3_res))
   }
   index_dataset <- index_name(a$dataset)
   proto <- tibble::tibble(
     .rcs_id = bit64::integer64(), h3 = bit64::integer64(),
     h3_main = bit64::integer64(), share = double()
+  )
+  partition <- character()
+  group <- character()
+  from <- paste(q_index, "AS i")
+  select <- "i.\".rcs_id\", i.h3"
+  if (rows > a$rows_per_group * 100) {
+    part <- duckdb_h3_partition(
+      con, paste("SELECT DISTINCT h3 FROM", q_index), a, h3_res,
+      name = paste0(tmp, "_index_map"), path = file.path(a$dir, "pass1", "index-map.parquet")
+    )
+    partition <- part$column
+    group <- rlang::set_names(paste0("m.", duckdb_ident(con, partition)), partition)
+    from <- paste0(from, " JOIN ", part$q_map, " AS m ON i.h3 = m.h3")
+    select <- paste0(select, ", ", group, " AS ", duckdb_ident(con, partition))
+    proto <- tibble::tibble(
+      .rcs_id = bit64::integer64(), h3 = bit64::integer64(), !!partition := bit64::integer64(),
+      h3_main = bit64::integer64(), share = double()
+    )
+  }
+  sql <- paste0(
+    "SELECT ", select, ", i.h3_main, i.share FROM ", from, " ORDER BY ",
+    paste(c(if (length(group) > 0) paste(group, "NULLS LAST"), "i.h3", "i.\".rcs_id\""), collapse = ", ")
   )
   schema <- files_arrow_schema(proto)
   spec <- files_columns_spec(proto, schema, NULL, call = a$call, cells_by_name = TRUE)
@@ -863,25 +1046,22 @@ duckdb_stage_index <- function(con, q_index, a, h3_res) {
     title = paste("H3 index of", a$dataset),
     description = paste0("Rows of ", a$dataset, " that cross H3 cells at resolution ", h3_res, "."),
     spec = spec, key = character(), sorted_by = c("h3", ".rcs_id"),
-    partition = character(), source = NA_character_, inputs = NA_character_,
+    partition = partition, source = NA_character_, inputs = NA_character_,
     crs = NA_character_, h3_res = NA_integer_, geocode_engine = NA_character_,
     index_of = a$dataset, history = a$history
   )
   dir <- file.path(a$dir, "index")
   tmp_dir <- files_tmp_dir(dir, index_dataset)
   on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
-  range <- function(values) {
-    withr::local_options(arrow.int64_downcast = FALSE)
-    agg <- duckdb_frame(con, paste("SELECT min(h3) AS h3_min, max(h3) AS h3_max FROM", q_index))
-    list(h3 = c(agg$h3_min, agg$h3_max))
-  }
   new <- duckdb_write_files(
-    con, sql = sql, partition = character(), proto = proto, schema = schema,
+    con, sql = sql, partition = partition, proto = proto, schema = schema,
     rcs_json = files_rcs_json(meta), rows_per_group = a$rows_per_group,
-    tmp_dir = tmp_dir, total = rows, file_meta = range
+    tmp_dir = tmp_dir, total = rows,
+    file_meta = duckdb_file_meta(con, from, group, h3 = "i.h3")
   )
   staged_src(files_finish(meta, new, NULL, created_of(a$existing_index, a$now), FALSE, TRUE, dir))
 }
+
 
 #' The serialization check of geospatial files staged from DuckDB (D40)
 #'

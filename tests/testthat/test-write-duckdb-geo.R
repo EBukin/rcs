@@ -221,3 +221,233 @@ test_that("the temporary DuckDB tables are gone after a geospatial write", {
   left <- DBI::dbGetQuery(con, "SELECT table_name FROM duckdb_tables() WHERE table_name LIKE 'rcs_%'")
   expect_identical(nrow(left), 0L)
 })
+
+# DW2: partitions, engines, GEOMETRY input ---------------------------------------
+
+# The data, index, geo metadata and version of a write from DuckDB equal
+# those of the same write from the sf.
+expect_dgeo_same <- function(a, b, out_a, out_b, label = NULL) {
+  expect_identical(attr(out_a, "version"), attr(out_b, "version"), label = label)
+  expect_identical(dgeo_facts(a, "geo/shapes"), dgeo_facts(b, "geo/shapes"), label = label)
+  expect_identical(dgeo_geo_metadata(a, "geo/shapes"), dgeo_geo_metadata(b, "geo/shapes"), label = label)
+  idx <- index_name("geo/shapes")
+  has_a <- idx %in% a$st$primary$catalog$dataset
+  expect_identical(has_a, idx %in% b$st$primary$catalog$dataset, label = label)
+  if (has_a) {
+    expect_identical(dgeo_facts(a, idx), dgeo_facts(b, idx), label = label)
+  }
+  invisible()
+}
+
+# Polygons with one empty geometry (an `h3_p<r>=null` partition).
+dgeo_polygons_empty <- function(n, seed = 1) {
+  x <- rcs_sim_polygons(n, seed = seed)
+  x$geometry[n] <- sf::st_polygon()
+  x
+}
+
+test_that("partition = \"h3\" from DuckDB gives the files and version of store_write() of the sf", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  withr::local_options(rcs.duckdb_batch_rows = 1000)
+  cases <- list(
+    polygons = list(x = dgeo_polygons_empty(3000), key = "id", max_files = 50L),
+    polygons_coarse = list(x = dgeo_polygons_empty(3000), key = "id", max_files = 6L),
+    points_keyless = list(x = rcs_sim_points(3000, seed = 2), key = NULL, max_files = 20L)
+  )
+  for (name in names(cases)) {
+    x <- cases[[name]]$x
+    types <- vapply(sf::st_drop_geometry(x), function(v) class(v)[[1]], character(1))
+    expect_true(all(types %in% c("integer", "numeric", "character")), label = name)
+    tbl <- dgeo_table(con, x, name)
+    a <- dgeo_store()
+    b <- dgeo_store()
+    args <- list(
+      key = cases[[name]]$key, partition = "h3", max_files = cases[[name]]$max_files,
+      rows_per_group = 700L
+    )
+    out_a <- do.call(dgeo_write, c(list(a$st, tbl, crs = 4326), args))
+    out_b <- do.call(dgeo_write, c(list(b$st, x), args))
+    expect_dgeo_same(a, b, out_a, out_b, label = name)
+    entry <- a$st$primary$catalog[a$st$primary$catalog$dataset == "geo/shapes", ]
+    expect_match(unlist(entry$partition), "^h3_p[0-9]$", label = name)
+    expect_gt(as.numeric(entry$n_files), 1)
+    expect_lte(as.numeric(entry$n_files), cases[[name]]$max_files)
+    expect_store_valid(a$st)
+  }
+})
+
+test_that("partition by an attribute column from DuckDB equals store_write() of the sf", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  withr::local_options(rcs.duckdb_batch_rows = 400)
+  x <- rcs_sim_polygons(1500, seed = 5)
+  tbl <- dgeo_table(con, x, "shapes")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  out_a <- dgeo_write(a$st, tbl, key = "id", partition = "cat", crs = 4326)
+  out_b <- dgeo_write(b$st, x, key = "id", partition = "cat")
+  expect_dgeo_same(a, b, out_a, out_b)
+  expect_gt(as.numeric(a$st$primary$catalog$n_files[a$st$primary$catalog$dataset == "geo/shapes"]), 1)
+})
+
+test_that("a user column h3_p<r> with other cells aborts as for the sf, the same cells serve", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  x <- rcs_sim_points(200, seed = 3)
+  x$h3_p5 <- seq_len(200)
+  s <- dgeo_store()
+  tbl <- dgeo_table(con, x, "pts")
+  expect_error(
+    dgeo_write(s$st, tbl, key = "id", partition = "h3", max_files = 1000L, crs = 4326),
+    class = "rcs_error_prepared"
+  )
+  expect_error(dgeo_write(s$st, x, key = "id", partition = "h3", max_files = 1000L), class = "rcs_error_prepared")
+
+  # the same cells serve as the partition column
+  x$h3_p5 <- NULL
+  dgeo_write(s$st, x, key = "id", partition = "h3", max_files = 1000L)
+  stored <- store_read(s$st, "geo/shapes", columns = c("id", "h3_p5"), geometry = FALSE)
+  x$h3_p5 <- bit64::as.integer64(stored$h3_p5)[match(x$id, stored$id)]
+  tbl <- dgeo_table(con, x, "pts_same")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  out_a <- dgeo_write(a$st, tbl, key = "id", partition = "h3", max_files = 1000L, crs = 4326)
+  out_b <- dgeo_write(b$st, x, key = "id", partition = "h3", max_files = 1000L)
+  expect_dgeo_same(a, b, out_a, out_b)
+})
+
+test_that("geocode = FALSE from DuckDB equals store_write() of the sf", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  withr::local_options(rcs.duckdb_batch_rows = 500)
+  x <- rcs_sim_polygons(1200, seed = 6)
+  tbl <- dgeo_table(con, x, "shapes")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  out_a <- dgeo_write(a$st, tbl, key = "id", geocode = FALSE, crs = 4326)
+  out_b <- dgeo_write(b$st, x, key = "id", geocode = FALSE)
+  expect_dgeo_same(a, b, out_a, out_b)
+  entry <- a$st$primary$catalog[a$st$primary$catalog$dataset == "geo/shapes", ]
+  expect_true(is.na(entry$h3_res))
+  expect_true(is.na(entry$geocode_engine))
+  expect_false(index_name("geo/shapes") %in% a$st$primary$catalog$dataset)
+
+  # with a partition column
+  c1 <- dgeo_store()
+  c2 <- dgeo_store()
+  out_c1 <- dgeo_write(c1$st, tbl, key = "id", geocode = FALSE, partition = "cat", crs = 4326)
+  out_c2 <- dgeo_write(c2$st, x, key = "id", geocode = FALSE, partition = "cat")
+  expect_dgeo_same(c1, c2, out_c1, out_c2)
+})
+
+test_that("geocode_engine = \"planar\" is stored and gives the files of the sf", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  withr::local_options(rcs.duckdb_batch_rows = 60)
+  x <- rcs_sim_polygons(150, seed = 7)
+  tbl <- dgeo_table(con, x, "shapes")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  out_a <- dgeo_write(a$st, tbl, key = "id", geocode_engine = "planar", crs = 4326)
+  out_b <- dgeo_write(b$st, x, key = "id", geocode_engine = "planar")
+  expect_dgeo_same(a, b, out_a, out_b)
+  entry <- a$st$primary$catalog[a$st$primary$catalog$dataset == "geo/shapes", ]
+  expect_identical(entry$geocode_engine, "planar")
+})
+
+test_that("a GEOMETRY column gives the files of the sf", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  local_duckdb_spatial(con)
+  withr::local_options(rcs.duckdb_batch_rows = 500)
+  x <- rcs_sim_polygons(1200, seed = 8)
+  dgeo_table(con, x, "shapes_wkb")
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE shapes AS SELECT * EXCLUDE (geometry), ST_GeomFromWKB(geometry) AS geometry FROM shapes_wkb"
+  ))
+  tbl <- dplyr::tbl(con, "shapes")
+  type <- DBI::dbGetQuery(con, paste(
+    "SELECT data_type FROM information_schema.columns",
+    "WHERE table_name = 'shapes' AND column_name = 'geometry'"
+  ))
+  expect_match(type$data_type, "^GEOMETRY")
+  for (partition in list(NULL, "h3")) {
+    a <- dgeo_store()
+    b <- dgeo_store()
+    out_a <- dgeo_write(a$st, tbl, key = "id", partition = partition, crs = 4326)
+    out_b <- dgeo_write(b$st, x, key = "id", partition = partition)
+    expect_dgeo_same(a, b, out_a, out_b, label = paste(c("partition", partition), collapse = " "))
+  }
+})
+
+test_that("store_read(intersects = cells) of a DuckDB write equals that of the sf write", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  withr::local_options(rcs.duckdb_batch_rows = 1000)
+  x <- rcs_sim_polygons(2500, seed = 9)
+  tbl <- dgeo_table(con, x, "shapes")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  dgeo_write(a$st, tbl, key = "id", partition = "h3", crs = 4326)
+  dgeo_write(b$st, x, key = "id", partition = "h3")
+  h3 <- store_read(b$st, "geo/shapes", columns = "h3")$h3
+  cells <- vctrs::vec_unique(bit64::as.integer64(h3))[c(1, 5, 9)]
+  ra <- store_read(a$st, "geo/shapes", intersects = cells)
+  rb <- store_read(b$st, "geo/shapes", intersects = cells)
+  expect_gt(nrow(rb), 0)
+  expect_identical(ra, rb)
+})
+
+test_that("an index above rows_per_group * 100 rows is streamed per H3 partition, never collected", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  n <- 300
+  withr::local_options(rcs.duckdb_batch_rows = n)
+  x <- rcs_sim_polygons(1500, seed = 10)
+  tbl <- dgeo_table(con, x, "shapes")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  spy <- local_batch_spy()
+  frames <- new.env(parent = emptyenv())
+  frames$rows <- list()
+  real_frame <- duckdb_frame
+  local_mocked_bindings(duckdb_frame = function(con, sql, table = FALSE) {
+    out <- real_frame(con, sql, table = table)
+    frames$rows[[length(frames$rows) + 1L]] <- list(names = names(out), rows = nrow(out))
+    out
+  })
+  out_a <- dgeo_write(a$st, tbl, key = "id", crs = 4326, rows_per_group = 5L)
+  out_b <- dgeo_write(b$st, x, key = "id", rows_per_group = 5L)
+  expect_dgeo_same(a, b, out_a, out_b)
+
+  idx <- index_name("geo/shapes")
+  entry <- a$st$primary$catalog[a$st$primary$catalog$dataset == idx, ]
+  expect_gt(entry$rows, 5 * 100)
+  expect_match(unlist(entry$partition), "^h3_p[0-9]$")
+  expect_gt(as.numeric(entry$n_files), 1)
+  for (r in spy$rows) expect_true(all(r <= n))
+  # no fetch of rows (data or index) larger than one batch
+  row_fetches <- Filter(function(f) ".rcs_id" %in% f$names || "share" %in% f$names, frames$rows)
+  expect_true(all(vapply(row_fetches, function(f) f$rows <= n, logical(1))))
+})
+
+# Aborts ---------------------------------------------------------------------------
+
+test_that("an invalid crs and partitions that cannot apply abort", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  tbl <- dgeo_table(con, rcs_sim_points(20), "pts")
+  s <- dgeo_store()
+  withr::local_options(cli.width = 250, width = 250)
+  expect_error(dgeo_write(s$st, tbl, key = "id", crs = "not a crs"), class = "rcs_error_argument")
+  expect_snapshot(dgeo_write(s$st, tbl, key = "id", crs = "not a crs"), error = TRUE)
+  expect_snapshot(dgeo_write(s$st, tbl, key = "id", crs = 4326, partition = "h3", geocode = FALSE), error = TRUE)
+  expect_snapshot(dgeo_write(s$st, tbl, key = "id", crs = 4326, partition = c("h3", "id")), error = TRUE)
+  expect_snapshot(dgeo_write(s$st, tbl, key = "id", crs = 4326, partition = "nowhere"), error = TRUE)
+  expect_snapshot(
+    dgeo_write(s$st, tbl, key = "id", crs = 4326, partition = "h3", max_files = 1L, h3_res = 9L),
+    error = TRUE
+  )
+  expect_false("geo/shapes" %in% s$st$primary$catalog$dataset)
+})

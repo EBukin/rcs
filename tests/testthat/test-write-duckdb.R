@@ -432,6 +432,32 @@ test_that("DuckDB types Arrow cannot write abort naming the columns", {
   expect_identical(nrow(s$st$primary$catalog), 0L)
 })
 
+test_that("unsupported DuckDB types nested in STRUCT, LIST or MAP abort naming the columns", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE nested AS SELECT range::INTEGER AS id,",
+    "{'a': range::HUGEINT} AS st,",
+    "[to_seconds(range)] AS spans,",
+    "{'b': [range::UHUGEINT]} AS deep,",
+    "{'map': range::INTEGER, 'interval': 1} AS fine,",
+    "[{'m': map([range], [range])}] AS maps",
+    "FROM range(3)"
+  ))
+  s <- duck_store()
+  local_snapshot_width()
+  expect_snapshot(duck_write(s$st, dplyr::tbl(con, "nested"), key = "id"), error = TRUE)
+  err <- expect_error(duck_write(s$st, dplyr::tbl(con, "nested"), key = "id"), class = "rcs_error_argument")
+  msg <- cli::ansi_strip(conditionMessage(err))
+  for (col in c("st", "spans", "deep", "maps")) expect_match(msg, paste0("\\b", col, ": "))
+  expect_no_match(msg, "fine")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+
+  # field names that are type names do not abort
+  ok <- dplyr::tbl(con, dbplyr::sql("SELECT id, fine FROM nested"))
+  expect_no_error(duck_write(s$st, ok, key = "id"))
+})
+
 test_that("mode update and lazy tables on other databases abort", {
   skip_if_no_duckdb_write()
   con <- local_duckdb()

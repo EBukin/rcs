@@ -32,6 +32,19 @@
       x span: INTERVAL
       i Cast them to a supported type in the query, for example with `CAST(... AS VARCHAR)`.
 
+# unsupported DuckDB types nested in STRUCT, LIST or MAP abort naming the columns
+
+    Code
+      duck_write(s$st, dplyr::tbl(con, "nested"), key = "id")
+    Condition
+      Error in `store_write()`:
+      ! 4 columns of `x` have a DuckDB type that cannot be stored:
+      x st: STRUCT(a HUGEINT)
+      x spans: INTERVAL[]
+      x deep: STRUCT(b UHUGEINT[])
+      x maps: STRUCT(m MAP(BIGINT, BIGINT))[]
+      i Cast them to a supported type in the query, for example with `CAST(... AS VARCHAR)`.
+
 # mode update and lazy tables on other databases abort
 
     Code
