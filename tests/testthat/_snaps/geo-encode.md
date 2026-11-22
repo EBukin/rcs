@@ -23,3 +23,19 @@
       Error in `geo_encode()`:
       ! `x` has no coordinate reference system.
 
+# geocode_engine and tol are checked
+
+    Code
+      geo_encode(x, geocode_engine = "sphere")
+    Condition
+      Error in `geo_encode()`:
+      ! `geocode_engine` must be one of "auto", "s2", or "planar", not "sphere".
+
+---
+
+    Code
+      geo_encode(x, tol = -1)
+    Condition
+      Error in `geo_encode()`:
+      ! `tol` must be one finite number not below 0.
+

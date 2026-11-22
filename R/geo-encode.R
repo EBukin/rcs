@@ -175,7 +175,10 @@ geo_res0_hex <- function() {
 # lies inside a polygon without testing them again (they intersect it), which
 # saves time for a large query shape; the result is the same up to cells that
 # a planar centre test and the spherical test judge differently.
-geo_touched_hex <- function(g, h3_res, exact = TRUE) {
+#
+# `geog` (optional) gives the geographies of `g` on the sphere, for example
+# with invalid rows rebuilt; by default they are made from `g`.
+geo_touched_hex <- function(g, h3_res, exact = TRUE, geog = NULL) {
   n <- length(g)
   out <- rep(list(character()), n)
   if (n == 0) {
@@ -186,10 +189,14 @@ geo_touched_hex <- function(g, h3_res, exact = TRUE) {
   special <- geo_is_special(env)
   normal <- which(!empty & !special)
   if (length(normal) > 0) {
-    out[normal] <- geo_touched_normal(g[normal], h3_res, exact = exact, env = lapply(env, `[`, normal))
+    out[normal] <- geo_touched_normal(
+      g[normal], h3_res,
+      exact = exact, env = lapply(env, `[`, normal),
+      geog = if (is.null(geog)) geo_as_s2(g[normal]) else geog[normal]
+    )
   }
   for (i in which(special)) {
-    out[[i]] <- geo_touched_sphere(g[i], h3_res)
+    out[[i]] <- geo_touched_sphere(g[i], h3_res, geog = if (is.null(geog)) geo_as_s2(g[i]) else geog[i])
   }
   out
 }
@@ -206,11 +213,11 @@ geo_extent_m <- function(env) {
 # pole: cells of boundary points taken every third of an edge length (on the
 # geodesic), their first ring, and for polygons larger than a cell the cells
 # whose centre is inside; every candidate is then tested on the sphere.
-geo_touched_normal <- function(g, h3_res, exact = TRUE, env = geo_envelope(g)) {
+geo_touched_normal <- function(g, h3_res, exact = TRUE, env = geo_envelope(g),
+                               geog = geo_as_s2(g)) {
   n <- length(g)
   spacing <- h3_edge_m[[h3_res + 1L]] / 3
   extent <- geo_extent_m(env)
-  geog <- geo_as_s2(g)
   dimension <- s2::s2_dimension(geog)
 
   # boundary points, densified on the sphere where an edge can be long
@@ -283,8 +290,7 @@ geo_intersects_pairs <- function(geog, vertices, from, cell) {
 # descending the H3 hierarchy: the children of a cell lie within the cell and
 # its first ring, so the cells at resolution r + 1 that intersect the shape
 # are among the children of the first ring of those at resolution r.
-geo_touched_sphere <- function(g, h3_res) {
-  geog <- geo_as_s2(g)
+geo_touched_sphere <- function(g, h3_res, geog = geo_as_s2(g)) {
   candidates <- geo_res0_hex()
   for (r in 0:h3_res) {
     hits <- s2::s2_intersects_matrix(geo_cell_s2(candidates), geog)
@@ -352,10 +358,11 @@ geo_edge_points <- function(env, tolerance_m = 0.01) {
 }
 
 # Geocodes of one chunk of rows: `g` is `geo_wkb()` in EPSG:4326. Returns the
-# cell of every row (hex, NA when empty) and the index rows of the crossing
-# rows (`row` within the chunk, `cell`, `share`). Self-contained, so that it
-# can run on a mirai worker.
-geo_h3_chunk <- function(g, h3_res) {
+# cell of every row (hex, NA when empty), the index rows of the crossing
+# rows (`row` within the chunk, `cell`, `share`) and the rows rebuilt or
+# fallen back to the plane (`geo_crossing_rows()`). Self-contained, so that
+# it can run on a mirai worker.
+geo_h3_chunk <- function(g, h3_res, geocode_engine = "auto", tol = 1e-3) {
   n <- length(g)
   h3 <- rep(NA_character_, n)
   env <- geo_envelope(g)
@@ -396,19 +403,216 @@ geo_h3_chunk <- function(g, h3_res) {
   }
   crossing <- setdiff(which(!empty), inside)
   index <- data.frame(row = integer(), cell = character(), share = double())
+  rebuilt <- integer()
+  fallback <- integer()
   if (length(crossing) > 0) {
-    gc <- g[crossing]
-    touched <- geo_touched_hex(gc, h3_res)
-    pairs <- data.frame(
-      from = rep(seq_along(touched), lengths(touched)),
-      cell = unlist(touched, use.names = FALSE)
-    )
-    geog <- geo_as_s2(gc)
-    pairs$share <- geo_shares(geog, pairs$from, pairs$cell)
-    h3[crossing] <- geo_largest(pairs, length(crossing))
-    index <- data.frame(row = crossing[pairs$from], cell = pairs$cell, share = pairs$share)
+    rows <- geo_crossing_rows(g[crossing], h3_res, geocode_engine, tol, special[crossing])
+    h3[crossing] <- rows$h3
+    index <- data.frame(row = crossing[rows$pairs$from], cell = rows$pairs$cell, share = rows$pairs$share)
+    rebuilt <- crossing[rows$rebuilt]
+    fallback <- crossing[rows$fallback]
   }
-  list(h3 = h3, index = index)
+  list(h3 = h3, index = index, rebuilt = rebuilt, fallback = fallback)
+}
+
+# Geocodes of crossing rows (`g`, `geo_wkb()` in EPSG:4326) by the engine
+# (plan 0002, D31). Every row is validated alone on the sphere, so one
+# invalid row changes nothing for the others. Rows valid on the sphere are
+# geocoded there (engines "auto" and "s2"); invalid rows are rebuilt by
+# `geo_rebuild()` ("s2"), or rebuilt and checked ("auto"), falling back to
+# the plane when the rebuilt copy is not faithful; engine "planar" geocodes
+# every row in the plane. Rows whose box spans 180 degrees or more
+# (`special`) are geocoded on the sphere whatever the engine. Returns the
+# cell of every row (hex), the pairs (from, cell, share) and the rows that
+# were rebuilt or fell back (indices into `g`).
+geo_crossing_rows <- function(g, h3_res, geocode_engine, tol, special) {
+  n <- length(g)
+  geog <- s2::as_s2_geography(wk::wk_set_geodesic(g, TRUE), check = FALSE)
+  valid <- s2::s2_is_valid(geog)
+  valid[is.na(valid)] <- FALSE
+
+  planar <- if (geocode_engine == "planar") !special else rep(FALSE, n)
+  rebuilt <- integer()
+  fallback <- integer()
+  for (i in which(!valid & !planar)) {
+    copy <- tryCatch(geo_rebuild(geog[i]), error = function(e) NULL)
+    ok <- !is.null(copy) && length(copy) == 1
+    if (ok && geocode_engine == "auto" && !special[[i]]) {
+      ok <- geo_rebuild_faithful(g[i], copy, tol)
+    }
+    if (ok) {
+      geog[i] <- copy
+      g[i] <- wk::wk_set_geodesic(geo_wkb(copy), FALSE)
+      rebuilt <- c(rebuilt, i)
+    } else if (special[[i]]) {
+      # rows without a planar reading keep the plain rebuild
+      geog[i] <- s2::s2_rebuild(geog[i])
+      g[i] <- wk::wk_set_geodesic(geo_wkb(geog[i]), FALSE)
+      rebuilt <- c(rebuilt, i)
+    } else {
+      planar[[i]] <- TRUE
+      fallback <- c(fallback, i)
+    }
+  }
+
+  pairs <- data.frame(from = integer(), cell = character(), share = double())
+  sphere <- which(!planar)
+  if (length(sphere) > 0) {
+    touched <- geo_touched_hex(g[sphere], h3_res, geog = geog[sphere])
+    from <- rep(seq_along(touched), lengths(touched))
+    cell <- unlist(touched, use.names = FALSE)
+    share <- geo_shares(geog[sphere], from, cell)
+    pairs <- rbind(pairs, data.frame(from = sphere[from], cell = as.character(cell), share = share))
+  }
+  flat <- which(planar)
+  if (length(flat) > 0) {
+    part <- geo_planar_rows(g[flat], h3_res)
+    pairs <- rbind(pairs, data.frame(from = flat[part$from], cell = part$cell, share = part$share))
+  }
+  pairs <- pairs[order(pairs$from, pairs$cell, method = "radix"), , drop = FALSE]
+  rownames(pairs) <- NULL
+  list(
+    h3 = geo_largest(pairs, n), pairs = pairs,
+    rebuilt = sort(rebuilt), fallback = sort(fallback)
+  )
+}
+
+#' Rebuild geographies on the sphere
+#'
+#' A wrapper of `s2::s2_rebuild()`, so that tests can replace it.
+#'
+#' @param geog An `s2_geography` vector.
+#' @return The rebuilt `s2_geography`, one element per element of `geog`.
+#' @noRd
+geo_rebuild <- function(geog) {
+  s2::s2_rebuild(geog)
+}
+
+# Whether the rebuilt copy of one invalid row is faithful (D31, fact 19):
+# not empty, and its measure (area, length or number of points) as WKB in
+# EPSG:6933 under `sf_use_s2(FALSE)` within `tol` of the original's. A
+# polygon whose rebuilt copy covers more than a hemisphere has turned inside
+# out (its WKB has the same planar area as the original, so the measure
+# alone cannot tell); it is not faithful either. Any error or non-finite
+# measure gives FALSE.
+geo_rebuild_faithful <- function(original, copy, tol) {
+  tryCatch(
+    {
+      if (isTRUE(s2::s2_is_empty(copy))) {
+        return(FALSE)
+      }
+      original <- geo_sfc(original)
+      dimension <- max(sf::st_dimension(original), na.rm = TRUE)
+      if (dimension == 2 && s2::s2_area(copy) > 2 * pi * s2::s2_earth_radius_meters()^2) {
+        return(FALSE)
+      }
+      wkb <- s2::s2_as_binary(copy)
+      rebuilt <- geo_sfc(wk::new_wk_wkb(unclass(wkb)))
+      before <- geo_planar_measure(original, dimension)
+      after <- geo_planar_measure(rebuilt, dimension)
+      is.finite(before) && before > 0 && is.finite(after) && abs(after / before - 1) <= tol
+    },
+    error = function(e) FALSE
+  )
+}
+
+# Area (dimension 2), length (1) or number of points (0) of an `sfc` in
+# EPSG:4326, measured in EPSG:6933 in the plane.
+geo_planar_measure <- function(x, dimension) {
+  if (dimension == 0) {
+    return(nrow(wk::wk_coords(x)))
+  }
+  without_s2({
+    projected <- sf::st_transform(x, 6933)
+    amount <- if (dimension == 2) sf::st_area(projected) else sf::st_length(projected)
+    sum(as.numeric(amount))
+  })
+}
+
+# Planar computations, whatever the session's s2 setting.
+without_s2 <- function(code) {
+  old <- suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(old)))
+  suppressMessages(code)
+}
+
+# Cell polygons in EPSG:4326 as `sfc`, from valid hex strings.
+geo_cell_sfc <- function(hex) {
+  sf::st_set_crs(sf::st_as_sfc(h3_hex_to_h3o(hex)), 4326)
+}
+
+# Cells and shares of rows (`g`, `geo_wkb()` in EPSG:4326, none across the
+# antimeridian or around a pole) in the plane (D31, fact 20). Candidate
+# cells: the cells of boundary points of the shape densified along its
+# straight edges every third of an edge length, their first ring, and the
+# cells whose centre lies inside. A candidate touches the row when
+# `sf::st_intersects()` says so under `sf_use_s2(FALSE)`. Shares: one
+# `sf::st_intersection()` per row with its touched cells, in EPSG:4326 in
+# the plane, the parts measured in EPSG:6933 (areas, or lengths for lines)
+# and normalised to sum to 1; `1 / n` for points. Returns pairs (from,
+# cell, share), `from` indexing `g`.
+geo_planar_rows <- function(g, h3_res) {
+  n <- length(g)
+  sfc <- geo_sfc(g)
+  edge <- h3_edge_m[[h3_res + 1L]]
+  dense <- geo_densify_planar(sfc, edge / 3 / 111320)
+  coords <- wk::wk_coords(dense)
+  boundary <- geo_pairs(coords$feature_id, h3_hex_of_points(coords$x, coords$y, h3_res))
+  ring <- geo_ring_pairs(boundary$cell)
+  candidates <- geo_pairs(boundary$from[ring$from], ring$cell)
+
+  dimension <- sf::st_dimension(sfc)
+  dimension[is.na(dimension)] <- 0L
+  extent <- geo_extent_m(geo_envelope(g))
+  big <- which(dimension == 2 & extent > edge)
+  if (length(big) > 0) {
+    polygons <- dense[big]
+    types <- as.character(sf::st_geometry_type(polygons))
+    if (any(types == "GEOMETRYCOLLECTION")) {
+      polygons <- sf::st_collection_extract(polygons, "POLYGON")
+    }
+    polygons <- sf::st_cast(polygons, "MULTIPOLYGON")
+    filled <- geo_flatten_cells(h3o::sfc_to_cells(polygons, h3_res, "centroid"))
+    candidates <- geo_pairs(c(candidates$from, big[filled$from]), c(candidates$cell, filled$hex))
+  }
+
+  out <- vector("list", n)
+  without_s2({
+    for (i in seq_len(n)) {
+      hex <- sort(unique(candidates$cell[candidates$from == i]), method = "radix")
+      cells <- geo_cell_sfc(hex)
+      hit <- lengths(sf::st_intersects(cells, sfc[i])) > 0
+      hex <- hex[hit]
+      cells <- cells[hit]
+      share <- rep(1 / length(hex), length(hex))
+      if (dimension[[i]] > 0 && length(hex) > 1) {
+        amount <- geo_planar_parts(sfc[i], cells, dimension[[i]])
+        if (is.finite(sum(amount)) && sum(amount) > 0) {
+          share <- amount / sum(amount)
+        }
+      }
+      out[[i]] <- data.frame(from = rep(i, length(hex)), cell = hex, share = share)
+    }
+  })
+  do.call(rbind, c(list(data.frame(from = integer(), cell = character(), share = double())), out))
+}
+
+# Area (dimension 2) or length (1) in EPSG:6933 of the part of the geometry
+# `x` (`sfc` of length 1, EPSG:4326) in each of `cells`: one intersection
+# call in the plane. Called under `sf_use_s2(FALSE)`.
+geo_planar_parts <- function(x, cells, dimension) {
+  parts <- sf::st_intersection(x, cells)
+  amount <- numeric(length(cells))
+  if (length(parts) == 0) {
+    return(amount)
+  }
+  which_cell <- attr(parts, "idx")[, 2]
+  projected <- sf::st_transform(parts, 6933)
+  measure <- as.numeric(if (dimension == 2) sf::st_area(projected) else sf::st_length(projected))
+  measure[!is.finite(measure)] <- 0
+  sums <- rowsum(measure, which_cell)
+  amount[as.integer(rownames(sums))] <- sums[, 1]
+  amount
 }
 
 # Share of each geometry's area (polygons) or length (lines) in each cell of
@@ -454,9 +658,27 @@ geo_largest <- function(pairs, n) {
   best
 }
 
-# Geocodes of all rows, in chunks of `rcs.chunk_size`, on mirai workers when
-# `rcs.workers` is above 1 and mirai is installed.
-geo_h3_rows <- function(g, h3_res) {
+#' Geocodes of rows by an engine
+#'
+#' Geocodes of all rows, in chunks of `rcs.chunk_size`, on mirai workers when
+#' `rcs.workers` is above 1 and mirai is installed. The engine applies to
+#' crossing rows whose cells come from s2 (plan 0002, D31); inside rows keep
+#' the cell of their box corners.
+#'
+#' @param g Geometries in EPSG:4326 (`sfc`, or anything `wk` reads).
+#' @param h3_res One integer, 0 to 15.
+#' @param geocode_engine `"auto"`, `"s2"` or `"planar"`.
+#' @param tol Largest relative change of area (length, number of points) of
+#'   a rebuilt row that `"auto"` accepts.
+#' @return A list: `h3` (hex string per row, `NA` when empty), `index` (a
+#'   data frame with `row`, `cell` (hex) and `share`, sorted by row then
+#'   cell), `rebuilt` and `fallback` (sorted row numbers of the rows rebuilt
+#'   on the sphere and of the rows geocoded in the plane after a rejected
+#'   rebuild).
+#' @noRd
+geo_h3_rows <- function(g, h3_res, geocode_engine = "auto", tol = rcs_option("rcs.s2_rebuild_tol")) {
+  geocode_engine <- check_geocode_engine(geocode_engine)
+  tol <- check_rebuild_tol(tol)
   g <- geo_wkb(g)
   n <- length(g)
   size <- max(1, as.integer(rcs_option("rcs.chunk_size")))
@@ -467,34 +689,68 @@ geo_h3_rows <- function(g, h3_res) {
   }
   workers <- as.integer(rcs_option("rcs.workers"))
   pieces <- if (workers > 1 && length(chunks) > 1 && rlang::is_installed("mirai")) {
-    geo_map_mirai(lapply(chunks, function(at) g[at]), h3_res, workers)
+    geo_map_mirai(lapply(chunks, function(at) g[at]), h3_res, workers, geocode_engine, tol)
   } else {
-    lapply(chunks, function(at) geo_h3_chunk(g[at], h3_res))
+    lapply(chunks, function(at) geo_h3_chunk(g[at], h3_res, geocode_engine, tol))
   }
   h3 <- rep(NA_character_, n)
   index <- vector("list", length(chunks))
+  rebuilt <- vector("list", length(chunks))
+  fallback <- vector("list", length(chunks))
   for (i in seq_along(chunks)) {
     h3[chunks[[i]]] <- pieces[[i]]$h3
     part <- pieces[[i]]$index
     part$row <- chunks[[i]][part$row]
     index[[i]] <- part
+    rebuilt[[i]] <- chunks[[i]][pieces[[i]]$rebuilt]
+    fallback[[i]] <- chunks[[i]][pieces[[i]]$fallback]
   }
   index <- do.call(rbind, c(list(data.frame(row = integer(), cell = character(), share = double())), index))
-  list(h3 = h3, index = index)
+  rownames(index) <- NULL
+  list(
+    h3 = h3, index = index,
+    rebuilt = as.integer(unlist(rebuilt)), fallback = as.integer(unlist(fallback))
+  )
+}
+
+check_geocode_engine <- function(geocode_engine, call = caller_env()) {
+  engines <- c("auto", "s2", "planar")
+  if (!rlang::is_string(geocode_engine) || !geocode_engine %in% engines) {
+    given <- if (rlang::is_string(geocode_engine)) {
+      cli::format_inline("{.val {geocode_engine}}")
+    } else {
+      cli::format_inline("{.obj_type_friendly {geocode_engine}}")
+    }
+    cli::cli_abort(
+      "{.arg geocode_engine} must be one of {.or {.val {engines}}}, not {given}.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  geocode_engine
+}
+
+check_rebuild_tol <- function(tol, call = caller_env()) {
+  if (!rlang::is_scalar_double(tol) && !rlang::is_scalar_integer(tol) || is.na(tol) || !is.finite(tol) || tol < 0) {
+    cli::cli_abort(
+      "{.arg tol} must be one finite number not below 0.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  as.double(tol)
 }
 
 # Runs `geo_h3_chunk()` over chunks on the mirai compute profile `rcs`. Uses
 # daemons already set for that profile; otherwise starts `workers` local
 # daemons for this call. The workers must be able to load rcs.
-geo_map_mirai <- function(chunks, h3_res, workers) {
+geo_map_mirai <- function(chunks, h3_res, workers, geocode_engine = "auto", tol = 1e-3) {
   if (!mirai::daemons_set(.compute = "rcs")) {
     mirai::daemons(workers, .compute = "rcs")
     on.exit(mirai::daemons(0, .compute = "rcs"), add = TRUE)
   }
   m <- mirai::mirai_map(
     chunks,
-    function(g, h3_res, chunk_fn) chunk_fn(g, h3_res),
-    .args = list(h3_res = h3_res, chunk_fn = geo_h3_chunk),
+    function(g, h3_res, geocode_engine, tol, chunk_fn) chunk_fn(g, h3_res, geocode_engine, tol),
+    .args = list(h3_res = h3_res, geocode_engine = geocode_engine, tol = tol, chunk_fn = geo_h3_chunk),
     .compute = "rcs"
   )
   m[mirai::.stop]
@@ -517,6 +773,12 @@ geo_map_mirai <- function(chunks, h3_res, workers) {
 #'   order only (uniqueness is checked by the caller).
 #' @param id_start `integer64` of length 1: the first `.rcs_id` to assign
 #'   (`update` passes the dataset's current maximum plus one).
+#' @param geocode_engine `"auto"` (default), `"s2"` or `"planar"`: how
+#'   crossing rows are geocoded (plan 0002, D31). Projected data are
+#'   geocoded on their EPSG:4326 copy by the same rule (D34).
+#' @param tol Largest relative change of area (length, number of points) of
+#'   a rebuilt row that `"auto"` accepts; above it the row is geocoded in
+#'   the plane.
 #'
 #' @return A list:
 #'
@@ -541,13 +803,19 @@ geo_map_mirai <- function(chunks, h3_res, workers) {
 #'   * `bbox`: the extent of all rows, named double
 #'     `c(xmin, ymin, xmax, ymax)` in the CRS of `x`; all `NA` when there is
 #'     no non-empty geometry.
+#'   * `order`: integer, the row of `x` of each row of `data`.
+#'   * `rebuilt`, `fallback`: sorted integer row numbers of `x`: rows
+#'     invalid on the sphere that were rebuilt there, and rows whose rebuild
+#'     was rejected and that were geocoded in the plane (empty when
+#'     `geocode = FALSE`).
 #'
 #'   Aborts with class `rcs_error_geo` when `x` has no CRS or a reserved
 #'   column name, and with the install hint (`rlang::check_installed()`) when
 #'   the H3 package is missing and `geocode = TRUE`.
 #' @noRd
 geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
-                       id_start = bit64::as.integer64(1)) {
+                       id_start = bit64::as.integer64(1), geocode_engine = "auto",
+                       tol = rcs_option("rcs.s2_rebuild_tol")) {
   if (!inherits(x, "sf")) {
     geo_abort("{.arg x} must be an {.cls sf} object, not {.obj_type_friendly {x}}.")
   }
@@ -584,6 +852,8 @@ geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
   if (length(id_start) != 1 || is.na(id_start)) {
     cli::cli_abort("{.arg id_start} must be one {.cls integer64}.", class = "rcs_error_argument")
   }
+  geocode_engine <- check_geocode_engine(geocode_engine)
+  tol <- check_rebuild_tol(tol)
   if (geocode) {
     check_h3o()
   }
@@ -593,7 +863,7 @@ geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
   n <- length(geometry)
   bbox <- geo_bbox_df(geometry)
 
-  encoded <- if (geocode) geo_h3_rows(geo_to_4326(geometry), h3_res)
+  encoded <- if (geocode) geo_h3_rows(geo_to_4326(geometry), h3_res, geocode_engine, tol)
 
   keys <- list()
   if (geocode) {
@@ -636,7 +906,11 @@ geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
     xmin = geo_min(bbox$xmin), ymin = geo_min(bbox$ymin),
     xmax = geo_max(bbox$xmax), ymax = geo_max(bbox$ymax)
   )
-  list(data = data, index = index, crs = geo_crs_json(x), bbox = extent)
+  list(
+    data = data, index = index, crs = geo_crs_json(x), bbox = extent, order = order,
+    rebuilt = if (geocode) encoded$rebuilt else integer(),
+    fallback = if (geocode) encoded$fallback else integer()
+  )
 }
 
 geo_min <- function(v) {
