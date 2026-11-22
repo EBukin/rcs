@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** ready for execution (two review rounds and the owner's decisions on 2026-11-21); no work package started
+- **Status:** in execution; wave 0 done (2026-11-21)
 
 ## Goal
 
@@ -262,13 +262,22 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 0, orchestrator
 
-- [ ] **Z. Preparation.**
+- [x] **Z. Preparation.**
   1. Merge branch `prototype/lazy-duckdb-auth-geo` into `main` (it holds this plan, `.docs/handoffs/0003-plan-0002-execution.md`, `dev/prototype/` and the `.Rbuildignore` line `^dev$`, committed on 2026-11-21) and push `main`.
   2. Options of D41 in `rcs_option()` (`R/utils.R`) and in the options table of `R/rcs-package.R`; update the option list test in `tests/testthat/test-utils.R`. Condition classes of D42 into the documentation of classes in `R/rcs-package.R` if it lists them.
   3. New `tests/testthat/helper-duckdb.R`: `local_duckdb(bigint = "integer64", .env = parent.frame())` (connection closed with `withr::defer()`), and `local_duckdb_spatial(con)` moved from `tests/testthat/test-interop.R` (that file then calls the helper).
   4. `DESCRIPTION`: `dbplyr` in `Suggests` (D43; `pillar` waits for wave 2); install `dbplyr` if missing.
   5. Fresh session: `devtools::document()`, `devtools::test()` at default, `devtools::check(cran = TRUE)`; record counts as the baseline in "Results of wave 0". Check `gs://rcs-test` with default credentials (create a store under a random prefix, delete it).
   6. Commit and push.
+
+#### Results of wave 0
+
+- Branch `prototype/lazy-duckdb-auth-geo` fast-forwarded into `main` and pushed.
+- Options `rcs.print_rows`, `rcs.duckdb_batch_rows`, `rcs.s2_rebuild_tol` in `rcs_option()` and the options table; `R/rcs-package.R` lists no condition classes, so none were added. `dbplyr` in `Suggests` (already installed).
+- `helper-duckdb.R`: `local_duckdb()`, and `local_duckdb_spatial(con = NULL, frame = parent.frame())` (loads `spatial` into `con`, or into a new `local_duckdb()` connection when `con` is `NULL`); `test-interop.R` uses it, so its connections are now `bigint = "integer64"`.
+- Baseline: `devtools::test()` at default: 29 files, 11,118 expectations, 0 failed, 0 errors, 11 skipped, about 16 minutes. `devtools::check(cran = TRUE)`: 0 errors, 0 warnings, 0 notes.
+- `gs://rcs-test` with default credentials: store created, table written and read, prefix removed.
+- Gate note: the whole suite takes longer than the 600-second limit of one `execute_code` call; gates and agents run it with `callr::r_bg()` and poll.
 
 ### Wave 1: N1a, N1c, P1
 

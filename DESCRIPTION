@@ -33,6 +33,7 @@ Suggests:
     bench,
     covr,
     DBI,
+    dbplyr,
     duckdb,
     gargle,
     ggplot2,

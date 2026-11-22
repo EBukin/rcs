@@ -17,6 +17,9 @@
 #' | `rcs.workers` | `1` | Parallel workers for geocoding. |
 #' | `rcs.lock_timeout` | `600` | Seconds after which a local lock is stale. |
 #' | `rcs.record_writer` | `FALSE` | Record the user name in the catalog. |
+#' | `rcs.print_rows` | `10` | Rows shown when a lazy query is printed. |
+#' | `rcs.duckdb_batch_rows` | `5e5` | Rows per batch when writing from DuckDB. |
+#' | `rcs.s2_rebuild_tol` | `1e-3` | Relative area change accepted for a geometry repaired on the sphere. |
 #'
 #' @keywords internal
 "_PACKAGE"

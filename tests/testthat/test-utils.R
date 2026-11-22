@@ -1,7 +1,8 @@
 test_that("rcs_option() knows the defaults and honours options", {
   withr::local_options(
     rcs.quiet = NULL, rcs.trace = NULL, rcs.staging_dir = NULL, rcs.chunk_size = NULL,
-    rcs.workers = NULL, rcs.lock_timeout = NULL, rcs.record_writer = NULL
+    rcs.workers = NULL, rcs.lock_timeout = NULL, rcs.record_writer = NULL,
+    rcs.print_rows = NULL, rcs.duckdb_batch_rows = NULL, rcs.s2_rebuild_tol = NULL
   )
   expect_false(rcs_option("rcs.quiet"))
   expect_false(rcs_option("rcs.trace"))
@@ -10,6 +11,9 @@ test_that("rcs_option() knows the defaults and honours options", {
   expect_identical(rcs_option("rcs.workers"), 1)
   expect_identical(rcs_option("rcs.lock_timeout"), 600)
   expect_false(rcs_option("rcs.record_writer"))
+  expect_identical(rcs_option("rcs.print_rows"), 10)
+  expect_identical(rcs_option("rcs.duckdb_batch_rows"), 5e5)
+  expect_identical(rcs_option("rcs.s2_rebuild_tol"), 1e-3)
   withr::local_options(rcs.workers = 4)
   expect_identical(rcs_option("rcs.workers"), 4)
   expect_error(rcs_option("rcs.other"), "Unknown option")

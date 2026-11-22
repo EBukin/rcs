@@ -25,30 +25,6 @@ interop_store <- function(frame = parent.frame()) {
   )
 }
 
-# A DuckDB connection with the spatial extension loaded, or a skip.
-local_duckdb_spatial <- function(frame = parent.frame()) {
-  skip_if_not_installed("duckdb")
-  skip_if_not_installed("DBI")
-  con <- suppressMessages(DBI::dbConnect(duckdb::duckdb()))
-  withr::defer(DBI::dbDisconnect(con, shutdown = TRUE), envir = frame)
-  load <- function(sql) {
-    tryCatch(
-      {
-        DBI::dbExecute(con, sql)
-        TRUE
-      },
-      error = function(e) FALSE
-    )
-  }
-  if (!load("LOAD spatial")) {
-    skip_if_offline()
-    if (!load("INSTALL spatial") || !load("LOAD spatial")) {
-      skip("The DuckDB spatial extension cannot be installed or loaded.")
-    }
-  }
-  con
-}
-
 parquet_list <- function(paths) {
   paste0("['", paste(paths, collapse = "', '"), "']")
 }

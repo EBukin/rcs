@@ -22,12 +22,16 @@ defaults.\tabular{lll}{
    \code{rcs.workers} \tab \code{1} \tab Parallel workers for geocoding. \cr
    \code{rcs.lock_timeout} \tab \code{600} \tab Seconds after which a local lock is stale. \cr
    \code{rcs.record_writer} \tab \code{FALSE} \tab Record the user name in the catalog. \cr
+   \code{rcs.print_rows} \tab \code{10} \tab Rows shown when a lazy query is printed. \cr
+   \code{rcs.duckdb_batch_rows} \tab \code{5e5} \tab Rows per batch when writing from DuckDB. \cr
+   \code{rcs.s2_rebuild_tol} \tab \code{1e-3} \tab Relative area change accepted for a geometry repaired on the sphere. \cr
 }
 }
 
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://ebukin.github.io/rcs/}
   \item \url{https://github.com/EBukin/rcs}
   \item Report bugs at \url{https://github.com/EBukin/rcs/issues}
 }
