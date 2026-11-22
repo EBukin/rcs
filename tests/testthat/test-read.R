@@ -321,6 +321,7 @@ test_that("rasters are read as SpatRaster, cropped by intersects, and refuse tab
   expect_true(e[["xmin"]] <= -28 && e[["xmax"]] >= -27 && e[["ymin"]] <= 7 && e[["ymax"]] >= 8)
   expect_snapshot(store_read(fx$st, "grids/sim", layer > 1, geometry = FALSE), error = TRUE)
   expect_snapshot(store_read(fx$st, "grids/sim", columns = 1, exact = FALSE), error = TRUE)
+  expect_snapshot(store_read(fx$st, "grids/sim", exact_engine = "planar"), error = TRUE)
   expect_snapshot(store_open(fx$st, "grids/sim"), error = TRUE)
   expect_snapshot(store_sample(fx$st, "grids/sim"), error = TRUE)
   withr::local_options(rcs.trace = TRUE)
