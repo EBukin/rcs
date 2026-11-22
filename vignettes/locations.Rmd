@@ -218,13 +218,22 @@ store_refresh(st)
 `store_status()` compares every secondary with the primary, dataset by
 dataset, from the catalogs alone. `status` is `same`, `differs` (another
 version), `missing` (not in the secondary) or `extra` (only in the
-secondary); for `differs`, `newer` says which side was written last, a hint
-only, as clocks of different machines can differ. Printed, the addresses
-of the secondaries are listed once above the table and numbered in the
-column `location`.
+secondary); for `differs`, `newer` says which side was written last:
+`"source"` (the primary here) or `"target"` (the location of the row). It
+is a hint only, as clocks of different machines can differ. Printed, the
+source is named first, and the addresses of the other locations are listed
+once above the table and numbered in the column `location`.
 
 ```{r}
-store_status(st)[c("dataset", "location", "status", "newer")]
+store_status(st)
+```
+
+`from` compares every other location, the primary included, with one of
+the secondaries instead. The columns keep their names: `primary_version`
+and `primary_updated` then describe that source.
+
+```{r}
+store_status(st, from = copy_2)[c("dataset", "location", "status", "newer")]
 ```
 
 A copy that is behind is never read: reads go to a location that holds the
@@ -233,11 +242,12 @@ secondary up to date for that dataset, whatever version it held.
 
 ## Bringing secondaries up to date
 
-`store_sync()` copies datasets from the primary to the secondaries: by
-default every dataset that is missing or differs, to every secondary. Like a
-write, it copies only the files a location lacks, checks each by MD5 and
-switches the catalog last. It never deletes a dataset. `dry_run = TRUE`
-shows what it would do.
+`store_sync()` copies datasets from one location, the *source*, to the
+others, the *targets*: by default from the primary, every dataset that is
+missing or differs, to every secondary. Like a write, it copies only the
+files a location lacks, checks each by MD5 and switches the catalog last.
+By default it never deletes a dataset. `dry_run = TRUE` shows what it would
+do and changes nothing.
 
 ```{r needs-sync-dry-run}
 store_sync(st, dry_run = TRUE)
@@ -270,6 +280,109 @@ store_delete(st, "sales/weekly", confirm = "sales/weekly")
 store_rebuild(st, copy_2)
 ```
 
+## Syncing from a secondary
+
+Work can also start on a secondary: on a laptop without network, say, a
+connection whose primary is the local copy writes there alone.
+
+```{r}
+offline <- store_connect(copy_1)
+store_write(offline, rcs_sim_table(80, seed = 4), "sales/monthly",
+  title = "Monthly sales",
+  description = "Simulated monthly sales."
+)
+```
+
+Back on the full connection, `from` names the location to sync from. The
+targets are then every other location, the primary included; `to` limits
+them as before.
+
+```{r}
+store_refresh(st)
+store_sync(st, from = copy_1)
+st
+```
+
+## Conflicts
+
+A dataset may have changed on both sides: here `sales/daily` is written
+through a connection to the primary alone, and later through the
+connection to the first copy alone.
+
+```{r}
+store_write(only_primary, rcs_sim_table(120, seed = 5), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+Sys.sleep(1)
+store_write(offline, rcs_sim_table(140, seed = 6), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+store_refresh(st)
+```
+
+A sync from the primary finds that the first copy holds another version
+that was written *later* than the primary's: a **conflict**. That dataset
+is not copied there. Everything else goes ahead (here the second copy,
+which held an older version, gets the primary's, and a warning lists the
+version it replaced); after the last target the call stops with an error
+of class `rcs_error_sync_conflict` that lists every conflict. The
+condition's field `result` holds the result table, so a script can
+inspect it.
+
+```{r, error = TRUE}
+store_sync(st)
+```
+
+Conflicts are detected by the times of the last writes recorded in the
+catalogs, which come from the clocks of the machines that wrote. Decide
+which version to keep: to keep the primary's, `force = TRUE` copies it over
+the newer one, and the warning names the version that was replaced. To
+keep the copy's, sync from the copy instead.
+
+```{r}
+store_sync(st, force = TRUE)
+```
+
+When the source is the newer side, the copy goes ahead without `force`;
+the warning (class `rcs_warning_sync_overwrite`) still lists every target
+version that was overwritten.
+
+## Deletions
+
+A dataset deleted in one location stays in the others: `store_status()`
+shows it there as `extra`, and a sync leaves it alone. `delete = TRUE`
+deletes from each target the datasets the source no longer holds, with
+their index tables, after the copies; history versions are kept, as with
+`store_delete(history = FALSE)`. `datasets` limits the deletions too.
+
+Here `sales/monthly` is deleted on the first copy only, then the deletion
+is synced from there:
+
+```{r}
+store_delete(offline, "sales/monthly", confirm = "sales/monthly")
+store_refresh(st)
+store_sync(st, from = copy_1, delete = TRUE)
+```
+
+The second copy lost the dataset, but the primary kept it: deleting from
+the primary, the truth of the store, also needs `force = TRUE`. Until
+then the result lists it in the column `kept`.
+
+```{r}
+store_sync(st, from = copy_1, delete = TRUE, force = TRUE)
+st
+```
+
+Deletions run also when conflicts were found, and are reported with them.
+
 ## Cloud locations
 
 A Google Cloud Storage location is given by its address. Nothing else
@@ -294,40 +407,121 @@ store_create("gs://my-bucket/new-store")
 Data are streamed: a read with filters fetches only the files and blocks of
 rows it needs, without downloading whole datasets.
 
-### Authentication
+### Credentials
 
-Three clients talk to Google Cloud Storage, and each finds its credentials
-on its own.
+Four clients of the package talk to Google Cloud Storage: **Arrow** reads
+data and copies files (the installed arrow package must support GCS:
+`arrow::arrow_with_gcs()` returns `TRUE`); the **storage JSON API** reads
+the MD5 checksums of stored files, so that files need not be downloaded to
+be verified (it needs the packages gargle and httr2); **GDAL** reads
+rasters through its `/vsigs/` path; and **DuckDB** reads data files when a
+store is opened in DuckDB (see `vignette("duckdb")`). They all get their
+credentials from the connection: set them once, with the argument `auth`
+of `store_connect()` or `store_create()`, and every client uses them. No
+environment variable is needed or changed.
 
-- **Arrow** reads data and copies files. It uses Google's default
-  credentials: the key file named by the environment variable
-  `GOOGLE_APPLICATION_CREDENTIALS` (a service account), or the credentials
-  written by `gcloud auth application-default login`, or, on Google Cloud
-  machines, those of the machine. The installed arrow package must support
-  GCS: `arrow::arrow_with_gcs()` returns `TRUE`.
-- **The storage JSON API** reads the MD5 checksums of stored files, so that
-  files need not be downloaded to be verified. It needs the packages gargle
-  and httr2 and uses the same credentials as Arrow.
-- **GDAL** reads rasters through its `/vsigs/` path. It does not find the
-  credentials of `gcloud auth application-default login` by itself. Set
-  `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key, or to the
-  credentials file that `gcloud` wrote, or set `GS_OAUTH2_REFRESH_TOKEN`,
-  `GS_OAUTH2_CLIENT_ID` and `GS_OAUTH2_CLIENT_SECRET`.
+Without `auth`, every bucket location uses `rcs_auth_gcs()`, the default
+lookup. It is a chain in which the first variable that is set decides;
+it does not fall through to the next step:
 
-For a personal account, one setup covers all three: log in once in a
-terminal, then point the variable to the file it wrote, for example in
-`.Renviron`:
+1. when the environment variable `GOOGLE_APPLICATION_CREDENTIALS` is set,
+   the key file it names, and only that file: a missing file is an error
+   (class `rcs_error_backend`);
+2. else, when `CLOUDSDK_CONFIG` is set,
+   `application_default_credentials.json` in that folder only; gcloud's
+   own folder is not tried;
+3. else the same file in gcloud's own folder (`%APPDATA%/gcloud` on
+   Windows, `~/.config/gcloud` elsewhere), written once by
+   `gcloud auth application-default login`;
+4. when the file of step 2 or 3 does not exist, *ambient* credentials:
+   Arrow and the JSON API use Google's own defaults, such as the machine's
+   account on Google Cloud. GDAL and DuckDB cannot use these.
+
+For a personal account, the usual setup is therefore one command in a
+terminal, once per machine, and nothing in R:
 
 ```
-# after: gcloud auth application-default login
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/application_default_credentials.json
+gcloud auth application-default login
 ```
 
-For a service account, point the same variable to its key file instead.
+`rcs_auth_gcs()` also takes a credential explicitly: `key` is a JSON key
+file, of a service account or of a user login; `token` is an access token
+obtained elsewhere; `fun` is a function that returns a fresh token each
+time it is called. `auth` accepts such an object, the path of a key file,
+or a list named by address that gives each location its own credential
+(locations left out use the default lookup):
 
-When a location cannot be reached, the error lists what each client needs.
-A primary that cannot be reached stops `store_connect()` with that list; a
-secondary gives a warning that includes it.
+```{r, eval = FALSE}
+# A service account for every bucket of the connection
+st <- store_connect("gs://my-bucket/store",
+  auth = rcs_auth_gcs(key = "~/keys/reader.json")
+)
+
+# The same, with the path alone
+st <- store_connect("gs://my-bucket/store", auth = "~/keys/reader.json")
+
+# One credential per location
+st <- store_connect("gs://my-bucket/store",
+  secondary = c("~/data/my-store", "gs://other-bucket/store"),
+  auth = list(
+    "gs://my-bucket/store" = "~/keys/reader.json",
+    "gs://other-bucket/store" = rcs_auth_gcs(fun = my_token_function)
+  )
+)
+```
+
+Tokens of a key file or a function are renewed five minutes before they
+expire, so a long session never needs to sign in again; a `token` given
+directly cannot be renewed and lasts as long as its issuer allows, usually
+an hour. Asking for the same source twice gives the same object, with its
+token. Printing a credential never contacts the network and never shows a
+secret; the identity (the account's e-mail) is known after the first
+token:
+
+```{r}
+rcs_auth_gcs(token = "<an access token>")
+```
+
+Credentials are never written to files, catalogs or logs, nor put in
+environment variables, with one exception: **GDAL's options are
+process-wide**. Reading a raster from a bucket gives GDAL the credential of
+that location (the three `GS_OAUTH2_*` options for a user login,
+`GOOGLE_APPLICATION_CREDENTIALS` as a GDAL option for a service account,
+an `Authorization` header for a token or a function), and it applies to
+every GDAL read in the R process. Reading rasters through two connections
+with different credentials therefore switches GDAL from one to the other;
+the first switch warns (class `rcs_warning_gdal_credential`), because a
+raster opened with the previous credential reads its tiles lazily and may
+fail on its next read. Also, GDAL remembers a failed open: after a
+credential problem is fixed, a raster that failed may need a new R
+session.
+
+DuckDB gets a temporary secret in its own connection, made from the
+location's token. A secret holds a token, not a key: after about an hour
+of DuckDB work on a bucket, call `store_duckdb()` again to refresh it.
+
+`store_auth_check()` tries each client on each location with a small probe
+and reports, without stopping, which work. Local folders need no
+credentials; each local location gives one row (the column
+`location`, the address, is left out here):
+
+```{r}
+store_auth_check(st)[c("client", "ok", "note")]
+```
+
+On a bucket it gives one row per client: Arrow and the JSON API look up
+the catalog file, GDAL opens the first raster of the location (`ok` is
+`NA` when there is none), and DuckDB counts the rows of the catalog
+(`NA` when duckdb is not installed):
+
+```{r, eval = FALSE}
+st <- store_connect("gs://my-bucket/store")
+store_auth_check(st)
+```
+
+When a location cannot be reached, the error names the credential in use
+and how to pass another one with `auth`. A primary that cannot be reached
+stops `store_connect()`; a secondary gives a warning.
 
 ## History per connection
 

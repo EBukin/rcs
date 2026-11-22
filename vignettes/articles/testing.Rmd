@@ -169,7 +169,20 @@ tests themselves):
   non-ASCII characters, factors with unused levels, ordered factors, dates,
   times with time zones, time differences, 64-bit integers, list columns,
   missing values, zero rows, every geometry type) is `identical()` after
-  normalisation, for one file and for partitioned datasets.
+  normalisation, for one file and for partitioned datasets;
+- the geocoding engines (`tests/testthat/test-geo-engine.R`) are compared
+  with brute force on the sphere and in the plane, for two polygons that
+  are valid in the plane but invalid on the sphere (a duplicated vertex
+  and a spike) and for a polygon with long edges, whose cells on the
+  sphere and in the plane differ. These geometries are given as WKT in
+  `tests/testthat/helper-geo-invalid.R`, with the brute-force references
+  for both readings. The tests also check the planar fallback of `"auto"`
+  (with the rebuild mocked to return an empty or a wrong geometry), that
+  an invalid row leaves the other rows of its chunk unchanged, that inside
+  rows and rows across the antimeridian or around a pole get the same
+  cells from every engine, and determinism. The read side
+  (`test-intersects.R`) checks that the exact test follows the engine
+  recorded with each dataset, and the explicit overrides.
 
 ## Other checks
 
@@ -193,15 +206,88 @@ tests themselves):
   when its Parquet driver is present. Each test skips when its tool is
   missing; common Windows builds of GDAL lack the Parquet driver.
 
+## Credentials, cells, types and verbs
+
+- **Credentials** (`tests/testthat/test-auth.R`) run offline: the network
+  calls, the clock and GDAL's configuration go through small internal
+  functions that the tests mock. They cover the default lookup order of
+  `rcs_auth_gcs()`, both key types, renewal five minutes before expiry, a
+  token that is never renewed, the GDAL options set for each credential
+  type and the warning on a switch, the temporary DuckDB secret, and
+  `store_auth_check()` with each client failing in turn. Most tests
+  (those of the lookup, the key types, renewal, `print()`, `str()`, GDAL's
+  options, the DuckDB secret and `store_auth_check()` with failing
+  clients) assert that no environment variable changed. The
+  tests of the default lookup, of key types, of the same source and of
+  `print()` fail on any network call; the `print()` and `str()` tests
+  assert that no token, refresh token or client secret is shown.
+- **H3 cells** (`test-h3-type.R`): the class `rcs_h3` prints hex in
+  vectors, tibbles and `sf`; never fails on any 64-bit value; keeps its
+  class through subsetting, `c()`, `unique()`, `sort()` and the dplyr and
+  vctrs verbs, with `NA` filled as `NA`; and `rcs_h3_hex()` accepts every
+  input form, warns for doubles and gives the same strings as the DuckDB
+  macro.
+- **Types** (`test-types.R`): `store_restore_types()` on data read by
+  `arrow::read_parquet()` from a dataset's files restores factors,
+  ordered factors, time differences, 64-bit integers, lists and cells, and
+  leaves incompatible columns alone.
+- **Geospatial verbs** (`test-geo-verbs.R`): `rcs_geo_add()` and
+  `rcs_geo_index()` equal what a write computes, `rcs_geo_strip()` undoes
+  `rcs_geo_add()` exactly, and the round trip raw, prepared, written,
+  collected and stripped gives the raw data back (attributes, identical
+  WKB, CRS) for points, lines and polygons. Prepared writes, accepted when
+  equal and refused when changed, are tested in `test-write.R`.
+- **Sync** (`test-sync.R`): syncs from the primary and from a secondary,
+  deletions with and without `force`, a conflict (target newer) and an
+  overwrite (source newer), dry runs, and one injected failure per phase,
+  after which the invariants hold and a repeat sends only what is
+  missing.
+
+## DuckDB
+
+The DuckDB tests skip when duckdb or DBI is missing. They make every
+connection through the helper `local_duckdb()`
+(`tests/testthat/helper-duckdb.R`), with `bigint = "integer64"` and
+closed when the test ends; `local_duckdb_spatial()` loads DuckDB's
+`spatial` extension and skips when it cannot be installed (it needs a
+download on first use).
+
+- `test-duckdb.R`: one view per dataset in both modes, their names, the
+  tables `rcs.views` and `rcs.store`, column types and rows equal to the
+  Arrow reads, the guards on view names and connections, and
+  `store_tables()`.
+- `test-duckdb-file.R`: a database file whose views and user tables
+  survive closing and reopening, refreshing after writes and deletions in
+  the store, reconnecting from the file alone, the local-first workflow
+  with the credential functions mocked to fail (they are never called),
+  and a file that stays small because views hold query text only.
+- `test-duckdb-tbl.R`: `store_open(engine = "duckdb")`, whose `collect()`
+  restores the R types and returns the rows of the Arrow engine.
+- `test-duckdb-intersects.R`: `store_intersects()` on DuckDB tables
+  returns exactly the rows of the Arrow path, for cells, thin strips,
+  polygons with holes, boxes and the antimeridian, in both modes.
+- `test-write-duckdb.R`: `store_write()` of a DuckDB table gives the same
+  files, catalog rows, manifest and version as a write of the same data
+  collected into R (byte for byte), checks keys and partitions inside
+  DuckDB, and drops its temporary table also after an error.
+
 ## The cloud tests
 
 At level `full`, the Google Cloud Storage backend is tested against a real
 bucket when the environment variable `RCS_TEST_GCS` names one
 (`tests/testthat/test-backend-gcs.R`): uploads, downloads, MD5 checksums
 read without a download, listing and deletion, a Parquet file streamed
-through Arrow and a file read through GDAL's `/vsigs/` path; and a raster
-is opened through `/vsigs/` (`test-raster.R`). The GDAL tests also need
-`GOOGLE_APPLICATION_CREDENTIALS`. The integration suite itself runs on
+through Arrow, a file read through GDAL's `/vsigs/` path, and a store on
+the bucket that renews an expired token; a raster is opened through
+`/vsigs/` (`test-raster.R`); a store on the bucket passes
+`store_auth_check()` for every client and reads a raster through GDAL
+(`test-auth.R`); DuckDB views read the bucket's files with a secret
+(`test-duckdb.R`); and syncs run with the bucket as a secondary
+(`test-sync.R`). All of them use the credentials of the default lookup
+of `rcs_auth_gcs()`, GDAL included, with one exception: the GDAL test of
+`test-backend-gcs.R` sets `GOOGLE_APPLICATION_CREDENTIALS` to gcloud's
+application-default login for its own duration when the variable is
+unset. The integration suite itself runs on
 local folders only. Each run works under a random prefix in the bucket and
 removes it at the end. Use a dedicated, empty bucket, and set up
 credentials as described in `vignette("locations")`:

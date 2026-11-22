@@ -30,17 +30,20 @@ auth_adc_name <- "application_default_credentials.json"
 #' `rcs_auth_gcs()`, the default lookup.
 #'
 #' Give at most one of `key`, `token` and `fun`. With none, the default lookup
-#' takes the first of:
+#' is a chain in which the first variable that is set decides:
 #'
-#' 1. the file named by the environment variable
-#'    `GOOGLE_APPLICATION_CREDENTIALS`;
-#' 2. `application_default_credentials.json` in the folder named by
-#'    `CLOUDSDK_CONFIG`, when that variable is set;
-#' 3. the same file in gcloud's folder (`%APPDATA%/gcloud` on Windows,
+#' 1. when the environment variable `GOOGLE_APPLICATION_CREDENTIALS` is set,
+#'    the file it names and only that file (a missing file aborts with
+#'    class `rcs_error_backend`);
+#' 2. else, when `CLOUDSDK_CONFIG` is set,
+#'    `application_default_credentials.json` in that folder only (gcloud's
+#'    folder is not tried);
+#' 3. else the same file in gcloud's folder (`%APPDATA%/gcloud` on Windows,
 #'    `~/.config/gcloud` elsewhere), written once by
 #'    `gcloud auth application-default login`;
-#' 4. ambient credentials, when no file exists: Arrow and the JSON API then
-#'    use Google's own defaults (on Google Cloud, the metadata server).
+#' 4. ambient credentials, when the file of step 2 or 3 does not exist:
+#'    Arrow and the JSON API then use Google's own defaults (on Google
+#'    Cloud, the metadata server).
 #'
 #' Access tokens of a key file or a function are renewed five minutes before
 #' they expire, so a long session never signs in again. A token given with
@@ -51,6 +54,28 @@ auth_adc_name <- "application_default_credentials.json"
 #' Printing the object never contacts the network and never shows a secret;
 #' the identity (the account's e-mail) is known after the first token.
 #'
+#' @section Clients:
+#' One credential serves every client of a location: Arrow (data files),
+#' the JSON API (MD5 checksums), GDAL (rasters through `/vsigs/`) and DuckDB
+#' ([store_duckdb()]). Tokens, refresh tokens, client secrets and functions
+#' stay inside the object: they are never written to files, catalogs or
+#' logs, nor put in environment variables.
+#'
+#' * GDAL's options are process-wide. Reading a raster gives GDAL the
+#'   credential of its location (a user login as the three
+#'   `GS_OAUTH2_*` options, a service account as the GDAL option
+#'   `GOOGLE_APPLICATION_CREDENTIALS`, a token or a function as an
+#'   `Authorization` header), for every GDAL read of the R process. The
+#'   first switch to another credential warns (class
+#'   `rcs_warning_gdal_credential`): a raster opened earlier reads its tiles
+#'   lazily and may fail with the new credential.
+#' * DuckDB gets a temporary secret holding a token, in its connection only;
+#'   call [store_duckdb()] again after about an hour of DuckDB work on a
+#'   bucket to refresh it.
+#' * Ambient credentials work for Arrow and the JSON API only.
+#'
+#' [store_auth_check()] tries every client on every location.
+#'
 #' @param key Path to a JSON key file of type `"service_account"` or
 #'   `"authorized_user"` (such as the file written by
 #'   `gcloud auth application-default login`).
@@ -59,11 +84,16 @@ auth_adc_name <- "application_default_credentials.json"
 #' @param fun A function of no arguments returning an access token, or a list
 #'   with `access_token` and `expires_in` (seconds). Called again when the
 #'   token it gave is about to expire.
+#' @param x An `rcs_auth_gcs` object.
+#' @param ... Ignored.
 #' @return An object of class `rcs_auth_gcs`: a list with `source`, `type`
 #'   (the key file's type, or `NA`), `file` (or `NA`) and the environment
 #'   `cache`. Aborts with class `rcs_error_argument` for invalid arguments and
-#'   with `rcs_error_backend` for a missing or unusable key file.
-#' @seealso [store_connect()], [store_create()].
+#'   with `rcs_error_backend` for a missing or unusable key file. `print()`
+#'   shows the source, type, file, identity and validity of the token, and
+#'   returns `x` invisibly.
+#' @seealso [store_connect()], [store_create()], [store_auth_check()];
+#'   `vignette("locations")` for a walk-through.
 #' @export
 #' @examples
 #' # The default lookup; nothing is contacted until data is read.
@@ -106,6 +136,7 @@ rcs_auth_gcs <- function(key = NULL, token = NULL, fun = NULL) {
   auth_default()
 }
 
+#' @rdname rcs_auth_gcs
 #' @export
 print.rcs_auth_gcs <- function(x, ...) {
   cache <- x$cache
@@ -675,7 +706,7 @@ auth_scrub <- function(text, hide) {
 #'   client was not tried) and `note` (`"ok"`, the error, or why it was not
 #'   tried).
 #' @seealso [rcs_auth_gcs()] for the credentials and [store_connect()] to
-#'   pass them.
+#'   pass them; `vignette("locations")`.
 #' @export
 #' @examples
 #' primary <- file.path(tempdir(), "rcs-example-auth-check")

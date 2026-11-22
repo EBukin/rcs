@@ -118,7 +118,7 @@ is_index_entry <- function(catalog) {
 #'   The attribute `source` holds the address of the source. Zero rows when
 #'   the connection has no other location. `store_sync()` brings missing
 #'   and differing datasets up to date.
-#' @seealso [store_datasets()], [store_refresh()].
+#' @seealso [store_datasets()], [store_refresh()], [store_sync()].
 #' @export
 #' @examples
 #' root <- file.path(tempdir(), "rcs-example-status")
