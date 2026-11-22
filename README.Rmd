@@ -52,6 +52,11 @@ folders or Google Cloud Storage buckets.
   passed to the Parquet reader. Spatial filters use H3 cells and bounding
   boxes stored with the data, so an area is read without scanning every
   geometry.
+- **Lazy first.** `store_open()` opens a dataset without reading it; dplyr
+  verbs describe the rows you want, and `collect()` reads them into R.
+- **DuckDB in one call.** `store_duckdb()` turns every dataset into a
+  DuckDB view, in memory or in a database file next to your own tables,
+  and `store_write()` stores a DuckDB result without loading it into R.
 - **Same data, same version.** Writing identical data again changes
   nothing and copies nothing.
 
@@ -62,8 +67,9 @@ folders or Google Cloud Storage buckets.
 pak::pak("EBukin/rcs")
 ```
 
-Geospatial datasets need the package h3o, rasters need terra, and Google
-Cloud Storage needs gargle and httr2 and an arrow build with GCS support.
+Geospatial datasets need the package h3o, rasters need terra, DuckDB
+needs duckdb, DBI and dbplyr, and Google Cloud Storage needs gargle and
+httr2 and an arrow build with GCS support.
 
 ## Example
 
@@ -89,12 +95,33 @@ See what the store holds:
 st
 ```
 
-Read part of a dataset. Only the file of the year 2024 is opened.
+Open a dataset. Nothing is read yet; printing shows a header and the
+first rows.
 
 ```{r}
-store_read(st, "sales/daily", year == 2024, qty > 45,
-  columns = c(shop_id, date, product, qty)
-)
+q <- store_open(st, "sales/daily")
+q
+```
+
+Describe the rows you want with dplyr verbs and read them with
+`collect()`. Only the file of the year 2024 is opened.
+
+```{r}
+q |>
+  dplyr::filter(year == 2024, qty > 45) |>
+  dplyr::select(shop_id, date, product, qty) |>
+  dplyr::collect()
+```
+
+`store_read(st, "sales/daily", year == 2024, qty > 45)` does the same in
+one call.
+
+Query the whole store with SQL in DuckDB, without copying any data:
+
+```{r, eval = requireNamespace("duckdb", quietly = TRUE) && requireNamespace("DBI", quietly = TRUE)}
+con <- store_duckdb(st)
+DBI::dbGetQuery(con, "SELECT year, sum(qty) AS qty FROM sales.daily GROUP BY year ORDER BY year")
+DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 Keep the same store in a bucket and in a local copy; writes reach both and
@@ -106,10 +133,14 @@ st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
 
 ## Learn more
 
-- `vignette("rcs")`: getting started with a local store.
+- `vignette("rcs")`: getting started with a local store: write, open,
+  read, update, keep versions.
+- `vignette("duckdb")`: datasets as DuckDB views, database files, spatial
+  filters in DuckDB, writing from DuckDB, the local-first workflow.
 - `vignette("locations")`: primary and secondary locations, environment
-  variables, cloud credentials.
-- `vignette("geospatial")`: `sf` objects, spatial filters, rasters.
+  variables, cloud credentials, sync.
+- `vignette("geospatial")`: `sf` objects, spatial filters, geocoding
+  engines, rasters.
 
 The package is developed and tested on simulated data only.
 

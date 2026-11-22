@@ -40,12 +40,17 @@ Sys.setenv(TZ = "UTC")
 rcs keeps tabular, geospatial vector and raster data in a *store*: a named
 collection of *datasets*, written mostly as Parquet files. This vignette
 works with a store in one local folder. It shows how to create the store,
-write a table, see what the store holds, read data back with filters, and
-keep earlier versions.
+write a table, see what the store holds, open a dataset and read part of it
+back, and keep earlier versions.
 
-Two other vignettes go further: `vignette("locations")` keeps the same store
-in several places, local folders or cloud buckets, and
-`vignette("geospatial")` writes `sf` objects and rasters.
+The way to work with a dataset is `store_open()`: it opens the dataset
+lazily, without reading it, you describe the rows you want with dplyr
+verbs, and `collect()` reads them into R.
+
+Three other vignettes go further: `vignette("locations")` keeps the same
+store in several places, local folders or cloud buckets,
+`vignette("geospatial")` writes `sf` objects and rasters, and
+`vignette("duckdb")` queries a store with DuckDB.
 
 ```{r setup}
 library(rcs)
@@ -160,32 +165,86 @@ open no data file, so they are fast also for a store in a cloud bucket.
 A dataset can be named by the last part of its name when that is unique in
 the store: `"daily"` stands for `"sales/daily"` below.
 
-## Read data
+## Open a dataset
 
-`store_read()` reads a dataset into R. Filters are written as in
-`dplyr::filter()`, and `columns` selects columns as in `dplyr::select()`.
+`store_open()` opens a dataset as a lazy query. It reads no data: the query
+is built from the files the catalog names. Printing it shows a header and
+the first rows.
+
+```{r}
+q <- store_open(st, "daily")
+q
+```
+
+The header says what the query reads:
+
+- `Dataset:` the full name, the number of rows and columns, and the kind.
+  The number of rows comes from the catalog; it is known as long as the
+  query is the whole dataset, with columns at most selected, renamed or
+  computed.
+- `Location:` the location read, here the primary, a local folder.
+- `Version:` the first characters of the version, and whether it is the
+  current one.
+- `Files:` how many of the dataset's files the query reads.
+
+Printing reads the rows it shows, and no more. It shows 10 rows, or `n`;
+the option `rcs.print_rows` changes the default.
+
+```{r}
+print(q, n = 3)
+```
+
+The query is changed with the dplyr verbs `filter()`, `select()`,
+`mutate()`, `rename()`, `arrange()`, `distinct()` and `head()`. Each verb
+returns a new query; still nothing is read.
+
+```{r}
+q24 <- q |>
+  dplyr::filter(year == 2024, qty > 45) |>
+  dplyr::select(shop_id, date, product, qty)
+q24
+```
+
+After a filter the number of rows is not known without reading, so the
+header shows `??`. `Files: 1 of 2 (pruned)` says that one file is enough:
+a filter on the partition columns alone is first applied to the catalog,
+and only the files of the matching partitions are opened. `Filter:` shows
+the row filter that is passed to the Parquet reader.
+
+`collect()` runs the query and returns a tibble.
+
+```{r}
+q24 |>
+  dplyr::mutate(big_day = qty > 48) |>
+  dplyr::arrange(dplyr::desc(qty)) |>
+  dplyr::collect()
+```
+
+Filters and the column selection are passed to the Parquet reader, so only
+the needed files, blocks of rows and columns are read. The work counters
+show it: with `options(rcs.trace = TRUE)`, `rcs_trace()` reports the work
+done by the last call.
+
+```{r}
+options(rcs.trace = TRUE)
+x <- q |> dplyr::filter(year == 2023) |> dplyr::collect()
+rcs_trace()[c("counter", "detail", "n")]
+options(rcs.trace = FALSE)
+```
+
+One of the two files was opened.
+
+## Read in one call
+
+`store_read()` is the shortcut for `store_open()`, `filter()`, `select()`
+and `collect()` in one call. Filters are written as in `dplyr::filter()`,
+and `columns` selects columns as in `dplyr::select()`.
 
 ```{r}
 store_read(st, "daily", year == 2024, product == "p07",
   columns = c(shop_id, date, qty)
 )
 ```
-
-Filters and the column selection are passed to the Parquet reader, so only
-the needed files, blocks of rows and columns are read. A filter on the
-partition columns alone is first applied to the catalog, and only the files
-of the matching partitions are opened. The work counters show it: with
-`options(rcs.trace = TRUE)`, `rcs_trace()` reports the work done by the last
-call.
-
-```{r}
-options(rcs.trace = TRUE)
-x <- store_read(st, "daily", year == 2023)
-rcs_trace()[c("counter", "detail", "n")]
-options(rcs.trace = FALSE)
-```
-
-One of the two files was opened.
 
 The types of the columns come back as they were written: factor levels,
 64-bit integers, time differences with their units, list columns and time
@@ -211,24 +270,6 @@ store_glimpse(st, "daily")
 store_sample(st, "daily", n = 5, qty > 40, columns = c(shop_id, date, qty),
   seed = 42
 )
-```
-
-## Lazy queries
-
-`store_open()` returns a lazy query. It is changed with the dplyr verbs
-`filter()`, `select()`, `mutate()`, `rename()`, `arrange()`, `distinct()`
-and `head()`, and nothing is read until `collect()`.
-
-```{r}
-q <- store_open(st, "daily")
-q
-
-q |>
-  dplyr::filter(year == 2024, qty > 45) |>
-  dplyr::mutate(revenue = qty * price) |>
-  dplyr::select(shop_id, date, qty, revenue) |>
-  dplyr::arrange(dplyr::desc(qty)) |>
-  dplyr::collect()
 ```
 
 ## Update some partitions

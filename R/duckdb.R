@@ -49,7 +49,16 @@ duckdb_qualified <- function(con, name) {
 #' no data: DuckDB reads the Parquet files when a query runs, and only the
 #' columns and row groups the query needs. The file list comes from the
 #' catalog held by the connection `st`, so the views show the versions it
-#' knows: after [store_refresh()] call `store_duckdb()` again.
+#' knows: after [store_refresh()] call `store_duckdb()` again. One message
+#' names the views made.
+#'
+#' The views are queried with SQL (`DBI::dbGetQuery()`), with dbplyr
+#' (`dplyr::tbl(con, DBI::Id(schema = , table = ))`, or
+#' `store_open(st, dataset, engine = "duckdb", con = con)`, whose
+#' `collect()` restores the R types and the geometry and which takes
+#' [store_intersects()]), and can be joined with your own tables. A lazy
+#' table on the connection can be written back to the store with
+#' [store_write()]. `vignette("duckdb")` shows each step.
 #'
 #' * View names: the first part of the dataset name is the schema, the other
 #'   parts joined with `__` are the view; a one-part name goes to schema
@@ -60,17 +69,21 @@ duckdb_qualified <- function(con, name) {
 #' * `mode = "native"` (the default): DuckDB reads the files itself with
 #'   `read_parquet()`, from the location a read would use. For locations on
 #'   Google Cloud Storage a temporary DuckDB secret is created from the
-#'   location's credential (see [rcs_auth_gcs()]). Its access token is valid
-#'   for about an hour: call `store_duckdb()` again to renew it. The
-#'   `geometry` column of geospatial datasets is of DuckDB type `GEOMETRY`.
+#'   location's credential (see [rcs_auth_gcs()]); it lives only in this
+#'   connection and holds an access token, valid for about an hour. After
+#'   an hour of DuckDB work on a bucket, call `store_duckdb()` again: every
+#'   call renews the secrets. The `geometry` column of geospatial datasets
+#'   is of DuckDB type `GEOMETRY`, readable without the `spatial` extension.
 #' * `mode = "arrow"`: the Arrow dataset the package opens for reads is
 #'   registered in DuckDB and the view selects from it, so DuckDB needs no
 #'   credential of its own; filters are pushed into the Arrow scan. The
-#'   `geometry` column is WKB (`BLOB`).
+#'   `geometry` column is WKB (`BLOB`). The registration lasts only as long
+#'   as the connection: in a database file such views stop working once it
+#'   is closed (see "Database files").
 #' * `spatial = TRUE` installs and loads DuckDB's `spatial` extension and, in
 #'   arrow mode, adds a column `geom` (`GEOMETRY`) to geospatial views.
-#' * The macro `rcs_h3_hex(x)` turns H3 cells (`BIGINT`) into hex strings in
-#'   SQL.
+#' * H3 cells are `BIGINT` columns, read into R as `bit64::integer64`; the
+#'   macro `rcs_h3_hex(x)` turns them into hex strings in SQL.
 #'
 #' The connection records its views in the table `rcs.views` (`view`,
 #' `dataset`, `version`, `location`, `mode`, `refreshed` in UTC) and the
@@ -95,11 +108,13 @@ duckdb_qualified <- function(con, name) {
 #' without `st` reconnects to the store recorded in `rcs.store`, with default
 #' credentials, and refreshes the same way.
 #'
-#' A plain `DBI::dbConnect(duckdb::duckdb(dbdir = path))` also opens the
-#' file: your tables work, and native views work while their files exist,
-#' but they show the versions of the last refresh, views on Google Cloud
-#' Storage need a secret first, and views in arrow mode do not work until
-#' `store_duckdb()` is called again.
+#' A plain `DBI::dbConnect(duckdb::duckdb(dbdir = path), bigint =
+#' "integer64")` also opens the file: your tables work, and native views
+#' work while their files exist, but they show the versions of the last
+#' refresh (a later write may have deleted those files, unless the store
+#' keeps history), views on Google Cloud Storage need a secret first, and
+#' views in arrow mode do not work until `store_duckdb()` is called again.
+#' [store_tables()] with `st` says which views are not current.
 #'
 #' @param st A store connection made by [store_connect()]. It may be left
 #'   out only with `path`, to reopen a file prepared earlier.
@@ -115,7 +130,8 @@ duckdb_qualified <- function(con, name) {
 #'   a double); `path` must then be `NULL`.
 #' @return The DuckDB connection, invisibly. Close it with
 #'   `DBI::dbDisconnect(con, shutdown = TRUE)`.
-#' @seealso [store_tables()], [store_open()].
+#' @seealso [store_tables()], [store_open()], [store_intersects()],
+#'   [store_write()].
 #' @export
 #' @examplesIf rlang::is_installed(c("duckdb", "DBI"))
 #' root <- file.path(tempdir(), "rcs-example-duckdb")

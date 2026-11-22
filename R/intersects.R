@@ -52,9 +52,16 @@
 #' the query. Several calls combine: a row must intersect every query.
 #'
 #' On a DuckDB table (`store_open(engine = "duckdb")`) the candidate test is
-#' added to the table's SQL (`bbox`, and `h3` with the index view when the
-#' cell filter is used), so it needs those columns: call
-#' `store_intersects()` before a [dplyr::select()] that drops them.
+#' added to the table's SQL: the box test on `bbox` and, when the cell
+#' filter is used, `h3` and the dataset's index view. The table must
+#' therefore still hold `bbox` and, for the cell filter, `h3` and `.rcs_id`
+#' (`geometry` too with `exact = "sql"`): call `store_intersects()` before a
+#' [dplyr::select()] that drops them.
+#' Above 10,000 cells, the cells go to a temporary table on the connection,
+#' kept until it is closed. With `exact = TRUE` the exact test runs in R in
+#' `collect()`, with the same engine and the same rows as on the Arrow
+#' engine; `exact = FALSE` gives the same candidate rows as on the Arrow
+#' engine. See `vignette("duckdb")`.
 #'
 #' @param q A query made by [store_open()] on a geospatial dataset, with
 #'   either engine.
@@ -75,9 +82,12 @@
 #'   message saying so. The candidate set is also returned, with the same
 #'   message, when the geometry is not collected. On a DuckDB table, `"sql"`
 #'   runs the exact test in DuckDB instead (`ST_Intersects()` of its
-#'   `spatial` extension, loaded and installed when needed, which needs the
-#'   network once): the query stays lazy, and the test is in the plane of
-#'   the coordinates, as `exact_engine = "planar"`, whatever `exact_engine`.
+#'   `spatial` extension, installed and loaded when needed; the first
+#'   installation downloads it): the query stays lazy, so the result can be
+#'   aggregated or joined in DuckDB, and the test is in the plane of the
+#'   coordinates whatever `exact_engine`. It returns the rows the Arrow
+#'   engine returns with `exact_engine = "planar"`, except for queries
+#'   across the antimeridian or around a pole.
 #' @param exact_engine How the exact test reads the geometries. `NULL` (the
 #'   default) follows the geocoding engine the dataset was written with
 #'   (`geocode_engine` of [store_write()]): `"s2"` tests on the sphere (a
