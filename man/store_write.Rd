@@ -109,6 +109,15 @@ H3 cell at \code{h3_res} holding the largest part of each geometry; not with
 \code{geocode = FALSE}) and \code{bbox} (bounding box), and are sorted by \code{h3}.
 Rows that cross H3 cells are listed in an index table
 \verb{<dataset>__h3}, written, replaced and removed with the dataset.
+\item Prepared geospatial data (\code{\link[=rcs_geo_add]{rcs_geo_add()}}, or rows read back with
+\code{collect()}) may hold these columns already: \code{.rcs_id} is dropped and
+assigned again; \code{h3} and \code{bbox} must equal what the write computes
+(else the write aborts naming the rows; prepare with the same
+\code{geocode_engine}, or call \code{\link[=rcs_geo_strip]{rcs_geo_strip()}} first), and \code{h3_res}, when
+not given, is taken from the cells. Columns \verb{h3_p<r>} are written as
+they are; with \code{partition = "h3"} one named as the chosen partition
+column must hold the same cells, and then serves as it. Raw and
+prepared data give the same version.
 \item A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 partitioned or updated.
 }

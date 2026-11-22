@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-3 done (2026-11-22)
+- **Status:** in execution; waves 0-4 done (2026-11-22)
 
 ## Goal
 
@@ -402,21 +402,33 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 4: Q, R, N2
 
-- [ ] **Q. Lazy-first printing.** D1, D2. Prototype: `dev/prototype/print.R`.
+- [x] **Q. Lazy-first printing.** D1, D2. Prototype: `dev/prototype/print.R`.
   - Owns: `R/query.R` (`print.rcs_query()` and helpers only), new `R/preview.R`, `tests/testthat/test-query.R` (print blocks), `_snaps/query.md`.
   - Tests first (snapshots use one kept file or an `arrange()` so that rows are deterministic): unfiltered table (known rows, `n more rows`); filtered (`??`, `Filter:`, `(pruned)`); after `head(5)` (`??`); geospatial (geometry column, `rcs_h3` cells in hex); spatial filter (`Spatial:`, `Filter:   (with spatial predicate)`, footer `more rows may exist`); zero rows; geometry dropped; read from a secondary (`Location: secondary 1 (local)`); `n = 3` and `options(rcs.print_rows = 3)`; a long filter truncated; work counters: printing a filtered query on a partitioned dataset opens only the kept files; `print()` returns `x` invisibly.
   - Acceptance: all pass; whole suite at default passes.
 
-- [ ] **R. Geospatial verbs and prepared writes.** D26, D27; fact 21. Prototype: `dev/prototype/geo.R`.
+- [x] **R. Geospatial verbs and prepared writes.** D26, D27; fact 21. Prototype: `dev/prototype/geo.R`.
   - Owns: new `R/geo-verbs.R`, `R/write.R` (geospatial branch of staging), `R/files.R` (partition-column handling of D27), new `tests/testthat/test-geo-verbs.R`, `tests/testthat/test-write.R` (prepared-data blocks), `tests/testthat/test-files.R` (partition blocks), snapshots.
   - Tests first: (a) `rcs_geo_add()` columns, position, order, values against `geo_encode()` mapped through `order`, `h3_parent()`, `geo_bbox_df()`; `replace`; `h3_res = NULL`; parents not below `h3_res` abort; (b) `rcs_geo_index()` against `geo_encode()$index` mapped to `id`; `crossing_only = FALSE`; (c) `rcs_geo_strip(rcs_geo_add(raw))` identical to `raw`; an `sf` whose active geometry column is `geom` keeps it; (d) D26 round trip for points, lines, polygons with a key, with and without `parents`, `partition = "h3"` and `NULL`; (e) prepared writes: equal accepted, tampered `h3` / `bbox` abort naming rows, an engine mismatch aborts and names the write's engine, `h3_res` taken from the cells, mixed resolutions abort, `geocode = FALSE` with `h3` aborts, `update` same handling, `h3_p<r>` stored and read as `rcs_h3`, partition column equal → used, different → abort; raw and prepared writes give the same version; (f) snapshots of the aborts.
   - Acceptance: a–f pass; whole suite at default passes.
 
-- [ ] **N2. Geocoding engines: read side.** D34, D35; owner decision 2. Plan 0001: "Reading", "Results of wave 3" (F), "Results of wave 5" (M), "Results of wave 6".
+- [x] **N2. Geocoding engines: read side.** D34, D35; owner decision 2. Plan 0001: "Reading", "Results of wave 3" (F), "Results of wave 5" (M), "Results of wave 6".
   - Owns: `R/intersects.R`, `R/read.R`, `tests/testthat/test-intersects.R`, `tests/testthat/test-read.R`, `tests/testthat/test-integration.R` (only expectations that change with the engine), `_snaps/intersects.md`, `_snaps/read.md`.
   - Steps: `exact_engine` argument; `exact_keep()`; per-row choice for `"auto"`; `check_query_valid()` by engine; the spatial property test passes `exact_engine = "session"` so its comparison with `sf::st_filter()` under each `sf_use_s2()` setting keeps its meaning.
   - Tests first: (a) a dataset written with `"planar"` containing the long-edge polygon: the exact test is planar with `sf_use_s2(TRUE)` in the session; (b) written with `"s2"`: on the sphere with `sf_use_s2(FALSE)`; (c) `"auto"` with the polygons of fact 18: tested in the plane, valid rows on the sphere, no s2 error; (d) a dataset written before this plan (engine `NA`): session rule; (e) explicit overrides; (f) for a dataset written with `"auto"` and read with `exact_engine = "planar"`, `store_read(intersects = <bbox | sf | cells>)` returns for the invalid rows the same set as a planar `sf::st_intersects()` on the full data; (g) projected data: planar in the data CRS; (h) `check_query_valid()` per engine and the advice in the abort.
   - Acceptance: a–h pass; the spatial property test passes at default; whole suite at default passes.
+
+#### Results of wave 4
+
+- R and N2 passed at the first verification; Q needed one fixer round. No decision contradicted.
+- Q (`R/query.R`, `R/preview.R`):
+  - First verification failed: a long `Filter:` line wrapped instead of being cut (pillar's `format_comment()` wraps at `min(width, cli::console_width())`; Arrow's `ToString()` holds newlines). Fix: whitespace squashed; the line is kept strictly shorter than pillar's wrap width (`header_width()`), so a line exactly as wide as the console is cut by one character.
+  - Choices where D2 is silent: printing runs with `rcs.quiet = TRUE` (the footer carries the candidate-set information); "known rows" is one Arrow step over the dataset with no filter, arrange, grouping, aggregation, head, join or spatial filter, so several `select()`/`mutate()` steps (merged by Arrow into one) also count as known (the count is correct); zero rows: pillar's footer, then `# i 0 rows`, and `more rows may exist` also with 0 rows while an exact test is pending; nested filters joined with ` & `; `print.rcs_query` stays `@noRd` (its `n` argument is not documented in `store_open()` yet: X1).
+  - The new print changed three snapshots in N2's files; at Q's request N2 made those prints deterministic (`arrange()` before `print()`), and the orchestrator re-recorded them at the gate (format only).
+- R (`R/geo-verbs.R`, `R/write.R`, `R/files.R`): a supplied partition column in an update that re-partitions is checked at the old resolution, then dropped (same version as a raw update); the verbs' rebuild warning carries no call; `warn_s2_rebuild()` delegates to `warn_geo_rebuild()`. Pre-existing bug fixed: a supplied partition column placed before `h3` landed at the wrong position. The engine-mismatch test uses a 60N sliver at resolution 2 (the fact-20 polygon has the same main cell in both engines at resolution 3).
+- Pre-existing bug found by R's verifier, not fixed in this wave: a re-partitioning `update` where every old file is replaced fails with `Error in order(): argument 1 is not a vector` (`stage_update()`, `old_data` has no columns). Reproduce: `partition = "h3", max_files = 10` write of 40 points, then `mode = "update"` of `rcs_sim_points(200, seed = 2)` with `max_files = 3`. Assigned to V1 (owns `R/write.R`) in wave 5.
+- N2 (`R/intersects.R`, `R/read.R`): `exact_engine` accepts `NULL`, `"s2"`, `"planar"`, `"session"`. The `"s2"` read engine rebuilds invalid rows on the sphere (planar for a row whose rebuild fails), as the write does; `"auto"` rebuilds invalid rows whose box spans 180 degrees or more on the sphere (D31's rule for such rows) instead of testing them in the plane. Gaps without tests: the rebuild-failure fallback of `"s2"` and an invalid special row on read. N1b's test (j) in `test-write.R` still reads under `sf_use_s2(FALSE)` (no longer needed).
+- Gate: `document()` added `export(rcs_geo_add)`, `export(rcs_geo_index)`, `export(rcs_geo_strip)`, the `rcs_preview` pillar methods, `man/rcs_geo_add.Rd`, `exact_engine` in `store_read.Rd` and `store_intersects.Rd`, prepared data in `store_write.Rd`. No non-ASCII in `R/`. Whole suite at default: 34 files, 12,797 expectations, 0 failed, 0 errors, 15 skipped. `devtools::check(cran = TRUE)`: 0/0/0.
 
 ### Wave 5: T1, V1
 

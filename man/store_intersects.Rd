@@ -4,7 +4,7 @@
 \alias{store_intersects}
 \title{Add a spatial filter to a lazy query}
 \usage{
-store_intersects(q, y, exact = TRUE)
+store_intersects(q, y, exact = TRUE, exact_engine = NULL)
 }
 \arguments{
 \item{q}{A query made by \code{\link[=store_open]{store_open()}} on a geospatial dataset.}
@@ -17,13 +17,26 @@ aborts: it cannot hold an H3 cell. The geometries of an \code{sf} or \code{sfc}
 query must be valid, or the call aborts with the reason and advice to
 repair them with \code{\link[sf:st_make_valid]{sf::st_make_valid()}} (only the query is checked). The
 check reads them as the exact test does: on the sphere (s2) when the
-query is in the data's geographic CRS and \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} is on, in
-the plane otherwise.}
+query is in the data's geographic CRS and the exact engine works on the
+sphere (\code{"s2"}, \code{"auto"}, or \code{"session"} with \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} on), in
+the plane otherwise. A query valid only in the plane can be used with
+\code{exact_engine = "planar"}.}
 
 \item{exact}{\code{TRUE} runs the exact test in \code{collect()}. \code{FALSE} returns
 the candidate rows, a superset of the intersecting rows, with a
 message saying so. The candidate set is also returned, with the same
 message, when the geometry is not collected.}
+
+\item{exact_engine}{How the exact test reads the geometries. \code{NULL} (the
+default) follows the geocoding engine the dataset was written with
+(\code{geocode_engine} of \code{\link[=store_write]{store_write()}}): \code{"s2"} tests on the sphere (a
+row invalid on the sphere is first rebuilt by s2, as the write did),
+\code{"planar"} in the plane of the coordinates, \code{"auto"} on the sphere for
+rows valid on the sphere and in the plane for the others; a dataset
+written before the engine was recorded follows the session's
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting. \code{"s2"}, \code{"planar"} or \code{"session"} (the
+\code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting) override the dataset's engine. Data in a
+projected CRS are always tested in the plane of that CRS.}
 }
 \value{
 The query with the filter added.
@@ -32,8 +45,8 @@ The query with the filter added.
 Keeps the rows of a geospatial dataset whose geometry intersects \code{y}. The
 filter first prunes files by their extent, then pushes a candidate test
 on the stored bounding boxes (\code{bbox}) into the scan, and finally, in
-\code{collect()}, tests the candidate rows exactly with \code{\link[sf:st_intersects]{sf::st_intersects()}}
-under the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting. When the box of \code{y} is
+\code{collect()}, tests the candidate rows exactly, on the sphere or in the
+plane as \code{exact_engine} says. When the box of \code{y} is
 much larger than \code{y} itself (a thin diagonal strip, a line), or \code{y}
 crosses the antimeridian or holds a pole, files are also pruned by their
 H3 cell range and the candidate test also requires the stored H3 cell

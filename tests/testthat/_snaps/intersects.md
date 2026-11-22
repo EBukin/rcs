@@ -85,22 +85,52 @@
     Code
       print(dplyr::arrange(q, id))
     Output
-      <rcs_query> shapes/polygons (geospatial, current)
-      Location: primary
-      Files:    10 of 44
-      Spatial:  2 queries, no cell filter, box test, exact test in collect()
-      Columns:  id, area
+      # Dataset:  shapes/polygons [?? x 2] (geospatial)
+      # Location: primary (local)
+      # Version:  04391513 (current)
+      # Files:    10 of 44 (pruned)
+      # Spatial:  2 queries, no cell filter, box test, exact test in collect()
+      # Filter:   (with spatial predicate)
+            id      area
+         <int>     <dbl>
+       1     3 6755.    
+       2     4   30.1   
+       3     5    0.392 
+       4     7    0.391 
+       5    14    0.187 
+       6    21    0.0480
+       7    23    0.326 
+       8    24    0.467 
+       9    37    0.378 
+      10    38    0.0617
+      # i more rows may exist
+      # i Use `collect()` to read the rows into R.
 
 ---
 
     Code
       print(dplyr::arrange(q2, id))
     Output
-      <rcs_query> polygons (geospatial, current)
-      Location: primary
-      Files:    1 of 1
-      Spatial:  1 query, no cell filter, box test, candidate set (exact = FALSE)
-      Columns:  id, area, cat, bbox, geometry
+      # Dataset:  polygons [?? x 5] (geospatial)
+      # Location: primary (local)
+      # Version:  d5bef4b8 (current)
+      # Files:    1 of 1
+      # Spatial:  1 query, no cell filter, box test, candidate set (exact = FALSE)
+      # Filter:   (with spatial predicate)
+            id       area cat   bbox$xmin $ymin $xmax $ymax                   geometry
+         <int>      <dbl> <chr>     <dbl> <dbl> <dbl> <dbl>             <GEOMETRY [°]>
+       1     1 46041.     c         -29.8  6.1  -27.3  7.6  POLYGON ((-29.8 6.1, -27.~
+       2     3  6755.     b         -26.6  6.2  -25.8  7    POLYGON ((-26.6 6.2, -25.~
+       3     4    30.1    d         -29    8.5  -26.3  8.50 POLYGON ((-29 8.5, -26.27~
+       4     5     0.392  b         -26.8  7.29 -26.7  7.30 MULTIPOLYGON (((-26.75391~
+       5     6     0.392  b         -28.0  7.73 -27.9  7.76 MULTIPOLYGON (((-27.96559~
+       6     7     0.391  d         -26.4  8.28 -25.9  8.54 MULTIPOLYGON (((-26.42263~
+       7     8     4.90   e         -27.6  7.49 -27.6  7.51 POLYGON ((-27.59022 7.49,~
+       8    10     0.0861 e         -27.6  6.87 -27.6  6.87 POLYGON ((-27.62964 6.871~
+       9    13     0.0306 d         -28.6  7.15 -28.6  7.16 POLYGON ((-28.58083 7.154~
+      10    14     0.187  d         -26.2  8.27 -26.2  8.27 POLYGON ((-26.15558 8.268~
+      # i more rows
+      # i Use `collect()` to read the rows into R.
 
 ---
 

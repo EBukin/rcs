@@ -12,7 +12,8 @@ store_read(
   intersects = NULL,
   geometry = TRUE,
   version = NULL,
-  exact = TRUE
+  exact = TRUE,
+  exact_engine = NULL
 )
 }
 \arguments{
@@ -40,9 +41,17 @@ tibble.}
 \item{version}{\code{NULL} for the current version, or the 16 hex characters of
 an earlier version kept in the history.}
 
-\item{exact}{\code{TRUE} tests the candidate rows of a spatial filter exactly
-with \code{\link[sf:st_intersects]{sf::st_intersects()}}, under the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}}
-setting.}
+\item{exact}{\code{TRUE} tests the candidate rows of a spatial filter exactly,
+on the sphere or in the plane as \code{exact_engine} says.}
+
+\item{exact_engine}{How the exact test of a spatial filter reads the
+geometries: \code{NULL} (the default) follows the geocoding engine the
+dataset was written with (\code{"s2"}: on the sphere; \code{"planar"}: in the
+plane; \code{"auto"}: on the sphere for rows valid on the sphere, in the
+plane for the others), and the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting for
+a dataset written before the engine was recorded. \code{"s2"}, \code{"planar"}
+or \code{"session"} override it. Data in a projected CRS are always tested
+in the plane of that CRS. See \code{\link[=store_intersects]{store_intersects()}}.}
 }
 \value{
 A tibble; an \code{sf} object for geospatial data read with geometry;

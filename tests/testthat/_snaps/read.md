@@ -38,10 +38,26 @@
     Code
       print(dplyr::arrange(q, shop_id, date, ts))
     Output
-      <rcs_query> sales/daily (table, earlier version)
-      Location: primary
-      Files:    2 of 2
-      Columns:  shop_id, date, year, product, qty, price, promo, grade, delivered, big, wait, note, tags, ts, ts_local
+      # Dataset:  sales/daily [?? x 15] (table)
+      # Location: primary (local)
+      # Version:  1ee64570 (earlier)
+      # Files:    2 of 2
+         shop_id date        year product   qty  price promo grade delivered      big
+           <int> <date>     <int> <fct>   <int>  <dbl> <lgl> <ord> <date>     <int64>
+       1       1 2023-01-20  2023 p08         2   7.52 FALSE low   2023-01-26    8e 2
+       2       1 2023-08-07  2023 p12         1 151.   FALSE mid   2023-08-15    4e 2
+       3       1 2024-03-24  2024 p10        48 112.   FALSE low   2024-04-01    9e15
+       4       1 2024-04-18  2024 p12         9  72.1  FALSE mid   2024-04-26    9e15
+       5       2 2023-12-11  2023 p09        46  23.1  TRUE  low   2023-12-13    9e15
+       6       2 2024-02-19  2024 p05        28  99.6  TRUE  mid   2024-02-20    9e15
+       7       2 2024-03-27  2024 p15        11 138.   TRUE  high  2024-04-04    9e15
+       8       2 2024-05-07  2024 p10        33  33.5  FALSE low   2024-05-15    6e 2
+       9       2 2024-05-14  2024 p19        34   7.81 FALSE mid   2024-05-19    9e 2
+      10       2 2024-10-27  2024 p16        32  84.2  FALSE mid   2024-10-30    3e 2
+      # i 5 more variables: wait <drtn>, note <chr>, tags <list>, ts <dttm>,
+      #   ts_local <dttm>
+      # i more rows
+      # i Use `collect()` to read the rows into R.
 
 # a read served by a local secondary makes no call to the primary
 
