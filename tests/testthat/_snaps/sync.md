@@ -15,8 +15,8 @@
       store_sync(st, to = paths[[1]])
     Condition
       Error in `store_sync()`:
-      ! `to` names the primary location '<root>/primary'.
-      i `store_sync()` copies from the primary to secondary locations; use `store_copy()` to copy into the primary.
+      ! `to` names the source location '<root>/primary'.
+      i `store_sync()` copies from `from` (by default the primary) to the other locations.
     Code
       store_sync(st, to = "elsewhere")
     Condition
@@ -28,6 +28,28 @@
     Condition
       Error in `store_sync()`:
       ! `dry_run` must be `TRUE` or `FALSE`, not `NA`.
+    Code
+      store_sync(st, from = "elsewhere")
+    Condition
+      Error in `store_sync()`:
+      ! `from` must be the address of a location of this connection, not "elsewhere".
+      i Its locations: '<root>/primary' and '<root>/secondary1'.
+    Code
+      store_sync(st, from = paths[[2]], to = paths[[2]])
+    Condition
+      Error in `store_sync()`:
+      ! `to` names the source location '<root>/secondary1'.
+      i `store_sync()` copies from `from` (by default the primary) to the other locations.
+    Code
+      store_sync(st, delete = "yes")
+    Condition
+      Error in `store_sync()`:
+      ! `delete` must be `TRUE` or `FALSE`, not a string.
+    Code
+      store_sync(st, force = NA)
+    Condition
+      Error in `store_sync()`:
+      ! `force` must be `TRUE` or `FALSE`, not `NA`.
     Code
       store_sync(list())
     Condition
@@ -54,6 +76,10 @@
       v secondary  <root>/secondary1  up to date
       v secondary  <root>/secondary2  2 datasets, 3/3 files sent  <bytes>  <time>
       v MD5 identical for 3 files sent to 1 location. Catalogs updated.
+    Condition
+      Warning:
+      `store_sync()` replaced 1 version held by the target locations:
+      * '<root>/secondary2': "sales/daily" version <version> (updated <date>) replaced by version <version> (updated <date>).
 
 ---
 
@@ -82,6 +108,58 @@
       v secondary  <root>/secondary2  1 dataset, 2/2 files sent  <bytes>  <time>
       v MD5 identical for 2 files sent to 1 location. Catalogs updated.
       ! 1 secondary location is behind; run `store_sync()` again once it can be reached.
+
+# a dry run of store_sync() reports copies, deletions and conflicts per target and changes nothing
+
+    Code
+      dry <- store_sync(sc$st, delete = TRUE, dry_run = TRUE)
+    Message
+      i Dry run: nothing is changed.
+      i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
+      * secondary  <root>/secondary1  would copy 1 dataset, 2 files (<bytes>): "sales/summary"; would delete 1 dataset: "old/gone"; 1 conflict, newer here: "sales/daily"
+      * secondary  <root>/secondary2  would copy 2 datasets, 4 files (<bytes>): "sales/daily", "sales/summary"; would delete 1 dataset: "old/gone"
+
+---
+
+    Code
+      dry <- store_sync(sc$st, from = sc$paths[[3]], delete = TRUE, dry_run = TRUE)
+    Message
+      i Dry run: nothing is changed.
+      i Syncing 3 datasets from the secondary '<root>/secondary2' to 2 locations.
+      * primary    <root>/primary     would copy 1 dataset, 2 files (<bytes>): "old/gone"; 2 conflicts, newer here: "sales/daily", "sales/summary"
+      * secondary  <root>/secondary1  1 conflict, newer here: "sales/daily"
+
+# store_sync() reports kept datasets, conflicts and deletions in its result and summary
+
+    Code
+      store_sync(st, delete = TRUE)
+    Message
+      i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
+      x secondary  <root>/secondary1  1 dataset, 2/2 files sent  <bytes>  <time>; 1 dataset deleted: "old/gone"; 1 conflict, newer here: "sales/daily"
+      v secondary  <root>/secondary2  2 datasets, 4/4 files sent  <bytes>  <time>; 1 dataset deleted: "old/gone"
+      v MD5 identical for 6 files sent to 2 locations. Catalogs updated.
+      v 2 datasets deleted in 2 locations.
+    Condition
+      Warning:
+      `store_sync()` replaced 3 versions held by the target locations:
+      * '<root>/secondary1': "sales/summary" version <version> (updated <date>) replaced by version <version> (updated <date>).
+      * '<root>/secondary2': "sales/daily" version <version> (updated <date>) replaced by version <version> (updated <date>).
+      * '<root>/secondary2': "sales/summary" version <version> (updated <date>) replaced by version <version> (updated <date>).
+      Error in `store_sync()`:
+      ! 1 dataset was not copied: the target holds a newer version.
+      x '<root>/secondary1': "sales/daily" version <version> (updated <date>) is newer than the source's version <version> (updated <date>).
+      i The other copies and deletions were made.
+      i Run with `force = TRUE` to copy the source over it, or sync from the location that holds the newer version.
+
+---
+
+    Code
+      err <- tryCatch(store_sync(st, from = sc$paths[[3]], delete = TRUE), rcs_error_sync_conflict = function(e) e)
+    Message
+      i Syncing 2 datasets from the secondary '<root>/secondary2' to 2 locations.
+      ! primary    <root>/primary     1 dataset kept, delete on primary needs force: "new/one"
+      x secondary  <root>/secondary1  1 conflict, newer here: "sales/daily"
+      ! 1 dataset kept in the primary: delete on primary needs force (`force = TRUE`).
 
 # store_copy() checks its arguments
 

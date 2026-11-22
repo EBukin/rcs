@@ -1,5 +1,5 @@
-# Keeping the locations of a store in step: `store_sync()` (primary to
-# secondaries), `store_copy()` (one dataset between any two locations),
+# Keeping the locations of a store in step: `store_sync()` (from any
+# location to the others), `store_copy()` (one dataset between any two locations),
 # `store_delete()` and `store_rebuild()`.
 #
 # Sync and copy land versions with the write pipeline's `land_location()`
@@ -17,35 +17,69 @@
 
 # store_sync() ------------------------------------------------------------------
 
-#' Bring secondary locations up to date
+#' Bring the locations of a store into step
 #'
-#' Copies datasets from the primary location to the secondary ones: every
-#' dataset whose copy in a secondary is missing or differs from the
-#' primary's (another version, or another entry). Only the files the
-#' secondary lacks are sent, each verified by MD5; the catalogs of the
-#' secondary are switched last, so that its readers always see a complete
-#' version. A geospatial dataset's index table travels with it.
+#' Copies datasets from one location, the source (by default the primary),
+#' to the other locations of the connection: every dataset whose copy in a
+#' target is missing or differs from the source's (another version, or
+#' another entry). Only the files a target lacks are sent, each verified by
+#' MD5; the catalogs of a target are switched last, so that its readers
+#' always see a complete version. A geospatial dataset's index table
+#' travels with it.
 #'
-#' `store_sync()` never deletes a dataset: datasets found only in a secondary
-#' are left alone (see [store_status()], status `"extra"`). Files of a
-#' version the secondary replaces are deleted when the dataset keeps no
-#' history, as in [store_write()].
+#' With `from` set to a secondary location, work done there (for example
+#' through a connection whose primary was that location, while the primary
+#' could not be reached) is brought to the primary and to the other
+#' secondaries.
 #'
-#' A secondary that fails is reported as behind with a warning, and the next
+#' @section Conflicts:
+#' When a target holds another version of a dataset and its entry was
+#' updated later than the source's, the dataset is not copied there: it is
+#' a conflict. Every other copy and deletion goes ahead; after the last
+#' target the call aborts with class `rcs_error_sync_conflict`, listing the
+#' conflicts, and the condition's field `result` holds the result tibble.
+#' `force = TRUE` copies the source over the newer version instead. Every
+#' version of a target that is replaced by another one is listed in one
+#' warning (class `rcs_warning_sync_overwrite`). The times compared are
+#' those of the machines that wrote; their clocks may differ.
+#'
+#' @section Deletions:
+#' By default `store_sync()` never deletes a dataset: datasets found only in
+#' a target are left alone (see [store_status()], status `"extra"`). With
+#' `delete = TRUE` they are deleted from that target, with their index table,
+#' after its copies, as [store_delete()] does for one location (the history
+#' kept). The primary is a target only when `from` is a secondary; datasets
+#' are deleted there only with `force = TRUE`, and are otherwise reported in
+#' the result column `kept`. Files of a version a target replaces are
+#' deleted when the dataset keeps no history, as in [store_write()].
+#'
+#' A target that fails is reported as behind with a warning, and the next
 #' one is synced; running the call again sends only what is still missing.
 #'
 #' @param st A store connection made by [store_connect()]. It is updated in
 #'   place.
-#' @param datasets `NULL` for every dataset of the primary, or names of
-#'   datasets (full names, or last parts that are unique).
-#' @param to `NULL` for every secondary location, or the addresses of some
-#'   of them.
-#' @param dry_run `TRUE` reports what would be copied and changes nothing.
-#' @return A tibble, invisibly, one row per secondary location: `location`,
-#'   `status` (`"synced"`, `"same"` when nothing was missing, `"behind"`
-#'   when it failed, `"unavailable"`, or `"to sync"` with `dry_run = TRUE`),
-#'   `datasets` (a list column: the datasets copied, or to copy), `files`
-#'   (files sent, or to send), `bytes` and `seconds`.
+#' @param datasets `NULL` for every dataset of the source, or names of
+#'   datasets (full names, or last parts that are unique in the source).
+#'   With `delete = TRUE` it restricts the deletions too, and a full name
+#'   the source does not hold is accepted.
+#' @param to `NULL` for every location other than the source, or the
+#'   addresses of some of them.
+#' @param from `NULL` for the primary, or the address of the location to
+#'   copy from.
+#' @param delete `TRUE` deletes from each target the datasets the source
+#'   does not hold.
+#' @param force `TRUE` copies over versions that are newer in a target, and
+#'   lets `delete = TRUE` delete datasets from the primary.
+#' @param dry_run `TRUE` reports what would be copied, deleted and found in
+#'   conflict, and changes nothing.
+#' @return A tibble, invisibly, one row per target location: `location`,
+#'   `status` (`"synced"`, `"same"` when nothing was copied or deleted,
+#'   `"conflict"` when the target holds a newer version of a dataset,
+#'   `"behind"` when it failed, `"unavailable"`, or `"to sync"` with
+#'   `dry_run = TRUE`), the list columns `datasets` (copied, or to copy),
+#'   `deleted` (deleted, or to delete), `kept` (not deleted from the primary
+#'   without `force`) and `conflicts`, then `files` (files sent, or to send),
+#'   `bytes` and `seconds`.
 #' @seealso [store_status()] to compare the locations, [store_copy()] for one
 #'   dataset between any two locations.
 #' @export
@@ -65,12 +99,22 @@
 #' store_status(st)
 #' store_sync(st, dry_run = TRUE)
 #' store_sync(st)
+#'
+#' # Work done on the secondary alone, brought back to the primary
+#' offline <- store_connect(file.path(root, "copy"))
+#' store_write(offline, rcs_sim_table(50, seed = 2), "sales/weekly",
+#'   title = "Weekly sales", description = "Simulated weekly sales."
+#' )
+#' store_sync(st, from = file.path(root, "copy"))
 #' store_status(st)
 #' unlink(root, recursive = TRUE)
-store_sync <- function(st, datasets = NULL, to = NULL, dry_run = FALSE) {
+store_sync <- function(st, datasets = NULL, to = NULL, from = NULL, delete = FALSE, force = FALSE,
+                       dry_run = FALSE) {
   validate_store(st)
   local_trace("store_sync")
   call <- rlang::current_env()
+  check_flag(delete, call = call)
+  check_flag(force, call = call)
   check_flag(dry_run, call = call)
   if (!is.null(datasets) && (!is.character(datasets) || length(datasets) == 0 || anyNA(datasets))) {
     cli::cli_abort(
@@ -78,62 +122,75 @@ store_sync <- function(st, datasets = NULL, to = NULL, dry_run = FALSE) {
       class = "rcs_error_argument", call = call
     )
   }
-  targets <- sync_targets(st, to, call)
-  failed <- sync_refresh(st, targets, call)
-  names <- sync_dataset_names(st, datasets, call)
-  units <- lapply(names, function(d) sync_unit(st, st$primary, d))
+  from_uri <- if (is.null(from)) st$primary$uri else location_arg(st, from, "from", call)
+  targets <- sync_targets(st, from_uri, to, call)
+  failed <- sync_refresh(st, from_uri, targets, call)
+  source <- current_location(st, from_uri)
+  names <- sync_dataset_names(st, source, datasets, delete, call)
+  held <- names[names %in% source$catalog$dataset]
+  units <- lapply(held, function(d) sync_unit(st, source, d))
   now <- now_utc()
 
   dir <- sync_staging_dir("rcs-sync")
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   ctx <- write_context(st, dir)
+  ctx$primary <- source$backend
   units <- lapply(units, sync_fresh_manifests, dir = dir, now = now)
+  restrict <- if (is.null(datasets)) NULL else names
 
   widths <- write_widths(store_locations(st))
-  sync_header(st, names, targets, dry_run)
+  sync_header(st, source, held, targets, dry_run)
   results <- list()
   for (uri in targets) {
+    role <- location_role(st, uri)
     result <- if (uri %in% names(failed)) {
-      sync_result(uri, if (identical(failed[[uri]], "unavailable")) "unavailable" else "behind",
+      sync_result(uri, role, if (identical(failed[[uri]], "unavailable")) "unavailable" else "behind",
         message = failed[[uri]]
       )
-    } else if (dry_run) {
-      sync_plan_location(st, uri, units)
     } else {
-      sync_location(st, uri, units, ctx, now)
+      plan <- sync_plan(st, source, current_location(st, uri), units, restrict, delete, force)
+      if (dry_run) sync_plan_location(st, uri, plan) else sync_location(st, uri, plan, ctx, now)
     }
     sync_line(result, widths)
     results[[length(results) + 1L]] <- result
   }
   out <- vctrs::vec_rbind(sync_empty(), !!!lapply(results, sync_result_row))
-  sync_footer(out, dry_run)
+  sync_footer(st, out, dry_run)
+  if (!dry_run) {
+    sync_warn_overwrite(results)
+    sync_abort_conflicts(results, out, call)
+  }
   invisible(out)
 }
 
-# Addresses of the secondary locations a sync goes to.
-sync_targets <- function(st, to, call) {
-  secondaries <- vapply(st$secondary, function(l) l$uri, character(1))
+location_role <- function(st, uri) {
+  if (identical(uri, st$primary$uri)) "primary" else "secondary"
+}
+
+# Addresses of the locations a sync goes to: every location but the source,
+# or those named by `to`, in connection order.
+sync_targets <- function(st, from_uri, to, call) {
+  uris <- store_uris(st)
   if (is.null(to)) {
-    return(secondaries)
+    return(setdiff(uris, from_uri))
   }
   if (!is.character(to) || length(to) == 0 || anyNA(to)) {
     cli::cli_abort(
-      "{.arg to} must be {.code NULL} or addresses of secondary locations, not {.obj_type_friendly {to}}.",
+      "{.arg to} must be {.code NULL} or addresses of locations of this connection, not {.obj_type_friendly {to}}.",
       class = "rcs_error_argument", call = call
     )
   }
-  uris <- vapply(to, function(x) location_arg(st, x, "to", call), character(1), USE.NAMES = FALSE)
-  if (st$primary$uri %in% uris) {
-    uri <- st$primary$uri
+  chosen <- vapply(to, function(x) location_arg(st, x, "to", call), character(1), USE.NAMES = FALSE)
+  if (from_uri %in% chosen) {
     cli::cli_abort(
       c(
-        "{.arg to} names the primary location {.path {uri}}.",
-        i = "{.fn store_sync} copies from the primary to secondary locations; use {.fn store_copy} to copy into the primary."
+        "{.arg to} names the source location {.path {from_uri}}.",
+        i = "{.fn store_sync} copies from {.arg from} (by default the primary) to the other locations."
       ),
       class = "rcs_error_argument", call = call
     )
   }
-  secondaries[secondaries %in% uris]
+  uris[uris %in% chosen]
 }
 
 #' The address of a location of the connection
@@ -163,17 +220,17 @@ location_arg <- function(st, x, arg, call) {
   uri
 }
 
-# Re-read the catalogs of the primary and of the given secondaries. The
-# primary must answer; a secondary that does not is returned by name (its
-# `uri`) with the error message, or "unavailable" for a location unavailable
-# since the connection.
-sync_refresh <- function(st, uris, call) {
-  be <- st$primary$backend
-  reach(location_refresh(st, st$primary), be, "primary", call)
+# Re-read the catalogs of the source and of the targets. The source must
+# answer; a target that does not is returned by name (its `uri`) with the
+# error message, or "unavailable" for a location unavailable since the
+# connection.
+sync_refresh <- function(st, from_uri, targets, call) {
+  source <- current_location(st, from_uri)
+  reach(location_refresh(st, source), source$backend, location_role(st, from_uri), call)
   failed <- list()
-  for (location in st$secondary) {
+  for (location in store_locations(st)) {
     uri <- location$uri
-    if (!uri %in% uris) next
+    if (!uri %in% targets) next
     if (!location$available) {
       failed[[uri]] <- "unavailable"
       next
@@ -183,8 +240,9 @@ sync_refresh <- function(st, uris, call) {
       if (!inherits(fresh, write_error_classes)) {
         rlang::cnd_signal(fresh)
       }
+      role <- location_role(st, uri)
       cli::cli_warn(
-        c("Cannot read the catalogs of the secondary location {.path {uri}}; it is skipped.",
+        c("Cannot read the catalogs of the {role} location {.path {uri}}; it is skipped.",
           i = "Run the call again once it can be reached."),
         class = "rcs_warning_secondary_behind", parent = fresh
       )
@@ -195,14 +253,35 @@ sync_refresh <- function(st, uris, call) {
 }
 
 # Full names of the datasets to sync; index tables travel with their dataset.
-sync_dataset_names <- function(st, datasets, call) {
-  catalog <- st$primary$catalog
+# With `delete`, a valid full name the source does not hold is kept (it
+# names a dataset to delete from the targets).
+sync_dataset_names <- function(st, source, datasets, delete, call) {
+  catalog <- source$catalog
   if (is.null(datasets)) {
     return(catalog$dataset[!is_index_entry(catalog)])
   }
-  unique(vapply(datasets, function(d) resolve_dataset(st, d, index = FALSE, call = call), character(1),
-    USE.NAMES = FALSE
-  ))
+  primary <- identical(source$uri, st$primary$uri)
+  resolve <- function(d) {
+    found <- tryCatch(
+      if (primary) resolve_dataset(st, d, index = FALSE, call = call) else resolve_in_location(source, d, call),
+      rcs_error_dataset_not_found = function(e) e
+    )
+    if (!inherits(found, "error")) {
+      return(found)
+    }
+    valid <- tryCatch(
+      {
+        check_dataset_name(d, call = call)
+        TRUE
+      },
+      error = function(e) FALSE
+    )
+    if (delete && valid && !is_index_name(d)) {
+      return(d)
+    }
+    rlang::cnd_signal(found)
+  }
+  unique(vapply(datasets, resolve, character(1), USE.NAMES = FALSE))
 }
 
 # One dataset of a source location, with its index table.
@@ -279,116 +358,217 @@ landed_anyway <- function(st, location, sets, drops, error) {
   list(status = "written", total = total, uploaded = 0, bytes = 0, seconds = 0)
 }
 
-# Land the units a secondary lacks: one catalog switch per history setting.
-sync_location <- function(st, uri, units, ctx, now) {
-  start <- Sys.time()
-  location <- current_location(st, uri)
-  needed <- Filter(function(u) unit_needed(location, u), units)
-  if (length(needed) == 0) {
-    return(sync_result(uri, "same"))
-  }
-  groups <- split(needed, vapply(needed, function(u) u$keep_history, logical(1)))
-  done <- character()
-  total <- 0
-  sent <- 0
-  bytes <- 0
-  for (group in groups) {
-    sets <- do.call(c, lapply(group, function(u) u$sets))
-    drops <- unlist(lapply(group, function(u) u$drops))
-    location <- current_location(st, uri)
-    landed <- tryCatch(
-      land_location(st, location, sets, drops, group[[1]]$keep_history, ctx, now),
-      error = function(e) e
-    )
-    if (inherits(landed, "error")) {
-      landed <- landed_anyway(st, location, sets, drops, landed)
-    }
-    if (inherits(landed, "error")) {
-      if (!inherits(landed, write_error_classes)) {
-        rlang::cnd_signal(landed)
-      }
-      cli::cli_warn(
-        c(
-          "Syncing the secondary location {.path {uri}} failed; it is behind.",
-          i = "Run {.fn store_sync} again: files already sent are reused."
-        ),
-        class = "rcs_warning_secondary_behind", parent = landed
+#' What a sync does in one target
+#'
+#' @param st An `rcs_store`.
+#' @param source,target The source and target `rcs_location`s, as read at
+#'   the start of the call.
+#' @param units The units of the source to sync.
+#' @param restrict `NULL`, or the dataset names deletions are restricted to.
+#' @param delete,force As in `store_sync()`.
+#' @return A list: `copy` (units to land), `conflicts` and `overwritten`
+#'   (lists of version records: `dataset`, `target_version`,
+#'   `target_updated`, `source_version`, `source_updated`), `delete` and
+#'   `kept` (dataset names).
+#' @noRd
+sync_plan <- function(st, source, target, units, restrict, delete, force) {
+  copy <- list()
+  conflicts <- list()
+  overwritten <- list()
+  for (unit in units) {
+    if (!unit_needed(target, unit)) next
+    entry <- unit$sets[[1]]$entry
+    current <- catalog_entry(target$catalog, unit$dataset)
+    if (nrow(current) == 1 && !identical(current$version, entry$version)) {
+      record <- list(
+        dataset = unit$dataset,
+        target_version = current$version, target_updated = current$updated,
+        source_version = entry$version, source_updated = entry$updated
       )
-      return(sync_result(uri, "behind",
-        datasets = done, files = sent, bytes = bytes,
-        message = first_line(conditionMessage(landed))
-      ))
+      if (current$updated > entry$updated && !force) {
+        conflicts[[length(conflicts) + 1L]] <- record
+        next
+      }
+      overwritten[[length(overwritten) + 1L]] <- record
     }
-    done <- c(done, vapply(group, function(u) u$dataset, character(1)))
-    total <- total + landed$total
-    sent <- sent + landed$uploaded
-    bytes <- bytes + landed$bytes
+    copy[[length(copy) + 1L]] <- unit
   }
-  sync_result(uri, "synced",
-    datasets = done, files = sent, total = total, bytes = bytes,
-    seconds = as.numeric(difftime(Sys.time(), start, units = "secs"))
+  gone <- character()
+  if (delete) {
+    catalog <- target$catalog
+    gone <- setdiff(catalog$dataset[!is_index_entry(catalog)], source$catalog$dataset)
+    if (!is.null(restrict)) {
+      gone <- intersect(gone, restrict)
+    }
+  }
+  keep <- identical(target$uri, st$primary$uri) && !force
+  list(
+    copy = copy, conflicts = conflicts, overwritten = overwritten,
+    delete = if (keep) character() else gone,
+    kept = if (keep) gone else character()
   )
 }
 
-# What a dry run reports: the units a secondary lacks and the files it would
-# be sent (compared by path and MD5 with its catalogs, then with what is
+unit_names <- function(units) {
+  vapply(units, function(u) u$dataset, character(1))
+}
+
+record_names <- function(records) {
+  vapply(records, function(r) r$dataset, character(1))
+}
+
+# Run the plan of one target: the copies (one catalog switch per history
+# setting), then the deletions (one catalog switch, then the files).
+sync_location <- function(st, uri, plan, ctx, now) {
+  start <- Sys.time()
+  role <- location_role(st, uri)
+  result <- function(status, ...) {
+    sync_result(uri, role, status,
+      datasets = done, deleted = deleted, kept = plan$kept, conflicts = plan$conflicts,
+      overwritten = Filter(function(r) r$dataset %in% done, plan$overwritten),
+      files = sent, total = total, bytes = bytes,
+      seconds = as.numeric(difftime(Sys.time(), start, units = "secs")), ...
+    )
+  }
+  behind <- function(error, text) {
+    if (!inherits(error, write_error_classes)) {
+      rlang::cnd_signal(error)
+    }
+    cli::cli_warn(
+      c(text, i = "Run {.fn store_sync} again: files already sent are reused."),
+      class = "rcs_warning_secondary_behind", parent = error
+    )
+    result("behind", message = first_line(conditionMessage(error)))
+  }
+  done <- character()
+  deleted <- character()
+  total <- 0
+  sent <- 0
+  bytes <- 0
+
+  if (length(plan$copy) > 0) {
+    groups <- split(plan$copy, vapply(plan$copy, function(u) u$keep_history, logical(1)))
+    for (group in groups) {
+      sets <- do.call(c, lapply(group, function(u) u$sets))
+      drops <- unlist(lapply(group, function(u) u$drops))
+      location <- current_location(st, uri)
+      landed <- tryCatch(
+        land_location(st, location, sets, drops, group[[1]]$keep_history, ctx, now),
+        error = function(e) e
+      )
+      if (inherits(landed, "error")) {
+        landed <- landed_anyway(st, location, sets, drops, landed)
+      }
+      if (inherits(landed, "error")) {
+        return(behind(landed, "Syncing the {role} location {.path {uri}} failed; it is behind."))
+      }
+      done <- c(done, unit_names(group))
+      total <- total + landed$total
+      sent <- sent + landed$uploaded
+      bytes <- bytes + landed$bytes
+    }
+  }
+
+  if (length(plan$delete) > 0) {
+    location <- current_location(st, uri)
+    names <- intersect(c(plan$delete, index_name(plan$delete)), location$catalog$dataset)
+    sink <- new.env(parent = emptyenv())
+    switched <- tryCatch(
+      delete_switch(st, location, names, FALSE, NULL, now, sink),
+      error = function(e) e
+    )
+    if (inherits(switched, "error")) {
+      switched <- deleted_anyway(st, uri, names, FALSE, sink, switched)
+    }
+    if (inherits(switched, "error")) {
+      return(behind(switched, "Deleting datasets from the {role} location {.path {uri}} failed; it still lists them."))
+    }
+    deleted <- plan$delete
+    delete_files(st, uri, switched)
+  }
+
+  status <- if (length(plan$conflicts) > 0) {
+    "conflict"
+  } else if (length(done) + length(deleted) > 0) {
+    "synced"
+  } else {
+    "same"
+  }
+  result(status)
+}
+
+# What a dry run reports: the plan of a target and the files it would be
+# sent (compared by path and MD5 with its catalogs, then with what is
 # stored).
-sync_plan_location <- function(st, uri, units) {
+sync_plan_location <- function(st, uri, plan) {
+  role <- location_role(st, uri)
   location <- current_location(st, uri)
-  needed <- Filter(function(u) unit_needed(location, u), units)
-  if (length(needed) == 0) {
-    return(sync_result(uri, "same"))
+  todo <- files_empty()
+  rows <- files_empty()
+  if (length(plan$copy) > 0) {
+    be <- location$backend
+    sets <- do.call(c, lapply(plan$copy, function(u) u$sets))
+    sets <- Filter(function(s) !holds_entry(location$catalog, s$entry), sets)
+    rows <- vctrs::vec_rbind(files_empty(), !!!lapply(sets, function(s) s$files))
+    todo <- rows[!duplicated(rows$path), ]
+    if (nrow(todo) > 0) {
+      history <- history_read(be)
+      held <- paste(c(location$files$path, history$path), c(location$files$md5, history$md5))
+      todo <- todo[!paste(todo$path, todo$md5) %in% held, ]
+    }
+    if (nrow(todo) > 0) {
+      stored <- be_md5(be, todo$path)
+      todo <- todo[is.na(stored) | stored != todo$md5, ]
+    }
   }
-  be <- location$backend
-  sets <- do.call(c, lapply(needed, function(u) u$sets))
-  sets <- Filter(function(s) !holds_entry(location$catalog, s$entry), sets)
-  rows <- vctrs::vec_rbind(files_empty(), !!!lapply(sets, function(s) s$files))
-  todo <- rows[!duplicated(rows$path), ]
-  if (nrow(todo) > 0) {
-    history <- history_read(be)
-    held <- paste(c(location$files$path, history$path), c(location$files$md5, history$md5))
-    todo <- todo[!paste(todo$path, todo$md5) %in% held, ]
-  }
-  if (nrow(todo) > 0) {
-    stored <- be_md5(be, todo$path)
-    todo <- todo[is.na(stored) | stored != todo$md5, ]
-  }
-  sync_result(uri, "to sync",
-    datasets = vapply(needed, function(u) u$dataset, character(1)),
+  busy <- length(plan$copy) + length(plan$delete) + length(plan$conflicts) > 0
+  sync_result(uri, role, if (busy) "to sync" else "same",
+    datasets = unit_names(plan$copy), deleted = plan$delete, kept = plan$kept,
+    conflicts = plan$conflicts, overwritten = plan$overwritten,
     files = nrow(todo), total = nrow(rows), bytes = sum(as.numeric(todo$bytes))
   )
 }
 
-sync_result <- function(uri, status, datasets = character(), files = 0, total = NA_real_,
-                        bytes = 0, seconds = 0, message = NA_character_) {
+sync_result <- function(uri, role, status, datasets = character(), deleted = character(),
+                        kept = character(), conflicts = list(), overwritten = list(), files = 0,
+                        total = NA_real_, bytes = 0, seconds = 0, message = NA_character_) {
   list(
-    location = uri, status = status, datasets = datasets, files = files,
-    total = total, bytes = bytes, seconds = seconds, message = message
+    location = uri, role = role, status = status, datasets = datasets, deleted = deleted,
+    kept = kept, conflicts = conflicts, overwritten = overwritten, files = files, total = total,
+    bytes = bytes, seconds = seconds, message = message
   )
 }
 
 sync_empty <- function() {
   tibble::tibble(
-    location = character(), status = character(), datasets = list(),
-    files = double(), bytes = double(), seconds = double()
+    location = character(), status = character(), datasets = list(), deleted = list(),
+    kept = list(), conflicts = list(), files = double(), bytes = double(), seconds = double()
   )
 }
 
 sync_result_row <- function(r) {
   tibble::tibble(
     location = r$location, status = r$status, datasets = list(r$datasets),
+    deleted = list(r$deleted), kept = list(r$kept), conflicts = list(record_names(r$conflicts)),
     files = as.numeric(r$files), bytes = as.numeric(r$bytes), seconds = as.numeric(r$seconds)
   )
 }
 
-sync_header <- function(st, names, targets, dry_run) {
+# "secondary location" when every target is a secondary, else "location".
+target_noun <- function(st, targets) {
+  if (st$primary$uri %in% targets) "location" else "secondary location"
+}
+
+sync_header <- function(st, source, names, targets, dry_run) {
   n <- length(names)
   k <- length(targets)
-  uri <- st$primary$uri
+  uri <- source$uri
+  role <- location_role(st, uri)
+  noun <- paste0(target_noun(st, targets), if (k == 1) "" else "s")
   if (dry_run) {
     rcs_inform(c(i = "Dry run: nothing is changed."))
   }
-  rcs_inform(c(i = "Syncing {n} dataset{?s} from the primary {.path {uri}} to {k} secondary location{?s}."))
+  rcs_inform(c(i = "Syncing {n} dataset{?s} from the {role} {.path {uri}} to {k} {noun}."))
 }
 
 dataset_list_text <- function(datasets, max = 5L) {
@@ -402,44 +582,130 @@ dataset_list_text <- function(datasets, max = 5L) {
 
 sync_line <- function(r, widths) {
   gap <- strrep(nbsp, 2)
-  head <- paste0(pad_right("secondary", widths$role), gap, pad_right(r$location, widths$uri))
+  head <- paste0(pad_right(r$role, widths$role), gap, pad_right(r$location, widths$uri))
+  count <- function(n, what) paste0(n, " ", what, if (n == 1) "" else "s")
   n <- length(r$datasets)
-  ds <- paste0(n, if (n == 1) " dataset" else " datasets")
+  parts <- character()
+  if (r$status == "to sync") {
+    if (n > 0) {
+      parts <- c(parts, paste0(
+        "would copy ", count(n, "dataset"), ", ", count(r$files, "file"),
+        if (r$bytes > 0) paste0(" (", format_bytes(r$bytes), ")"), ": ", dataset_list_text(r$datasets)
+      ))
+    }
+    if (length(r$deleted) > 0) {
+      parts <- c(parts, paste0("would delete ", count(length(r$deleted), "dataset"), ": ", dataset_list_text(r$deleted)))
+    }
+  } else if (r$status %in% c("synced", "conflict", "same")) {
+    if (n > 0) {
+      parts <- c(parts, paste0(
+        count(n, "dataset"), ", ", format(r$files), "/", format(r$total), " files sent",
+        if (r$bytes > 0) paste0(gap, format_bytes(r$bytes)), gap, format_seconds(r$seconds)
+      ))
+    }
+    if (length(r$deleted) > 0) {
+      parts <- c(parts, paste0(count(length(r$deleted), "dataset"), " deleted: ", dataset_list_text(r$deleted)))
+    }
+  }
+  if (length(r$conflicts) > 0) {
+    names <- record_names(r$conflicts)
+    parts <- c(parts, paste0(count(length(names), "conflict"), ", newer here: ", dataset_list_text(names)))
+  }
+  if (length(r$kept) > 0) {
+    parts <- c(parts, paste0(
+      count(length(r$kept), "dataset"), " kept, delete on primary needs force: ", dataset_list_text(r$kept)
+    ))
+  }
   detail <- switch(
     r$status,
-    synced = paste0(
-      ds, ", ", format(r$files), "/", format(r$total), " files sent",
-      if (r$bytes > 0) paste0(gap, format_bytes(r$bytes)), gap, format_seconds(r$seconds)
-    ),
-    same = "up to date",
     behind = paste0("behind: ", r$message),
     unavailable = "unavailable, skipped",
-    `to sync` = paste0(
-      "would copy ", ds, ", ", format(r$files), " file", if (r$files == 1) "" else "s",
-      if (r$bytes > 0) paste0(" (", format_bytes(r$bytes), ")"), ": ", dataset_list_text(r$datasets)
-    )
+    if (length(parts) == 0) "up to date" else paste(parts, collapse = "; ")
   )
-  bullet <- switch(r$status, behind = "x", unavailable = "!", `to sync` = "*", "v")
+  bullet <- switch(r$status, behind = "x", conflict = "x", unavailable = "!", `to sync` = "*",
+    if (length(r$kept) > 0) "!" else "v"
+  )
   rcs_inform(stats::setNames(escape_braces(paste0(head, gap, detail)), bullet))
 }
 
-sync_footer <- function(out, dry_run) {
+sync_footer <- function(st, out, dry_run) {
   if (dry_run || nrow(out) == 0) {
     return(invisible())
   }
-  synced <- out[out$status == "synced", ]
-  if (nrow(synced) > 0) {
-    n <- sum(synced$files)
-    k <- nrow(synced)
+  noun <- target_noun(st, out$location)
+  copied <- out[lengths(out$datasets) > 0, ]
+  if (nrow(copied) > 0) {
+    n <- sum(copied$files)
+    k <- nrow(copied)
     rcs_inform(c(v = "MD5 identical for {n} file{?s} sent to {k} location{?s}. Catalogs updated."))
-  } else if (all(out$status == "same")) {
-    rcs_inform(c(v = "Every secondary location is up to date."))
+  }
+  n_deleted <- sum(lengths(out$deleted))
+  if (n_deleted > 0) {
+    k <- sum(lengths(out$deleted) > 0)
+    rcs_inform(c(v = "{n_deleted} dataset{?s} deleted in {k} location{?s}."))
+  }
+  if (all(out$status == "same") && sum(lengths(out$kept)) == 0) {
+    rcs_inform(c(v = paste0("Every ", noun, " is up to date.")))
+  }
+  n_kept <- sum(lengths(out$kept))
+  if (n_kept > 0) {
+    rcs_inform(c("!" = "{n_kept} dataset{?s} kept in the primary: delete on primary needs force ({.code force = TRUE})."))
   }
   n_behind <- sum(out$status %in% c("behind", "unavailable"))
   if (n_behind > 0) {
-    rcs_inform(c("!" = "{n_behind} secondary location{?s} {?is/are} behind; run {.fn store_sync} again once {?it/they} can be reached."))
+    nouns <- paste0(noun, if (n_behind == 1) "" else "s")
+    rcs_inform(c("!" = "{n_behind} {nouns} {cli::qty(n_behind)}{?is/are} behind; run {.fn store_sync} again once {?it/they} can be reached."))
   }
   invisible()
+}
+
+# One line per version record.
+record_lines <- function(records, uri, what) {
+  stamp <- function(x) format(local_time(x), "%Y-%m-%d %H:%M:%S")
+  vapply(records, function(r) {
+    escape_braces(sprintf(
+      what, uri, r$dataset, r$target_version, stamp(r$target_updated),
+      r$source_version, stamp(r$source_updated)
+    ))
+  }, character(1))
+}
+
+# One warning per call: every version of a target replaced by another one.
+sync_warn_overwrite <- function(results) {
+  lines <- unlist(lapply(results, function(r) {
+    record_lines(r$overwritten, r$location, "'%s': \"%s\" version %s (updated %s) replaced by version %s (updated %s).")
+  }))
+  if (length(lines) == 0) {
+    return(invisible())
+  }
+  n <- length(lines)
+  cli::cli_warn(
+    c(
+      "{.fn store_sync} replaced {n} version{?s} held by the target locations:",
+      rlang::set_names(lines, rep("*", n))
+    ),
+    class = "rcs_warning_sync_overwrite"
+  )
+}
+
+# After every target: abort when any target holds a newer version.
+sync_abort_conflicts <- function(results, out, call) {
+  lines <- unlist(lapply(results, function(r) {
+    record_lines(r$conflicts, r$location, "'%s': \"%s\" version %s (updated %s) is newer than the source's version %s (updated %s).")
+  }))
+  if (length(lines) == 0) {
+    return(invisible())
+  }
+  n <- length(lines)
+  cli::cli_abort(
+    c(
+      "{n} dataset{?s} {?was/were} not copied: the target holds a newer version.",
+      rlang::set_names(lines, rep("x", n)),
+      i = "The other copies and deletions were made.",
+      i = "Run with {.code force = TRUE} to copy the source over {cli::qty(n)}{?it/them}, or sync from the location that holds the newer version."
+    ),
+    class = "rcs_error_sync_conflict", result = out, call = call
+  )
 }
 
 # store_copy() ------------------------------------------------------------------
