@@ -27,7 +27,8 @@ geospatial dataset's index table travels with it."></head><body>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -137,9 +138,10 @@ history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Copying <span style="color: #0000BB;">"sales/daily"</span> (version bf16efd1aebea856, 2 files) from</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/primary</span> to</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span>.</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2/2 files sent (23.7 kB) in 0.2s, MD5 verified. Catalogs of</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2/2 files sent (23.7 kB) in 0.3s, MD5 verified. Catalogs of</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span> updated.</span>
 <span class="r-in"><span><span class="fu"><a href="store_status.html">store_status</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Source: /tmp/Rtmp/rcs-example-copy/primary</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Locations: [1] /tmp/Rtmp/rcs-example-copy/copy</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 8</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   dataset     location status newer primary_version  location_version</span>

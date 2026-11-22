@@ -4,6 +4,8 @@
 
 - [Getting started with
   rcs](https://ebukin.github.io/rcs/articles/rcs.md):
+- [Querying a store with
+  DuckDB](https://ebukin.github.io/rcs/articles/duckdb.md):
 - [Primary and secondary
   locations](https://ebukin.github.io/rcs/articles/locations.md):
 - [Geospatial

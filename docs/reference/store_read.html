@@ -23,7 +23,8 @@ groups and columns are read."></head><body>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -75,7 +76,8 @@ groups and columns are read.</p>
 <span>  intersects <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  geometry <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  version <span class="op">=</span> <span class="cn">NULL</span>,</span>
-<span>  exact <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span>  exact <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  exact_engine <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -122,9 +124,20 @@ an earlier version kept in the history.</p></dd>
 
 
 <dt id="arg-exact">exact<a class="anchor" aria-label="anchor" href="#arg-exact"></a></dt>
-<dd><p><code>TRUE</code> tests the candidate rows of a spatial filter exactly
-with <code><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">sf::st_intersects()</a></code>, under the session's <code><a href="https://r-spatial.github.io/sf/reference/s2.html" class="external-link">sf::sf_use_s2()</a></code>
-setting.</p></dd>
+<dd><p><code>TRUE</code> tests the candidate rows of a spatial filter exactly,
+on the sphere or in the plane as <code>exact_engine</code> says.</p></dd>
+
+
+<dt id="arg-exact-engine">exact_engine<a class="anchor" aria-label="anchor" href="#arg-exact-engine"></a></dt>
+<dd><p>How the exact test of a spatial filter reads the
+geometries: <code>NULL</code> (the default) follows the geocoding engine the
+dataset was written with (<code>"s2"</code>: on the sphere; <code>"planar"</code>: in the
+plane; <code>"auto"</code>: on the sphere for rows valid on the sphere, in the
+plane for the others), and the session's <code><a href="https://r-spatial.github.io/sf/reference/s2.html" class="external-link">sf::sf_use_s2()</a></code> setting for
+a dataset with no recorded engine (written before engines were
+recorded, or with <code>geocode = FALSE</code>). <code>"s2"</code>, <code>"planar"</code> or
+<code>"session"</code> override it. Data in a projected CRS are always tested
+in the plane of that CRS. See <code><a href="store_intersects.html">store_intersects()</a></code>.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -203,7 +216,7 @@ catalogs held by the connection; <code><a href="store_refresh.html">store_refres
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons"</span>: 200 rows in 1 file, and its index table in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.1 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.2 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">area</span> <span class="op">&lt;-</span> <span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">28</span>, ymin <span class="op">=</span> <span class="fl">7</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">27</span>, ymax <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span></span>
@@ -216,39 +229,39 @@ catalogs held by the connection; <code><a href="store_refresh.html">store_refres
 <span class="r-out co"><span class="r-pr">#&gt;</span> Bounding box:  xmin: -29.8 ymin: 6.1 xmax: -27.08777 ymax: 7.969043</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Geodetic CRS:  WGS 84</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 16 × 6</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       id       area cat        h3 bbox$xmin $ymin                       geometry</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>                 <span style="color: #949494; font-style: italic;">&lt;GEOMETRY [°]&gt;</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span>     6     0.392  b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">28.0</span>  7.73 MULTIPOLYGON (((-27.96559 7.7…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span>   119     0.272  b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">28.0</span>  7.74 POLYGON ((-27.97298 7.736041,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span>    19     0.166  e        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.6</span>  7.34 POLYGON ((-27.63064 7.34118, …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span>   117     0.428  d        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.5</span>  7.33 POLYGON ((-27.5089 7.333518, …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span>     8     4.90   a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.6</span>  7.49 POLYGON ((-27.59022 7.49, -27…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span>   196     0.047<span style="text-decoration: underline;">9</span> a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.5</span>  7.43 POLYGON ((-27.49999 7.429893,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span>    34     0.180  a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.6</span>  7.80 POLYGON ((-27.59195 7.798493,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span>    49     0.463  b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.5</span>  7.85 POLYGON ((-27.53358 7.846119,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span>    10     0.134  c        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.6</span>  7.97 POLYGON ((-27.6311 7.965744, …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span>    21     0.204  a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.8</span>  7.89 POLYGON ((-27.76669 7.894771,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">11</span>     1 <span style="text-decoration: underline;">46</span>041.     a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">29.8</span>  6.1  POLYGON ((-29.8 6.1, -27.3 6.…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">12</span>    53     0.310  c        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.9</span>  7.15 POLYGON ((-27.86865 7.154465,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">13</span>    64     0.036<span style="text-decoration: underline;">7</span> e        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.8</span>  7.13 POLYGON ((-27.84618 7.131019,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">14</span>    22     0.055<span style="text-decoration: underline;">8</span> a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.1</span>  7.31 POLYGON ((-27.08991 7.31366, …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">15</span>    59     0.044<span style="text-decoration: underline;">5</span> b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.1</span>  7.43 POLYGON ((-27.13006 7.433258,…</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">16</span>    74     0.138  d        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">27.1</span>  7.00 POLYGON ((-27.09025 6.99834, …</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 2 more variables: bbox$xmax &lt;dbl&gt;, $ymax &lt;dbl&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       id       area cat   h3              bbox$xmin                     geometry</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>                <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>               <span style="color: #949494; font-style: italic;">&lt;GEOMETRY [°]&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span>     6     0.392  b     85565903fffffff     -<span style="color: #BB0000;">28.0</span> MULTIPOLYGON (((-27.96559 7…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span>   119     0.272  b     85565903fffffff     -<span style="color: #BB0000;">28.0</span> POLYGON ((-27.97298 7.73604…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span>    19     0.166  e     85565927fffffff     -<span style="color: #BB0000;">27.6</span> POLYGON ((-27.63064 7.34118…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span>   117     0.428  d     85565927fffffff     -<span style="color: #BB0000;">27.5</span> POLYGON ((-27.5089 7.333518…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span>     8     4.90   a     85565937fffffff     -<span style="color: #BB0000;">27.6</span> POLYGON ((-27.59022 7.49, -…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span>   196     0.047<span style="text-decoration: underline;">9</span> a     85565937fffffff     -<span style="color: #BB0000;">27.5</span> POLYGON ((-27.49999 7.42989…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span>    34     0.180  a     855659a3fffffff     -<span style="color: #BB0000;">27.6</span> POLYGON ((-27.59195 7.79849…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span>    49     0.463  b     855659a3fffffff     -<span style="color: #BB0000;">27.5</span> POLYGON ((-27.53358 7.84611…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span>    10     0.134  c     855659b3fffffff     -<span style="color: #BB0000;">27.6</span> POLYGON ((-27.6311 7.965744…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span>    21     0.204  a     855659bbfffffff     -<span style="color: #BB0000;">27.8</span> POLYGON ((-27.76669 7.89477…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">11</span>     1 <span style="text-decoration: underline;">46</span>041.     a     857c4bd3fffffff     -<span style="color: #BB0000;">29.8</span> POLYGON ((-29.8 6.1, -27.3 …</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">12</span>    53     0.310  c     857c596ffffffff     -<span style="color: #BB0000;">27.9</span> POLYGON ((-27.86865 7.15446…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">13</span>    64     0.036<span style="text-decoration: underline;">7</span> e     857c596ffffffff     -<span style="color: #BB0000;">27.8</span> POLYGON ((-27.84618 7.13101…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">14</span>    22     0.055<span style="text-decoration: underline;">8</span> a     857c5b0ffffffff     -<span style="color: #BB0000;">27.1</span> POLYGON ((-27.08991 7.31366…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">15</span>    59     0.044<span style="text-decoration: underline;">5</span> b     857c5b3bfffffff     -<span style="color: #BB0000;">27.1</span> POLYGON ((-27.13006 7.43325…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">16</span>    74     0.138  d     857c5b8ffffffff     -<span style="color: #BB0000;">27.1</span> POLYGON ((-27.09025 6.99834…</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 3 more variables: bbox$ymin &lt;dbl&gt;, $xmax &lt;dbl&gt;, $ymax &lt;dbl&gt;</span></span>
 <span class="r-in"><span><span class="fu">store_read</span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span>, geometry <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 200 × 5</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>       id   area cat        h3 bbox$xmin $ymin $xmax $ymax</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span>   185 0.269  e        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.2</span>  8.78 -<span style="color: #BB0000;">26.2</span>  8.79</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span>   188 0.425  c        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">25.9</span>  8.31 -<span style="color: #BB0000;">25.9</span>  8.32</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span>     7 0.391  a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.4</span>  8.28 -<span style="color: #BB0000;">25.9</span>  8.54</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span>   158 0.287  c        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.6</span>  8.56 -<span style="color: #BB0000;">26.6</span>  8.56</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span>    93 0.476  d        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.4</span>  8.49 -<span style="color: #BB0000;">26.4</span>  8.49</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span>    44 0.061<span style="text-decoration: underline;">8</span> b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.2</span>  8.33 -<span style="color: #BB0000;">26.2</span>  8.33</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span>    23 0.191  a        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.4</span>  8.28 -<span style="color: #BB0000;">26.4</span>  8.29</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span>   168 0.414  b        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">26.1</span>  8.46 -<span style="color: #BB0000;">26.1</span>  8.46</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span>    63 0.093<span style="text-decoration: underline;">8</span> d        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">25.6</span>  8.60 -<span style="color: #BB0000;">25.6</span>  8.60</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span>   139 0.499  c        6<span style="color: #949494;">e</span>17     -<span style="color: #BB0000;">25.7</span>  8.62 -<span style="color: #BB0000;">25.7</span>  8.62</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>       id   area cat   h3              bbox$xmin $ymin $xmax $ymax</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>                <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 1</span>   185 0.269  e     8556481bfffffff     -<span style="color: #BB0000;">26.2</span>  8.78 -<span style="color: #BB0000;">26.2</span>  8.79</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 2</span>   188 0.425  c     8556482bfffffff     -<span style="color: #BB0000;">25.9</span>  8.31 -<span style="color: #BB0000;">25.9</span>  8.32</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 3</span>     7 0.391  a     8556483bfffffff     -<span style="color: #BB0000;">26.4</span>  8.28 -<span style="color: #BB0000;">25.9</span>  8.54</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 4</span>   158 0.287  c     8556484bfffffff     -<span style="color: #BB0000;">26.6</span>  8.56 -<span style="color: #BB0000;">26.6</span>  8.56</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 5</span>    93 0.476  d     8556484ffffffff     -<span style="color: #BB0000;">26.4</span>  8.49 -<span style="color: #BB0000;">26.4</span>  8.49</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 6</span>    44 0.061<span style="text-decoration: underline;">8</span> b     85564863fffffff     -<span style="color: #BB0000;">26.2</span>  8.33 -<span style="color: #BB0000;">26.2</span>  8.33</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 7</span>    23 0.191  a     8556486bfffffff     -<span style="color: #BB0000;">26.4</span>  8.28 -<span style="color: #BB0000;">26.4</span>  8.29</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 8</span>   168 0.414  b     85564877fffffff     -<span style="color: #BB0000;">26.1</span>  8.46 -<span style="color: #BB0000;">26.1</span>  8.46</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;"> 9</span>    63 0.093<span style="text-decoration: underline;">8</span> d     855648affffffff     -<span style="color: #BB0000;">25.6</span>  8.60 -<span style="color: #BB0000;">25.6</span>  8.60</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">10</span>   139 0.499  c     855648affffffff     -<span style="color: #BB0000;">25.7</span>  8.62 -<span style="color: #BB0000;">25.7</span>  8.62</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># ℹ 190 more rows</span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">location</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

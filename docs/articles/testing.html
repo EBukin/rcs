@@ -37,7 +37,8 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+<li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -298,7 +299,21 @@ with non-ASCII characters, factors with unused levels, ordered factors,
 dates, times with time zones, time differences, 64-bit integers, list
 columns, missing values, zero rows, every geometry type) is
 <code><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical()</a></code> after normalisation, for one file and for
-partitioned datasets.</li>
+partitioned datasets;</li>
+<li>the geocoding engines
+(<code>tests/testthat/test-geo-engine.R</code>) are compared with brute
+force on the sphere and in the plane, for two polygons that are valid in
+the plane but invalid on the sphere (a duplicated vertex and a spike)
+and for a polygon with long edges, whose cells on the sphere and in the
+plane differ. These geometries are given as WKT in
+<code>tests/testthat/helper-geo-invalid.R</code>, with the brute-force
+references for both readings. The tests also check the planar fallback
+of <code>"auto"</code> (with the rebuild mocked to return an empty or a
+wrong geometry), that an invalid row leaves the other rows of its chunk
+unchanged, that inside rows and rows across the antimeridian or around a
+pole get the same cells from every engine, and determinism. The read
+side (<code>test-intersects.R</code>) checks that the exact test follows
+the engine recorded with each dataset, and the explicit overrides.</li>
 </ul>
 </div>
 <div class="section level2">
@@ -336,6 +351,98 @@ of GDAL lack the Parquet driver.</li>
 </ul>
 </div>
 <div class="section level2">
+<h2 id="credentials-cells-types-and-verbs">Credentials, cells, types and verbs<a class="anchor" aria-label="anchor" href="#credentials-cells-types-and-verbs"></a>
+</h2>
+<ul>
+<li>
+<strong>Credentials</strong>
+(<code>tests/testthat/test-auth.R</code>) run offline: the network
+calls, the clock and GDAL’s configuration go through small internal
+functions that the tests mock. They cover the default lookup order of
+<code><a href="../reference/rcs_auth_gcs.html">rcs_auth_gcs()</a></code>, both key types, renewal five minutes before
+expiry, a token that is never renewed, the GDAL options set for each
+credential type and the warning on a switch, the temporary DuckDB
+secret, and <code><a href="../reference/store_auth_check.html">store_auth_check()</a></code> with each client failing in
+turn. Most tests (those of the lookup, the key types, renewal,
+<code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code>, <code><a href="https://rdrr.io/r/utils/str.html" class="external-link">str()</a></code>, GDAL’s options, the DuckDB
+secret and <code><a href="../reference/store_auth_check.html">store_auth_check()</a></code> with failing clients) assert
+that no environment variable changed. The tests of the default lookup,
+of key types, of the same source and of <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> fail on any
+network call; the <code><a href="https://rdrr.io/r/base/print.html" class="external-link">print()</a></code> and <code><a href="https://rdrr.io/r/utils/str.html" class="external-link">str()</a></code> tests
+assert that no token, refresh token or client secret is shown.</li>
+<li>
+<strong>H3 cells</strong> (<code>test-h3-type.R</code>): the class
+<code>rcs_h3</code> prints hex in vectors, tibbles and <code>sf</code>;
+never fails on any 64-bit value; keeps its class through subsetting,
+<code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>, <code><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique()</a></code>, <code><a href="https://rdrr.io/r/base/sort.html" class="external-link">sort()</a></code> and the
+dplyr and vctrs verbs, with <code>NA</code> filled as <code>NA</code>;
+and <code><a href="../reference/rcs_h3_hex.html">rcs_h3_hex()</a></code> accepts every input form, warns for
+doubles and gives the same strings as the DuckDB macro.</li>
+<li>
+<strong>Types</strong> (<code>test-types.R</code>):
+<code><a href="../reference/store_restore_types.html">store_restore_types()</a></code> on data read by
+<code><a href="https://arrow.apache.org/docs/r/reference/read_parquet.html" class="external-link">arrow::read_parquet()</a></code> from a dataset’s files restores
+factors, ordered factors, time differences, 64-bit integers, lists and
+cells, and leaves incompatible columns alone.</li>
+<li>
+<strong>Geospatial verbs</strong> (<code>test-geo-verbs.R</code>):
+<code><a href="../reference/rcs_geo_add.html">rcs_geo_add()</a></code> and <code><a href="../reference/rcs_geo_add.html">rcs_geo_index()</a></code> equal what a
+write computes, <code><a href="../reference/rcs_geo_add.html">rcs_geo_strip()</a></code> undoes
+<code><a href="../reference/rcs_geo_add.html">rcs_geo_add()</a></code> exactly, and the round trip raw, prepared,
+written, collected and stripped gives the raw data back (attributes,
+identical WKB, CRS) for points, lines and polygons. Prepared writes,
+accepted when equal and refused when changed, are tested in
+<code>test-write.R</code>.</li>
+<li>
+<strong>Sync</strong> (<code>test-sync.R</code>): syncs from the
+primary and from a secondary, deletions with and without
+<code>force</code>, a conflict (target newer) and an overwrite (source
+newer), dry runs, and one injected failure per phase, after which the
+invariants hold and a repeat sends only what is missing.</li>
+</ul>
+</div>
+<div class="section level2">
+<h2 id="duckdb">DuckDB<a class="anchor" aria-label="anchor" href="#duckdb"></a>
+</h2>
+<p>The DuckDB tests skip when duckdb or DBI is missing. They make every
+connection through the helper <code>local_duckdb()</code>
+(<code>tests/testthat/helper-duckdb.R</code>), with
+<code>bigint = "integer64"</code> and closed when the test ends;
+<code>local_duckdb_spatial()</code> loads DuckDB’s <code>spatial</code>
+extension and skips when it cannot be installed (it needs a download on
+first use).</p>
+<ul>
+<li>
+<code>test-duckdb.R</code>: one view per dataset in both modes,
+their names, the tables <code>rcs.views</code> and
+<code>rcs.store</code>, column types and rows equal to the Arrow reads,
+the guards on view names and connections, and
+<code><a href="../reference/store_tables.html">store_tables()</a></code>.</li>
+<li>
+<code>test-duckdb-file.R</code>: a database file whose views and
+user tables survive closing and reopening, refreshing after writes and
+deletions in the store, reconnecting from the file alone, the
+local-first workflow with the credential functions mocked to fail (they
+are never called), and a file that stays small because views hold query
+text only.</li>
+<li>
+<code>test-duckdb-tbl.R</code>:
+<code>store_open(engine = "duckdb")</code>, whose <code>collect()</code>
+restores the R types and returns the rows of the Arrow engine.</li>
+<li>
+<code>test-duckdb-intersects.R</code>:
+<code><a href="../reference/store_intersects.html">store_intersects()</a></code> on DuckDB tables returns exactly the
+rows of the Arrow path, for cells, thin strips, polygons with holes,
+boxes and the antimeridian, in both modes.</li>
+<li>
+<code>test-write-duckdb.R</code>: <code><a href="../reference/store_write.html">store_write()</a></code> of a
+DuckDB table gives the same files, catalog rows, manifest and version as
+a write of the same data collected into R (byte for byte), checks keys
+and partitions inside DuckDB, and drops its temporary table also after
+an error.</li>
+</ul>
+</div>
+<div class="section level2">
 <h2 id="the-cloud-tests">The cloud tests<a class="anchor" aria-label="anchor" href="#the-cloud-tests"></a>
 </h2>
 <p>At level <code>full</code>, the Google Cloud Storage backend is
@@ -343,13 +450,22 @@ tested against a real bucket when the environment variable
 <code>RCS_TEST_GCS</code> names one
 (<code>tests/testthat/test-backend-gcs.R</code>): uploads, downloads,
 MD5 checksums read without a download, listing and deletion, a Parquet
-file streamed through Arrow and a file read through GDAL’s
-<code>/vsigs/</code> path; and a raster is opened through
-<code>/vsigs/</code> (<code>test-raster.R</code>). The GDAL tests also
-need <code>GOOGLE_APPLICATION_CREDENTIALS</code>. The integration suite
-itself runs on local folders only. Each run works under a random prefix
-in the bucket and removes it at the end. Use a dedicated, empty bucket,
-and set up credentials as described in
+file streamed through Arrow, a file read through GDAL’s
+<code>/vsigs/</code> path, and a store on the bucket that renews an
+expired token; a raster is opened through <code>/vsigs/</code>
+(<code>test-raster.R</code>); a store on the bucket passes
+<code><a href="../reference/store_auth_check.html">store_auth_check()</a></code> for every client and reads a raster
+through GDAL (<code>test-auth.R</code>); DuckDB views read the bucket’s
+files with a secret (<code>test-duckdb.R</code>); and syncs run with the
+bucket as a secondary (<code>test-sync.R</code>). All of them use the
+credentials of the default lookup of <code><a href="../reference/rcs_auth_gcs.html">rcs_auth_gcs()</a></code>, GDAL
+included, with one exception: the GDAL test of
+<code>test-backend-gcs.R</code> sets
+<code>GOOGLE_APPLICATION_CREDENTIALS</code> to gcloud’s
+application-default login for its own duration when the variable is
+unset. The integration suite itself runs on local folders only. Each run
+works under a random prefix in the bucket and removes it at the end. Use
+a dedicated, empty bucket, and set up credentials as described in
 <code><a href="../articles/locations.html">vignette("locations")</a></code>:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">withr</span><span class="fu">::</span><span class="fu"><a href="https://withr.r-lib.org/reference/with_envvar.html" class="external-link">with_envvar</a></span><span class="op">(</span></span>

@@ -3,15 +3,21 @@
 rcs keeps tabular, geospatial vector and raster data in a *store*: a
 named collection of *datasets*, written mostly as Parquet files. This
 vignette works with a store in one local folder. It shows how to create
-the store, write a table, see what the store holds, read data back with
-filters, and keep earlier versions.
+the store, write a table, see what the store holds, open a dataset and
+read part of it back, and keep earlier versions.
 
-Two other vignettes go further:
+The way to work with a dataset is
+[`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md):
+it opens the dataset lazily, without reading it, you describe the rows
+you want with dplyr verbs, and `collect()` reads them into R.
+
+Three other vignettes go further:
 [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)
 keeps the same store in several places, local folders or cloud buckets,
-and
 [`vignette("geospatial")`](https://ebukin.github.io/rcs/articles/geospatial.md)
-writes `sf` objects and rasters.
+writes `sf` objects and rasters, and
+[`vignette("duckdb")`](https://ebukin.github.io/rcs/articles/duckdb.md)
+queries a store with DuckDB.
 
 ``` r
 
@@ -147,7 +153,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   300  31.3 kB      2  2026-11-21 21:57
+#>     daily  table   300  31.3 kB      2  2026-11-22 15:55
 ```
 
 [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md)
@@ -160,7 +166,7 @@ datasets
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   300 31289       2 <chr [1]> b74a07… 2026-11-21 21:57:20
+#> 1 sales/d… table Dail…   300 31289       2 <chr [1]> b74a07… 2026-11-22 15:55:19
 datasets$title
 #> [1] "Daily sales"
 ```
@@ -188,8 +194,8 @@ store_describe(st, "sales/daily")
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-21 21:57:20 UTC
-#> Updated     2026-11-21 21:57:20 UTC
+#> Created     2026-11-22 15:55:18 UTC
+#> Updated     2026-11-22 15:55:19 UTC
 #> Written by  R 4.6.2, rcs 0.0.0.9000
 #> 
 #> Locations:
@@ -226,10 +232,156 @@ bucket.
 A dataset can be named by the last part of its name when that is unique
 in the store: `"daily"` stands for `"sales/daily"` below.
 
-## Read data
+## Open a dataset
+
+[`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md)
+opens a dataset as a lazy query. It reads no data: the query is built
+from the files the catalog names. Printing it shows a header and the
+first rows.
+
+``` r
+
+q <- store_open(st, "daily")
+q
+#> # Dataset:  sales/daily [300 x 15] (table)
+#> # Location: primary (local)
+#> # Version:  b74a078c (current)
+#> # Files:    2 of 2
+#>    shop_id date        year product   qty price promo grade delivered      big
+#>      <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
+#>  1       1 2023-03-12  2023 p07         9 172.  FALSE mid   2023-03-17    9e15
+#>  2       1 2023-03-15  2023 p18        13  77.8 TRUE  low   2023-03-21    9e15
+#>  3       1 2023-03-27  2023 p08        18  NA   TRUE  mid   2023-04-02    9e15
+#>  4       1 2023-04-14  2023 p06        39  46.7 FALSE mid   2023-04-15    9e15
+#>  5       1 2023-05-11  2023 p04        NA 159.  FALSE low   2023-05-14    9e15
+#>  6       1 2023-06-04  2023 p08        45 138.  TRUE  high  2023-06-11    1e 2
+#>  7       1 2023-08-18  2023 p04         8 151.  FALSE high  2023-08-28    4e 2
+#>  8       1 2023-12-24  2023 p09        32 189.  TRUE  high  2023-12-31    9e15
+#>  9       2 2023-03-21  2023 p15        41  88.6 TRUE  low   2023-03-27    2e 2
+#> 10       2 2023-03-30  2023 p10        18 186.  FALSE mid   2023-04-06    6e 2
+#> # ℹ 5 more variables: wait <drtn>, note <chr>, tags <list>, ts <dttm>,
+#> #   ts_local <dttm>
+#> # ℹ 290 more rows
+#> # ℹ Use `collect()` to read the rows into R.
+```
+
+The header says what the query reads:
+
+- `Dataset:` the full name, the number of rows and columns, and the
+  kind. The number of rows comes from the catalog; it is known as long
+  as the query is the whole dataset, with columns at most selected,
+  renamed or computed.
+- `Location:` the location read, here the primary, a local folder.
+- `Version:` the first characters of the version, and whether it is the
+  current one.
+- `Files:` how many of the dataset’s files the query reads.
+
+Printing reads the rows it shows, and no more. It shows 10 rows, or `n`;
+the option `rcs.print_rows` changes the default.
+
+``` r
+
+print(q, n = 3)
+#> # Dataset:  sales/daily [300 x 15] (table)
+#> # Location: primary (local)
+#> # Version:  b74a078c (current)
+#> # Files:    2 of 2
+#>   shop_id date        year product   qty price promo grade delivered      big
+#>     <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
+#> 1       1 2023-03-12  2023 p07         9 172.  FALSE mid   2023-03-17    9e15
+#> 2       1 2023-03-15  2023 p18        13  77.8 TRUE  low   2023-03-21    9e15
+#> 3       1 2023-03-27  2023 p08        18  NA   TRUE  mid   2023-04-02    9e15
+#> # ℹ 5 more variables: wait <drtn>, note <chr>, tags <list>, ts <dttm>,
+#> #   ts_local <dttm>
+#> # ℹ 297 more rows
+#> # ℹ Use `collect()` to read the rows into R.
+```
+
+The query is changed with the dplyr verbs
+[`filter()`](https://rdrr.io/r/stats/filter.html), `select()`,
+`mutate()`, `rename()`, `arrange()`, `distinct()` and
+[`head()`](https://rdrr.io/r/utils/head.html). Each verb returns a new
+query; still nothing is read.
+
+``` r
+
+q24 <- q |>
+  dplyr::filter(year == 2024, qty > 45) |>
+  dplyr::select(shop_id, date, product, qty)
+q24
+#> # Dataset:  sales/daily [?? x 4] (table)
+#> # Location: primary (local)
+#> # Version:  b74a078c (current)
+#> # Files:    1 of 2 (pruned)
+#> # Filter:   ((year == 2024) and (qty > 45))
+#>   shop_id date       product   qty
+#>     <int> <date>     <fct>   <int>
+#> 1       1 2024-12-24 p01        46
+#> 2       3 2024-06-20 p01        46
+#> 3       7 2024-08-19 p13        50
+#> 4       7 2024-11-27 p12        48
+#> 5      12 2024-08-12 p16        46
+#> 6      12 2024-10-19 p09        49
+#> 7      19 2024-09-04 p09        49
+#> # ℹ Use `collect()` to read the rows into R.
+```
+
+After a filter the number of rows is not known without reading, so the
+header shows `??`. `Files: 1 of 2 (pruned)` says that one file is
+enough: a filter on the partition columns alone is first applied to the
+catalog, and only the files of the matching partitions are opened.
+`Filter:` shows the row filter that is passed to the Parquet reader.
+
+`collect()` runs the query and returns a tibble.
+
+``` r
+
+q24 |>
+  dplyr::mutate(big_day = qty > 48) |>
+  dplyr::arrange(dplyr::desc(qty)) |>
+  dplyr::collect()
+#> # A tibble: 7 × 5
+#>   shop_id date       product   qty big_day
+#>     <int> <date>     <fct>   <int> <lgl>  
+#> 1       7 2024-08-19 p13        50 TRUE   
+#> 2      12 2024-10-19 p09        49 TRUE   
+#> 3      19 2024-09-04 p09        49 TRUE   
+#> 4       7 2024-11-27 p12        48 FALSE  
+#> 5       1 2024-12-24 p01        46 FALSE  
+#> 6       3 2024-06-20 p01        46 FALSE  
+#> 7      12 2024-08-12 p16        46 FALSE
+```
+
+Filters and the column selection are passed to the Parquet reader, so
+only the needed files, blocks of rows and columns are read. The work
+counters show it: with `options(rcs.trace = TRUE)`,
+[`rcs_trace()`](https://ebukin.github.io/rcs/reference/rcs_trace.md)
+reports the work done by the last call.
+
+``` r
+
+options(rcs.trace = TRUE)
+x <- q |> dplyr::filter(year == 2023) |> dplyr::collect()
+rcs_trace()[c("counter", "detail", "n")]
+#> # A tibble: 4 × 3
+#>   counter          detail                                                  n
+#>   <chr>            <chr>                                               <dbl>
+#> 1 backend_call     be_arrow_fs                                             1
+#> 2 file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1
+#> 3 row_groups_total NA                                                      1
+#> 4 rows_returned    NA                                                    156
+options(rcs.trace = FALSE)
+```
+
+One of the two files was opened.
+
+## Read in one call
 
 [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
-reads a dataset into R. Filters are written as in
+is the shortcut for
+[`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md),
+[`filter()`](https://rdrr.io/r/stats/filter.html), `select()` and
+`collect()` in one call. Filters are written as in
 [`dplyr::filter()`](https://dplyr.tidyverse.org/reference/filter.html),
 and `columns` selects columns as in
 [`dplyr::select()`](https://dplyr.tidyverse.org/reference/select.html).
@@ -251,31 +403,6 @@ store_read(st, "daily", year == 2024, product == "p07",
 #> 7      12 2024-05-24    43
 #> 8      19 2024-08-26    NA
 ```
-
-Filters and the column selection are passed to the Parquet reader, so
-only the needed files, blocks of rows and columns are read. A filter on
-the partition columns alone is first applied to the catalog, and only
-the files of the matching partitions are opened. The work counters show
-it: with `options(rcs.trace = TRUE)`,
-[`rcs_trace()`](https://ebukin.github.io/rcs/reference/rcs_trace.md)
-reports the work done by the last call.
-
-``` r
-
-options(rcs.trace = TRUE)
-x <- store_read(st, "daily", year == 2023)
-rcs_trace()[c("counter", "detail", "n")]
-#> # A tibble: 4 × 3
-#>   counter          detail                                                  n
-#>   <chr>            <chr>                                               <dbl>
-#> 1 backend_call     be_arrow_fs                                             3
-#> 2 file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1
-#> 3 row_groups_total NA                                                      1
-#> 4 rows_returned    NA                                                    156
-options(rcs.trace = FALSE)
-```
-
-One of the two files was opened.
 
 The types of the columns come back as they were written: factor levels,
 64-bit integers, time differences with their units, list columns and
@@ -340,42 +467,6 @@ store_sample(st, "daily", n = 5, qty > 40, columns = c(shop_id, date, qty),
 #> 5      18 2024-07-09    42
 ```
 
-## Lazy queries
-
-[`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md)
-returns a lazy query. It is changed with the dplyr verbs
-[`filter()`](https://rdrr.io/r/stats/filter.html), `select()`,
-`mutate()`, `rename()`, `arrange()`, `distinct()` and
-[`head()`](https://rdrr.io/r/utils/head.html), and nothing is read until
-`collect()`.
-
-``` r
-
-q <- store_open(st, "daily")
-q
-#> <rcs_query> sales/daily (table, current)
-#> Location: primary
-#> Files:    2 of 2
-#> Columns:  shop_id, date, year, product, qty, price, promo, grade, delivered, big, wait, note, tags, ts, ts_local
-
-q |>
-  dplyr::filter(year == 2024, qty > 45) |>
-  dplyr::mutate(revenue = qty * price) |>
-  dplyr::select(shop_id, date, qty, revenue) |>
-  dplyr::arrange(dplyr::desc(qty)) |>
-  dplyr::collect()
-#> # A tibble: 7 × 4
-#>   shop_id date         qty revenue
-#>     <int> <date>     <int>   <dbl>
-#> 1       7 2024-08-19    50   8860.
-#> 2      12 2024-10-19    49    654.
-#> 3      19 2024-09-04    49   5888.
-#> 4       7 2024-11-27    48   9347.
-#> 5       1 2024-12-24    46   3428.
-#> 6       3 2024-06-20    46    669.
-#> 7      12 2024-08-12    46   4654.
-```
-
 ## Update some partitions
 
 With `mode = "update"`, only the partitions whose values occur in the
@@ -396,7 +487,12 @@ store_write(st, fix, "sales/daily",
 #> ℹ Updating "sales/daily": 1 partition replaced, 0 added, 1 kept.
 #> • year = 2024: 144 rows -> 144 rows
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.4 kB  0.1s
+#> Warning: Cannot delete 2 replaced files in <tempdir>/my-store.
+#> ℹ They are no longer named by the catalogs; `store_prune()` removes them later.
+#> Caused by error in `be_delete()`:
+#> ! Cannot delete 1 file in <tempdir>/my-store:
+#>   <tempdir>/my-store/sales/daily/year=2024/part-b74a078c7191e5d3.parquet.
+#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.4 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -438,7 +534,7 @@ store_write(sth, fix, "sales/daily",
 #> ℹ Updating "sales/daily": 1 partition replaced, 0 added, 1 kept.
 #> • year = 2024: 144 rows -> 144 rows
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/store-with-history  1/2 files sent  15.4 kB  0.1s
+#> ✔ primary  <tempdir>/store-with-history  1/2 files sent  15.4 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 

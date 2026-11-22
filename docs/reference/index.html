@@ -19,7 +19,8 @@
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -84,6 +85,29 @@
         </dt>
         <dd>Re-read the catalogs of a connection</dd>
       </dl></div><div class="section level2">
+      <h2 id="credentials">Credentials<a class="anchor" aria-label="anchor" href="#credentials"></a></h2>
+
+      <div class="section-desc"><p>Credentials for Google Cloud Storage, set once per connection, and a check of every client.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="rcs_auth_gcs.html">rcs_auth_gcs()</a></code> <code><a href="rcs_auth_gcs.html">print(<i>&lt;rcs_auth_gcs&gt;</i>)</a></code>
+
+        </dt>
+        <dd>Credentials for Google Cloud Storage</dd>
+
+        <dt>
+
+          <code><a href="store_auth_check.html">store_auth_check()</a></code>
+
+        </dt>
+        <dd>Check which clients reach each location of a store</dd>
+      </dl></div><div class="section level2">
       <h2 id="see-what-a-store-holds">See what a store holds<a class="anchor" aria-label="anchor" href="#see-what-a-store-holds"></a></h2>
 
       <div class="section-desc"><p>These functions read the catalog only; they open no data file.</p></div>
@@ -119,7 +143,7 @@
           <code><a href="store_status.html">store_status()</a></code> <code><a href="store_status.html">print(<i>&lt;rcs_status&gt;</i>)</a></code>
 
         </dt>
-        <dd>Compare the secondary locations with the primary</dd>
+        <dd>Compare the locations of a connection with one of them</dd>
 
         <dt>
 
@@ -162,7 +186,7 @@
 
         <dt>
 
-          <code><a href="store_open.html">store_open()</a></code>
+          <code><a href="store_open.html">store_open()</a></code> <code><a href="store_open.html">print(<i>&lt;rcs_query&gt;</i>)</a></code>
 
         </dt>
         <dd>Open a dataset as a lazy query</dd>
@@ -190,6 +214,75 @@
 
         <dt>
 
+          <code><a href="rcs_query-dplyr.html">filter(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">select(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">mutate(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">rename(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">arrange(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">distinct(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">head(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">collect(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">compute(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">pull(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">glimpse(<i>&lt;rcs_query&gt;</i>)</a></code>
+
+        </dt>
+        <dd>dplyr verbs for lazy queries</dd>
+      </dl></div><div class="section level2">
+      <h2 id="duckdb">DuckDB<a class="anchor" aria-label="anchor" href="#duckdb"></a></h2>
+
+      <div class="section-desc"><p>The datasets of a store as DuckDB views, in memory or in a database file.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="store_duckdb.html">store_duckdb()</a></code>
+
+        </dt>
+        <dd>Query a store's datasets in DuckDB</dd>
+
+        <dt>
+
+          <code><a href="store_tables.html">store_tables()</a></code>
+
+        </dt>
+        <dd>List a store's datasets or a DuckDB connection's tables</dd>
+      </dl></div><div class="section level2">
+      <h2 id="geospatial-preparation">Geospatial preparation<a class="anchor" aria-label="anchor" href="#geospatial-preparation"></a></h2>
+
+      <div class="section-desc"><p>Add, index and strip the package’s geospatial columns in memory, without a store.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="rcs_geo_add.html">rcs_geo_add()</a></code> <code><a href="rcs_geo_add.html">rcs_geo_index()</a></code> <code><a href="rcs_geo_add.html">rcs_geo_strip()</a></code>
+
+        </dt>
+        <dd>Add, index and strip the package's geospatial columns</dd>
+      </dl></div><div class="section level2">
+      <h2 id="types-and-h-cells">Types and H3 cells<a class="anchor" aria-label="anchor" href="#types-and-h-cells"></a></h2>
+
+      <div class="section-desc"><p>H3 cells as 64-bit integers printed as hex, and the R types of data read by other tools.</p></div>
+
+      <dl></dl></div><div class="section level2">
+
+
+
+
+      <dl><dt>
+
+          <code><a href="rcs_h3.html">rcs_h3</a></code>
+
+        </dt>
+        <dd>H3 cells as 64-bit integers, printed as hex</dd>
+
+        <dt>
+
+          <code><a href="rcs_h3_hex.html">rcs_h3_hex()</a></code>
+
+        </dt>
+        <dd>Hex strings of H3 cells</dd>
+
+        <dt>
+
           <code><a href="store_h3_hex.html">store_h3_hex()</a></code>
 
         </dt>
@@ -197,10 +290,10 @@
 
         <dt>
 
-          <code><a href="rcs_query-dplyr.html">filter(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">select(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">mutate(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">rename(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">arrange(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">distinct(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">head(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">collect(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">compute(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">pull(<i>&lt;rcs_query&gt;</i>)</a></code> <code><a href="rcs_query-dplyr.html">glimpse(<i>&lt;rcs_query&gt;</i>)</a></code>
+          <code><a href="store_restore_types.html">store_restore_types()</a></code>
 
         </dt>
-        <dd>dplyr verbs for lazy queries</dd>
+        <dd>Restore the R types of a dataset's columns</dd>
       </dl></div><div class="section level2">
       <h2 id="check-and-maintain">Check and maintain<a class="anchor" aria-label="anchor" href="#check-and-maintain"></a></h2>
 
@@ -223,7 +316,7 @@
           <code><a href="store_sync.html">store_sync()</a></code>
 
         </dt>
-        <dd>Bring secondary locations up to date</dd>
+        <dd>Bring the locations of a store into step</dd>
 
         <dt>
 

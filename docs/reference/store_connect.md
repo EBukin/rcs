@@ -13,7 +13,8 @@ store_connect(
   secondary = NULL,
   env = "STORE",
   history = NULL,
-  create = FALSE
+  create = FALSE,
+  auth = NULL
 )
 ```
 
@@ -46,6 +47,17 @@ store_connect(
 - create:
 
   `TRUE` initialises locations that hold no catalogs yet.
+
+- auth:
+
+  Credentials for Google Cloud Storage locations (local folders need
+  none): `NULL` uses
+  [`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md),
+  the default lookup; an object made by
+  [`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md)
+  applies to every GCS location; a string is the path of a key file; a
+  list named by address (as given in the call) gives each location any
+  of these, and locations left out use the default.
 
 ## Value
 
@@ -86,7 +98,8 @@ to see what other sessions wrote since.
 [`store_create()`](https://ebukin.github.io/rcs/reference/store_create.md),
 [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md),
 [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md),
-[`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md).
+[`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md),
+[`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md).
 
 ## Examples
 
@@ -109,7 +122,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.7 kB      2  2026-11-21 16:55
+#>     daily  table   100  23.7 kB      2  2026-11-22 10:51
 
 # The same, with the address in the environment
 withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())

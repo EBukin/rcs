@@ -42,27 +42,37 @@ site_clean <- function() {
 }
 
 site_scrub_paths <- function() {
-  # Example output prints store locations below tempdir(), whose path holds
-  # the local user name; the site shows a neutral temporary folder instead.
+  # Example output prints store locations below tempdir() and the path of the
+  # local credentials file; both hold the local user name. The site shows a
+  # neutral temporary folder and `~` for the home folder instead.
   temp <- normalizePath(dirname(tempdir()), winslash = "/", mustWork = FALSE)
-  forms <- unique(c(
-    temp,
-    gsub("/", "\\", temp, fixed = TRUE),
-    gsub("/", "\\\\", temp, fixed = TRUE)
-  ))
-  pattern <- paste0(
-    "(", paste(gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", forms), collapse = "|"), ")",
-    "[/\\\\]+Rtmp[A-Za-z0-9]+"
+  home <- Sys.getenv(if (.Platform$OS.type == "windows") "USERPROFILE" else "HOME")
+  home <- normalizePath(home, winslash = "/", mustWork = FALSE)
+  path_pattern <- function(path) {
+    forms <- unique(c(
+      path,
+      gsub("/", "\\", path, fixed = TRUE),
+      gsub("/", "\\\\", path, fixed = TRUE)
+    ))
+    paste0("(", paste(gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", forms), collapse = "|"), ")")
+  }
+  rules <- list(
+    c(paste0(path_pattern(temp), "[/\\\\]+Rtmp[A-Za-z0-9]+"), "/tmp/Rtmp"),
+    c(path_pattern(home), "~")
   )
   files <- list.files("docs", recursive = TRUE, full.names = TRUE)
   files <- files[grepl("\\.(html|md|json|txt|xml)$", files)]
   for (file in files) {
     lines <- readLines(file, encoding = "UTF-8", warn = FALSE)
-    hit <- grepl(pattern, lines, ignore.case = TRUE)
-    if (any(hit)) {
-      lines[hit] <- gsub(pattern, "/tmp/Rtmp", lines[hit], ignore.case = TRUE)
-      writeLines(lines, file, useBytes = TRUE)
+    changed <- FALSE
+    for (rule in rules) {
+      hit <- grepl(rule[[1]], lines, ignore.case = TRUE)
+      if (any(hit)) {
+        lines[hit] <- gsub(rule[[1]], rule[[2]], lines[hit], ignore.case = TRUE)
+        changed <- TRUE
+      }
     }
+    if (changed) writeLines(lines, file, useBytes = TRUE)
   }
   invisible(files)
 }

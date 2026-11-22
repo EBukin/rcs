@@ -37,7 +37,8 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+<li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -92,11 +93,16 @@
 <em>store</em>: a named collection of <em>datasets</em>, written mostly
 as Parquet files. This vignette works with a store in one local folder.
 It shows how to create the store, write a table, see what the store
-holds, read data back with filters, and keep earlier versions.</p>
-<p>Two other vignettes go further: <code><a href="../articles/locations.html">vignette("locations")</a></code>
+holds, open a dataset and read part of it back, and keep earlier
+versions.</p>
+<p>The way to work with a dataset is <code><a href="../reference/store_open.html">store_open()</a></code>: it opens
+the dataset lazily, without reading it, you describe the rows you want
+with dplyr verbs, and <code>collect()</code> reads them into R.</p>
+<p>Three other vignettes go further: <code><a href="../articles/locations.html">vignette("locations")</a></code>
 keeps the same store in several places, local folders or cloud buckets,
-and <code><a href="../articles/geospatial.html">vignette("geospatial")</a></code> writes <code>sf</code> objects
-and rasters.</p>
+<code><a href="../articles/geospatial.html">vignette("geospatial")</a></code> writes <code>sf</code> objects and
+rasters, and <code><a href="../articles/duckdb.html">vignette("duckdb")</a></code> queries a store with
+DuckDB.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://ebukin.github.io/rcs/">rcs</a></span><span class="op">)</span></span></code></pre></div>
 <div class="section level2">
@@ -217,7 +223,7 @@ by folder.</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   300  31.3 kB      2  2026-11-21 21:57</span></span></code></pre></div>
+<span><span class="co">#&gt;     daily  table   300  31.3 kB      2  2026-11-22 15:55</span></span></code></pre></div>
 <p><code><a href="../reference/store_datasets.html">store_datasets()</a></code> returns the same list as a tibble, one
 row per dataset.</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
@@ -226,7 +232,7 @@ row per dataset.</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 9</span></span></span>
 <span><span class="co">#&gt;   dataset  kind  title  rows bytes n_files partition version updated            </span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;list&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dttm&gt;</span>             </span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>289       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> b74a07… 2026-11-21 <span style="color: #949494;">21:57:20</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>289       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> b74a07… 2026-11-22 <span style="color: #949494;">15:55:19</span></span></span>
 <span><span class="va">datasets</span><span class="op">$</span><span class="va">title</span></span>
 <span><span class="co">#&gt; [1] "Daily sales"</span></span></code></pre></div>
 <p><code><a href="../reference/store_describe.html">store_describe()</a></code> shows everything the catalog knows
@@ -249,8 +255,8 @@ their types, and the files of the current version.</p>
 <span><span class="co">#&gt; Source      –</span></span>
 <span><span class="co">#&gt; Inputs      –</span></span>
 <span><span class="co">#&gt; History     not set (the connection's setting applies)</span></span>
-<span><span class="co">#&gt; Created     2026-11-21 21:57:20 UTC</span></span>
-<span><span class="co">#&gt; Updated     2026-11-21 21:57:20 UTC</span></span>
+<span><span class="co">#&gt; Created     2026-11-22 15:55:18 UTC</span></span>
+<span><span class="co">#&gt; Updated     2026-11-22 15:55:19 UTC</span></span>
 <span><span class="co">#&gt; Written by  R 4.6.2, rcs 0.0.0.9000</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; Locations:</span></span>
@@ -286,12 +292,142 @@ unique in the store: <code>"daily"</code> stands for
 <code>"sales/daily"</code> below.</p>
 </div>
 <div class="section level2">
-<h2 id="read-data">Read data<a class="anchor" aria-label="anchor" href="#read-data"></a>
+<h2 id="open-a-dataset">Open a dataset<a class="anchor" aria-label="anchor" href="#open-a-dataset"></a>
 </h2>
-<p><code><a href="../reference/store_read.html">store_read()</a></code> reads a dataset into R. Filters are written
-as in <code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">dplyr::filter()</a></code>, and <code>columns</code> selects
-columns as in <code><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">dplyr::select()</a></code>.</p>
+<p><code><a href="../reference/store_open.html">store_open()</a></code> opens a dataset as a lazy query. It reads
+no data: the query is built from the files the catalog names. Printing
+it shows a header and the first rows.</p>
 <div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
+<span><span class="va">q</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [300 x 15] (table)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Files:    2 of 2</span></span></span>
+<span><span class="co">#&gt;    shop_id date        year product   qty price promo grade delivered      big</span></span>
+<span><span class="co">#&gt;      <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span>       1 2023-03-12  <span style="text-decoration: underline;">2</span>023 p07         9 172.  FALSE mid   2023-03-17    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span>       1 2023-03-15  <span style="text-decoration: underline;">2</span>023 p18        13  77.8 TRUE  low   2023-03-21    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span>       1 2023-03-27  <span style="text-decoration: underline;">2</span>023 p08        18  <span style="color: #BB0000;">NA</span>   TRUE  mid   2023-04-02    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span>       1 2023-04-14  <span style="text-decoration: underline;">2</span>023 p06        39  46.7 FALSE mid   2023-04-15    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span>       1 2023-05-11  <span style="text-decoration: underline;">2</span>023 p04        <span style="color: #BB0000;">NA</span> 159.  FALSE low   2023-05-14    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span>       1 2023-06-04  <span style="text-decoration: underline;">2</span>023 p08        45 138.  TRUE  high  2023-06-11    1<span style="color: #949494;">e</span> 2</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span>       1 2023-08-18  <span style="text-decoration: underline;">2</span>023 p04         8 151.  FALSE high  2023-08-28    4<span style="color: #949494;">e</span> 2</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span>       1 2023-12-24  <span style="text-decoration: underline;">2</span>023 p09        32 189.  TRUE  high  2023-12-31    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span>       2 2023-03-21  <span style="text-decoration: underline;">2</span>023 p15        41  88.6 TRUE  low   2023-03-27    2<span style="color: #949494;">e</span> 2</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span>       2 2023-03-30  <span style="text-decoration: underline;">2</span>023 p10        18 186.  FALSE mid   2023-04-06    6<span style="color: #949494;">e</span> 2</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 5 more variables: wait &lt;drtn&gt;, note &lt;chr&gt;, tags &lt;list&gt;, ts &lt;dttm&gt;,</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;">#   ts_local &lt;dttm&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 290 more rows</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ Use `collect()` to read the rows into R.</span></span></span></code></pre></div>
+<p>The header says what the query reads:</p>
+<ul>
+<li>
+<code>Dataset:</code> the full name, the number of rows and columns,
+and the kind. The number of rows comes from the catalog; it is known as
+long as the query is the whole dataset, with columns at most selected,
+renamed or computed.</li>
+<li>
+<code>Location:</code> the location read, here the primary, a local
+folder.</li>
+<li>
+<code>Version:</code> the first characters of the version, and
+whether it is the current one.</li>
+<li>
+<code>Files:</code> how many of the dataset’s files the query
+reads.</li>
+</ul>
+<p>Printing reads the rows it shows, and no more. It shows 10 rows, or
+<code>n</code>; the option <code>rcs.print_rows</code> changes the
+default.</p>
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">q</span>, n <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [300 x 15] (table)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Files:    2 of 2</span></span></span>
+<span><span class="co">#&gt;   shop_id date        year product   qty price promo grade delivered      big</span></span>
+<span><span class="co">#&gt;     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>       1 2023-03-12  <span style="text-decoration: underline;">2</span>023 p07         9 172.  FALSE mid   2023-03-17    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span>       1 2023-03-15  <span style="text-decoration: underline;">2</span>023 p18        13  77.8 TRUE  low   2023-03-21    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span>       1 2023-03-27  <span style="text-decoration: underline;">2</span>023 p08        18  <span style="color: #BB0000;">NA</span>   TRUE  mid   2023-04-02    9<span style="color: #949494;">e</span>15</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 5 more variables: wait &lt;drtn&gt;, note &lt;chr&gt;, tags &lt;list&gt;, ts &lt;dttm&gt;,</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;">#   ts_local &lt;dttm&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 297 more rows</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ Use `collect()` to read the rows into R.</span></span></span></code></pre></div>
+<p>The query is changed with the dplyr verbs <code><a href="https://rdrr.io/r/stats/filter.html" class="external-link">filter()</a></code>,
+<code>select()</code>, <code>mutate()</code>, <code>rename()</code>,
+<code>arrange()</code>, <code>distinct()</code> and <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">head()</a></code>.
+Each verb returns a new query; still nothing is read.</p>
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">q24</span> <span class="op">&lt;-</span> <span class="va">q</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">45</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">select</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">product</span>, <span class="va">qty</span><span class="op">)</span></span>
+<span><span class="va">q24</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [?? x 4] (table)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Files:    1 of 2 (pruned)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Filter:   ((year == 2024) and (qty &gt; 45))</span></span></span>
+<span><span class="co">#&gt;   shop_id date       product   qty</span></span>
+<span><span class="co">#&gt;     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>       1 2024-12-24 p01        46</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span>       3 2024-06-20 p01        46</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span>       7 2024-08-19 p13        50</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span>       7 2024-11-27 p12        48</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">5</span>      12 2024-08-12 p16        46</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">6</span>      12 2024-10-19 p09        49</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">7</span>      19 2024-09-04 p09        49</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ Use `collect()` to read the rows into R.</span></span></span></code></pre></div>
+<p>After a filter the number of rows is not known without reading, so
+the header shows <code>??</code>. <code>Files: 1 of 2 (pruned)</code>
+says that one file is enough: a filter on the partition columns alone is
+first applied to the catalog, and only the files of the matching
+partitions are opened. <code>Filter:</code> shows the row filter that is
+passed to the Parquet reader.</p>
+<p><code>collect()</code> runs the query and returns a tibble.</p>
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">q24</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html" class="external-link">mutate</a></span><span class="op">(</span>big_day <span class="op">=</span> <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">48</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/arrange.html" class="external-link">arrange</a></span><span class="op">(</span><span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/desc.html" class="external-link">desc</a></span><span class="op">(</span><span class="va">qty</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 7 × 5</span></span></span>
+<span><span class="co">#&gt;   shop_id date       product   qty big_day</span></span>
+<span><span class="co">#&gt;     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>       7 2024-08-19 p13        50 TRUE   </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span>      12 2024-10-19 p09        49 TRUE   </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span>      19 2024-09-04 p09        49 TRUE   </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span>       7 2024-11-27 p12        48 FALSE  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">5</span>       1 2024-12-24 p01        46 FALSE  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">6</span>       3 2024-06-20 p01        46 FALSE  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">7</span>      12 2024-08-12 p16        46 FALSE</span></span></code></pre></div>
+<p>Filters and the column selection are passed to the Parquet reader, so
+only the needed files, blocks of rows and columns are read. The work
+counters show it: with <code>options(rcs.trace = TRUE)</code>,
+<code><a href="../reference/rcs_trace.html">rcs_trace()</a></code> reports the work done by the last call.</p>
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rcs.trace <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="va">q</span> <span class="op">|&gt;</span> <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2023</span><span class="op">)</span> <span class="op">|&gt;</span> <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/rcs_trace.html">rcs_trace</a></span><span class="op">(</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"counter"</span>, <span class="st">"detail"</span>, <span class="st">"n"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 4 × 3</span></span></span>
+<span><span class="co">#&gt;   counter          detail                                                  n</span></span>
+<span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                               <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> backend_call     be_arrow_fs                                             1</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span> row_groups_total <span style="color: #BB0000;">NA</span>                                                      1</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span> rows_returned    <span style="color: #BB0000;">NA</span>                                                    156</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rcs.trace <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
+<p>One of the two files was opened.</p>
+</div>
+<div class="section level2">
+<h2 id="read-in-one-call">Read in one call<a class="anchor" aria-label="anchor" href="#read-in-one-call"></a>
+</h2>
+<p><code><a href="../reference/store_read.html">store_read()</a></code> is the shortcut for
+<code><a href="../reference/store_open.html">store_open()</a></code>, <code><a href="https://rdrr.io/r/stats/filter.html" class="external-link">filter()</a></code>, <code>select()</code>
+and <code>collect()</code> in one call. Filters are written as in
+<code><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">dplyr::filter()</a></code>, and <code>columns</code> selects columns
+as in <code><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">dplyr::select()</a></code>.</p>
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span>, <span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="va">product</span> <span class="op">==</span> <span class="st">"p07"</span>,</span>
 <span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">qty</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
@@ -306,30 +442,11 @@ columns as in <code><a href="https://dplyr.tidyverse.org/reference/select.html" 
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">6</span>      10 2024-02-24    40</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">7</span>      12 2024-05-24    43</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">8</span>      19 2024-08-26    <span style="color: #BB0000;">NA</span></span></span></code></pre></div>
-<p>Filters and the column selection are passed to the Parquet reader, so
-only the needed files, blocks of rows and columns are read. A filter on
-the partition columns alone is first applied to the catalog, and only
-the files of the matching partitions are opened. The work counters show
-it: with <code>options(rcs.trace = TRUE)</code>,
-<code><a href="../reference/rcs_trace.html">rcs_trace()</a></code> reports the work done by the last call.</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rcs.trace <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span>, <span class="va">year</span> <span class="op">==</span> <span class="fl">2023</span><span class="op">)</span></span>
-<span><span class="fu"><a href="../reference/rcs_trace.html">rcs_trace</a></span><span class="op">(</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"counter"</span>, <span class="st">"detail"</span>, <span class="st">"n"</span><span class="op">)</span><span class="op">]</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 4 × 3</span></span></span>
-<span><span class="co">#&gt;   counter          detail                                                  n</span></span>
-<span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                               <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> backend_call     be_arrow_fs                                             3</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span> row_groups_total <span style="color: #BB0000;">NA</span>                                                      1</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span> rows_returned    <span style="color: #BB0000;">NA</span>                                                    156</span></span>
-<span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rcs.trace <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
-<p>One of the two files was opened.</p>
 <p>The types of the columns come back as they were written: factor
 levels, 64-bit integers, time differences with their units, list columns
 and time zones included. Rows come back sorted by the key within each
 partition, so both sides are sorted before they are compared.</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">back</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span></span>
 <span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/arrange.html" class="external-link">arrange</a></span><span class="op">(</span><span class="va">sales</span>, <span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">product</span><span class="op">)</span>,</span>
@@ -342,7 +459,7 @@ of one file. <code><a href="../reference/store_sample.html">store_sample()</a></
 chosen blocks of rows. It is a quick way to look at the data, not a
 simple random sample: rows of one block are alike, because rows are
 stored sorted.</p>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_glimpse.html">store_glimpse</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; Dataset:   sales/daily (table)</span></span>
 <span><span class="co">#&gt; Rows:      300</span></span>
@@ -381,39 +498,6 @@ stored sorted.</p>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">5</span>      18 2024-07-09    42</span></span></code></pre></div>
 </div>
 <div class="section level2">
-<h2 id="lazy-queries">Lazy queries<a class="anchor" aria-label="anchor" href="#lazy-queries"></a>
-</h2>
-<p><code><a href="../reference/store_open.html">store_open()</a></code> returns a lazy query. It is changed with
-the dplyr verbs <code><a href="https://rdrr.io/r/stats/filter.html" class="external-link">filter()</a></code>, <code>select()</code>,
-<code>mutate()</code>, <code>rename()</code>, <code>arrange()</code>,
-<code>distinct()</code> and <code><a href="https://rdrr.io/r/utils/head.html" class="external-link">head()</a></code>, and nothing is read
-until <code>collect()</code>.</p>
-<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
-<span><span class="va">q</span></span>
-<span><span class="co">#&gt; &lt;rcs_query&gt; sales/daily (table, current)</span></span>
-<span><span class="co">#&gt; Location: primary</span></span>
-<span><span class="co">#&gt; Files:    2 of 2</span></span>
-<span><span class="co">#&gt; Columns:  shop_id, date, year, product, qty, price, promo, grade, delivered, big, wait, note, tags, ts, ts_local</span></span>
-<span></span>
-<span><span class="va">q</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">45</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html" class="external-link">mutate</a></span><span class="op">(</span>revenue <span class="op">=</span> <span class="va">qty</span> <span class="op">*</span> <span class="va">price</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">select</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">qty</span>, <span class="va">revenue</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/arrange.html" class="external-link">arrange</a></span><span class="op">(</span><span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/desc.html" class="external-link">desc</a></span><span class="op">(</span><span class="va">qty</span><span class="op">)</span><span class="op">)</span> <span class="op">|&gt;</span></span>
-<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 7 × 4</span></span></span>
-<span><span class="co">#&gt;   shop_id date         qty revenue</span></span>
-<span><span class="co">#&gt;     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>       7 2024-08-19    50   <span style="text-decoration: underline;">8</span>860.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span>      12 2024-10-19    49    654.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span>      19 2024-09-04    49   <span style="text-decoration: underline;">5</span>888.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span>       7 2024-11-27    48   <span style="text-decoration: underline;">9</span>347.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">5</span>       1 2024-12-24    46   <span style="text-decoration: underline;">3</span>428.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">6</span>       3 2024-06-20    46    669.</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">7</span>      12 2024-08-12    46   <span style="text-decoration: underline;">4</span>654.</span></span></code></pre></div>
-</div>
-<div class="section level2">
 <h2 id="update-some-partitions">Update some partitions<a class="anchor" aria-label="anchor" href="#update-some-partitions"></a>
 </h2>
 <p>With <code>mode = "update"</code>, only the partitions whose values
@@ -421,7 +505,7 @@ occur in the new data are replaced; the other partitions stay as they
 are. Here the rows of 2024 are written again with corrected quantities.
 The key, the partition columns and the column types come from the stored
 dataset and must match.</p>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fix</span> <span class="op">&lt;-</span> <span class="va">sales</span><span class="op">[</span><span class="va">sales</span><span class="op">$</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="op">]</span></span>
 <span><span class="va">fix</span><span class="op">$</span><span class="va">qty</span> <span class="op">&lt;-</span> <span class="va">fix</span><span class="op">$</span><span class="va">qty</span> <span class="op">+</span> <span class="fl">1L</span></span>
 <span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">fix</span>, <span class="st">"sales/daily"</span>,</span>
@@ -432,7 +516,12 @@ dataset and must match.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> year = 2024: 144 rows -&gt; 144 rows</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.4 kB  0.1s</span></span>
+<span><span class="co">#&gt; Warning: Cannot delete 2 replaced files in <span style="color: #0000BB;">&lt;tempdir&gt;/my-store</span>.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> They are no longer named by the catalogs; `store_prune()` removes them later.</span></span>
+<span><span class="co">#&gt; Caused by error in `be_delete()`:</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> Cannot delete 1 file in <span style="color: #0000BB;">&lt;tempdir&gt;/my-store</span>:</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/my-store/sales/daily/year=2024/part-b74a078c7191e5d3.parquet</span>.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.4 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The message lists every replaced partition with its old and new
 number of rows. Check it: a row of a replaced partition that is missing
@@ -448,7 +537,7 @@ them. The setting can also be given for one connection
 (<code>store_connect(history = )</code>) or one dataset
 (<code>store_write(history = )</code>); the dataset’s setting wins over
 the connection’s, and the connection’s over the store’s.</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">path_h</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span>, <span class="st">"store-with-history"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_create.html">store_create</a></span><span class="op">(</span><span class="va">path_h</span>, history <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> Created an empty store in</span></span>
@@ -472,11 +561,11 @@ the connection’s, and the connection’s over the store’s.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> year = 2024: 144 rows -&gt; 144 rows</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  1/2 files sent  15.4 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  1/2 files sent  15.4 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p><code><a href="../reference/store_history.html">store_history()</a></code> lists the versions, the current one
 first.</p>
-<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">versions</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_history.html">store_history</a></span><span class="op">(</span><span class="va">sth</span>, <span class="st">"daily"</span><span class="op">)</span></span>
 <span><span class="va">versions</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"version"</span>, <span class="st">"current"</span>, <span class="st">"n_files"</span>, <span class="st">"rows"</span>, <span class="st">"complete"</span><span class="op">)</span><span class="op">]</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 2 × 5</span></span></span>
@@ -485,7 +574,7 @@ first.</p>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> e0ce507f7ddb7d09 TRUE          2   300 TRUE    </span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> b74a078c7191e5d3 FALSE         2   300 TRUE</span></span></code></pre></div>
 <p>An earlier version is read by its code:</p>
-<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">first</span> <span class="op">&lt;-</span> <span class="va">versions</span><span class="op">$</span><span class="va">version</span><span class="op">[</span><span class="op">!</span><span class="va">versions</span><span class="op">$</span><span class="va">current</span><span class="op">]</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span></span>
 <span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">sth</span>, <span class="st">"daily"</span>, <span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">qty</span><span class="op">)</span>,</span>
 <span>  version <span class="op">=</span> <span class="va">first</span></span>
@@ -501,7 +590,7 @@ first.</p>
 <code>keep</code> is the number of earlier versions to keep;
 <code>dry_run = TRUE</code> only reports. Files that the current version
 still uses are never deleted.</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_prune.html">store_prune</a></span><span class="op">(</span><span class="va">sth</span>, keep <span class="op">=</span> <span class="fl">0</span>, dry_run <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> Would remove 1 history version and 2 files (18.3 kB) in 1</span></span>
 <span><span class="co">#&gt; location.</span></span>
@@ -516,7 +605,7 @@ stored dataset: every file exists with the checksum and the number of
 rows its catalog records, and the catalog agrees with itself. Given the
 data the dataset was written from, it compares a sample of stored rows
 with them.</p>
-<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_check.html">store_check</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> 2 files checked in 1 location: no problem found.</span></span>
 <span><span class="fu"><a href="../reference/store_check.html">store_check</a></span><span class="op">(</span><span class="va">sth</span>, <span class="st">"daily"</span>, x <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span><span class="va">sales</span><span class="op">[</span><span class="va">sales</span><span class="op">$</span><span class="va">year</span> <span class="op">!=</span> <span class="fl">2024</span>, <span class="op">]</span>, <span class="va">fix</span><span class="op">)</span><span class="op">)</span></span>

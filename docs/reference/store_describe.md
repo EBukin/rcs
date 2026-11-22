@@ -91,8 +91,8 @@ store_describe(st, "sales/daily")
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-21 16:55:14 EST
-#> Updated     2026-11-21 16:55:14 EST
+#> Created     2026-11-22 10:52:01 EST
+#> Updated     2026-11-22 10:52:01 EST
 #> Written by  R 4.6.2, rcs 0.0.0.9000
 #> 
 #> Locations:

@@ -10,7 +10,7 @@ the call aborts.
 ## Usage
 
 ``` r
-store_create(location, history = FALSE)
+store_create(location, history = FALSE, auth = NULL)
 ```
 
 ## Arguments
@@ -25,6 +25,14 @@ store_create(location, history = FALSE)
   The store's default for keeping earlier versions of datasets, `FALSE`
   unless switched on. A connection (`store_connect(history = )`) and a
   dataset (`store_write(history = )`) can override it.
+
+- auth:
+
+  Credentials when `location` is on Google Cloud Storage: `NULL` uses
+  [`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md),
+  the default lookup; else an object made by
+  [`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md)
+  or the path of a key file.
 
 ## Value
 
@@ -48,7 +56,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-create  2/2
-#>   files sent  23.7 kB  0.1s
+#>   files sent  23.7 kB  0.3s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
@@ -58,6 +66,6 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.7 kB      2  2026-11-21 16:55
+#>     daily  table   100  23.7 kB      2  2026-11-22 10:51
 unlink(location, recursive = TRUE)
 ```

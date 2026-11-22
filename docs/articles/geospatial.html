@@ -37,7 +37,8 @@
 <li class="active nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+<li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -156,7 +157,8 @@ package adds three columns when it writes an <code>sf</code> object:</p>
 <code>h3</code>: an H3 cell. H3 divides the globe into hexagonal
 cells at 16 resolutions; at resolution 5, the default, a cell covers
 about 250 km². <code>h3</code> is the cell that holds the largest part
-of the geometry, stored as a 64-bit integer.</li>
+of the geometry, stored as a 64-bit integer and read back as an H3 cell
+vector (class <code>rcs_h3</code>, see below).</li>
 <li>
 <code>bbox</code>: the bounding box of the geometry, four numbers
 (<code>xmin</code>, <code>ymin</code>, <code>xmax</code>,
@@ -184,11 +186,11 @@ deleted with its dataset, and is hidden unless asked for:</p>
 <span><span class="co">#&gt; Datasets: 2</span></span>
 <span><span class="co">#&gt;   name            kind        rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   shapes/</span></span>
-<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-21 21:56</span></span>
-<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-21 21:56</span></span></code></pre></div>
+<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-22 15:54</span></span>
+<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-22 15:54</span></span></code></pre></div>
 <p><code>h3</code> and <code>bbox</code> come back with the data.
-<code><a href="../reference/store_h3_hex.html">store_h3_hex()</a></code> turns the cells into the 15-character text
-form that other H3 tools use:</p>
+<code><a href="../reference/store_h3_hex.html">store_h3_hex()</a></code> turns the cell columns of a data frame into
+the 15-character text form that other H3 tools use:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span>, geometry <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_h3_hex.html">store_h3_hex</a></span><span class="op">(</span><span class="va">x</span><span class="op">)</span></span>
@@ -208,12 +210,75 @@ form that other H3 tools use:</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># ℹ 490 more rows</span></span></span></code></pre></div>
 </div>
 <div class="section level2">
+<h2 id="h3-cells-in-r">H3 cells in R<a class="anchor" aria-label="anchor" href="#h3-cells-in-r"></a>
+</h2>
+<p>A cell column read from a store has class <code>rcs_h3</code>: a
+<code><a href="https://bit64.r-lib.org/reference/bit64-package.html" class="external-link">bit64::integer64</a></code> vector holding the same 64 bits that
+Parquet stores, filters and sorts, printed as hex in the console, in
+tibbles and in <code>sf</code> objects.</p>
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cells</span> <span class="op">&lt;-</span> <span class="va">x</span><span class="op">$</span><span class="va">h3</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">3</span><span class="op">]</span></span>
+<span><span class="va">cells</span></span>
+<span><span class="co">#&gt; &lt;rcs_h3[3]&gt;</span></span>
+<span><span class="co">#&gt; [1] 8556480ffffffff 8556483bfffffff 8556484bfffffff</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "rcs_h3"    "integer64"</span></span></code></pre></div>
+<p>Comparison, sorting, joins and <code><a href="https://dplyr.tidyverse.org/reference/bind_rows.html" class="external-link">dplyr::bind_rows()</a></code> work
+as for <code>integer64</code>, and joining an <code>rcs_h3</code> column
+with an <code>integer64</code> column gives <code>rcs_h3</code>.
+Subsetting, <code><a href="https://rdrr.io/r/base/c.html" class="external-link">c()</a></code>, <code><a href="https://rdrr.io/r/base/rep.html" class="external-link">rep()</a></code>, <code><a href="https://rdrr.io/r/base/unique.html" class="external-link">unique()</a></code>,
+<code><a href="https://rdrr.io/r/base/sort.html" class="external-link">sort()</a></code> and <code><a href="https://rdrr.io/r/base/rev.html" class="external-link">rev()</a></code> keep the class.
+<code><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character()</a></code> gives decimal strings, exactly as for
+<code>integer64</code> (the package relies on that for partition values
+and keys); <code><a href="../reference/rcs_h3_hex.html">rcs_h3_hex()</a></code> gives the hex strings of any cell
+vector: <code>rcs_h3</code>, <code>integer64</code>, hex text in any
+case, h3o <code>H3</code> cells, or doubles.</p>
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/character.html" class="external-link">as.character</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "600496630537388031" "600496642348548095" "600496646643515391"</span></span>
+<span><span class="fu"><a href="../reference/rcs_h3_hex.html">rcs_h3_hex</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "8556480ffffffff" "8556483bfffffff" "8556484bfffffff"</span></span>
+<span><span class="fu"><a href="../reference/rcs_h3_hex.html">rcs_h3_hex</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/chartr.html" class="external-link">toupper</a></span><span class="op">(</span><span class="fu"><a href="../reference/rcs_h3_hex.html">rcs_h3_hex</a></span><span class="op">(</span><span class="va">cells</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "8556480ffffffff" "8556483bfffffff" "8556484bfffffff"</span></span></code></pre></div>
+<p>A double cannot hold a cell exactly (cells are above 2^53), so a
+double gives a warning, and a cell whose last bits were lost no longer
+validates:</p>
+<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/rcs_h3_hex.html">rcs_h3_hex</a></span><span class="op">(</span><span class="fl">600496630537388031</span><span class="op">)</span></span>
+<span><span class="co">#&gt; Warning: `x` is a double: cells above 2^53 may have lost their last bits.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Read cells as <span style="color: #0000BB;">&lt;integer64&gt;</span>, for DuckDB with `DBI::dbConnect(duckdb::duckdb(), bigint = "integer64")`.</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;"> in `rcs_h3_hex()`:</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> `x` holds 1 value that is not a valid H3 cell.</span></span>
+<span><span class="co">#&gt; <span style="color: #BB0000;">✖</span> First: <span style="color: #0000BB;">"600496630537388032"</span>.</span></span></code></pre></div>
+<p>Inside a DuckDB connection prepared by the package, a SQL macro of
+the same name gives the same strings, so
+<code>dplyr::mutate(cell = rcs_h3_hex(h3))</code> runs lazily in DuckDB
+(see <code><a href="../articles/duckdb.html">vignette("duckdb")</a></code>). The Arrow engine cannot translate
+it (<code>Expression not supported in Arrow</code>): there, call
+<code><a href="../reference/rcs_h3_hex.html">rcs_h3_hex()</a></code> after <code>collect()</code>.</p>
+<p>Data that reach R by another route
+(<code><a href="https://arrow.apache.org/docs/r/reference/read_parquet.html" class="external-link">arrow::read_parquet()</a></code> on a stored file, a DuckDB query of
+your own) carry only the storage types: plain 64-bit integers instead of
+cells, character instead of factor, and so on.
+<code><a href="../reference/store_restore_types.html">store_restore_types()</a></code> gives back the R types recorded in
+the catalog, cells included, without reading any file:</p>
+<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">file</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.files.html" class="external-link">list.files</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span>, <span class="st">"geo-store"</span>, <span class="st">"shapes"</span>, <span class="st">"polygons"</span><span class="op">)</span>,</span>
+<span>  pattern <span class="op">=</span> <span class="st">"\\.parquet$"</span>, full.names <span class="op">=</span> <span class="cn">TRUE</span></span>
+<span><span class="op">)</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span></span>
+<span><span class="va">raw_cols</span> <span class="op">&lt;-</span> <span class="fu">arrow</span><span class="fu">::</span><span class="fu"><a href="https://arrow.apache.org/docs/r/reference/read_parquet.html" class="external-link">read_parquet</a></span><span class="op">(</span><span class="va">file</span>, col_select <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"id"</span>, <span class="st">"h3"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="va">raw_cols</span><span class="op">$</span><span class="va">h3</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "integer64"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/class.html" class="external-link">class</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_restore_types.html">store_restore_types</a></span><span class="op">(</span><span class="va">raw_cols</span>, <span class="va">st</span>, <span class="st">"shapes/polygons"</span><span class="op">)</span><span class="op">$</span><span class="va">h3</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "rcs_h3"    "integer64"</span></span></code></pre></div>
+</div>
+<div class="section level2">
 <h2 id="read-the-rows-in-an-area">Read the rows in an area<a class="anchor" aria-label="anchor" href="#read-the-rows-in-an-area"></a>
 </h2>
 <p><code>intersects</code> keeps the rows whose geometry intersects a
 query shape: an <code>sf</code>, <code>sfc</code> or <code>bbox</code>
 object with a CRS.</p>
-<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">query</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sfc.html" class="external-link">st_sfc</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st.html" class="external-link">st_polygon</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span></span>
 <span>    <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="op">-</span><span class="fl">28.5</span>, <span class="fl">6.5</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="op">-</span><span class="fl">26</span>, <span class="fl">6.5</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="op">-</span><span class="fl">27.2</span>, <span class="fl">8.5</span><span class="op">)</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="op">-</span><span class="fl">28.5</span>, <span class="fl">6.5</span><span class="op">)</span></span>
@@ -226,19 +291,20 @@ object with a CRS.</p>
 <p>The read works in steps. It keeps only the files whose extent
 overlaps the query’s box, reads the candidate rows (those whose
 <code>bbox</code> overlaps the query’s box), and finally tests the
-candidates exactly with <code><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">sf::st_intersects()</a></code>. When the
+candidates exactly with <code><a href="https://r-spatial.github.io/sf/reference/geos_binary_pred.html" class="external-link">sf::st_intersects()</a></code>, on the sphere
+or in the plane as described in “Geocoding engines” below. When the
 query’s box is much larger than the query (a thin diagonal strip, a
 line), or the query crosses the antimeridian, the H3 cells help: the
 read then also finds the cells the query touches, keeps only files whose
 range of cells matches, and keeps only rows whose <code>h3</code>, or a
 cell in the index table, is one of them. The result is the same as
 filtering everything in memory:</p>
-<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/sets.html" class="external-link">setequal</a></span><span class="op">(</span><span class="va">inside</span><span class="op">$</span><span class="va">id</span>, <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_join.html" class="external-link">st_filter</a></span><span class="op">(</span><span class="va">polys</span>, <span class="va">query</span><span class="op">)</span><span class="op">$</span><span class="va">id</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
 <p>The query may be in another CRS than the data; it is transformed
 first.</p>
-<div class="sourceCode" id="cb8"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">query_utm</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_transform.html" class="external-link">st_transform</a></span><span class="op">(</span><span class="va">query</span>, <span class="fl">32626</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span>, intersects <span class="op">=</span> <span class="va">query_utm</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 89</span></span></code></pre></div>
@@ -249,7 +315,7 @@ first.</p>
 or with <code>geometry = FALSE</code>, the read returns the candidate
 rows: every intersecting row and some rows that only come close. A
 message says so.</p>
-<div class="sourceCode" id="cb9"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">candidates</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span>,</span>
 <span>  intersects <span class="op">=</span> <span class="va">query</span>, geometry <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span>
@@ -267,7 +333,7 @@ when an approximate answer is enough and the geometries are large.</p>
 text, as <code><a href="https://bit64.r-lib.org/reference/bit64-package.html" class="external-link">bit64::integer64</a></code> or as an h3o <code>H3</code>
 vector. Each stands for its cell polygon. A plain number is refused,
 because a double cannot hold an H3 cell exactly.</p>
-<div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">cell</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_h3_hex.html">store_h3_hex</a></span><span class="op">(</span><span class="va">x</span><span class="op">$</span><span class="va">h3</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span><span class="op">)</span></span>
 <span><span class="va">cell</span></span>
 <span><span class="co">#&gt; [1] "8556480ffffffff"</span></span>
@@ -283,7 +349,7 @@ because a double cannot hold an H3 cell exactly.</p>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>   288 d     ((-26.05978 8.578918, -26.05433 8.578918, -26.05433 8.584336, -26…</span></span></code></pre></div>
 <p>A cell finer than the stored resolution works too; a message says
 that the stored resolution is coarser.</p>
-<div class="sourceCode" id="cb11"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fine</span> <span class="op">&lt;-</span> <span class="fu">h3o</span><span class="fu">::</span><span class="fu"><a href="https://extendr.github.io/h3o/reference/H3.html" class="external-link">h3_from_xy</a></span><span class="op">(</span><span class="fl">7.5</span>, <span class="op">-</span><span class="fl">27.5</span>, <span class="fl">8L</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span>, intersects <span class="op">=</span> <span class="va">fine</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> The query holds cells finer than the stored resolution 5; the</span></span>
@@ -296,7 +362,7 @@ that the stored resolution is coarser.</p>
 <p><code><a href="../reference/store_intersects.html">store_intersects()</a></code> adds the same filter to a lazy query
 from <code><a href="../reference/store_open.html">store_open()</a></code>, where it combines with the dplyr
 verbs:</p>
-<div class="sourceCode" id="cb12"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu"><a href="../reference/store_intersects.html">store_intersects</a></span><span class="op">(</span><span class="va">query</span><span class="op">)</span> <span class="op">|&gt;</span></span>
 <span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="va">cat</span> <span class="op">==</span> <span class="st">"a"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
@@ -336,7 +402,7 @@ opens only the files of the cells near the query. For large datasets
 this makes small spatial reads several times faster, most of all from a
 cloud bucket (see the article “Benchmark: which steps of the spatial
 filter pay off”).</p>
-<div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">polys</span>, <span class="st">"shapes/polygons_by_cell"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Polygons by cell"</span>,</span>
 <span>  description <span class="op">=</span> <span class="st">"Simulated polygons in open ocean, one file per H3 cell."</span>,</span>
@@ -345,10 +411,10 @@ filter pay off”).</p>
 <span>  max_files <span class="op">=</span> <span class="fl">10</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons_by_cell"</span>: 500 rows in 7 files (partition h3_p2), and its index table in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  156.8 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  157.2 kB  0.3s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 8 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The work counters show which files a read opened:</p>
-<div class="sourceCode" id="cb14"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">small</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">29.5</span>, ymin <span class="op">=</span> <span class="fl">6.2</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">29.2</span>, ymax <span class="op">=</span> <span class="fl">6.5</span><span class="op">)</span>,</span>
 <span>  crs <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="fl">4326</span><span class="op">)</span></span>
@@ -361,7 +427,7 @@ filter pay off”).</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 2</span></span></span>
 <span><span class="co">#&gt;   detail                                                                       n</span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                                                    <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> shapes/polygons_by_cell/h3_p2=587654880185810943/part-c6ab2c8df9a86bde.…     1</span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> shapes/polygons_by_cell/h3_p2=587654880185810943/part-b331e5c7b2facfa8.…     1</span></span></code></pre></div>
 <p>One data file of seven was opened. The query is a compact box, so the
 box test alone selects the rows, and the index table is not read.</p>
 </div>
@@ -374,7 +440,7 @@ writing skips the geocoding. A spatial read then filters by bounding
 boxes alone: as fast for compact queries, slower for queries much
 smaller than their box, and always complete.
 <code>partition = "h3"</code> cannot be combined with it.</p>
-<div class="sourceCode" id="cb15"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">polys</span>, <span class="st">"shapes/polygons_boxes"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Polygons, boxes only"</span>,</span>
 <span>  description <span class="op">=</span> <span class="st">"Simulated polygons in open ocean, without H3 cells."</span>,</span>
@@ -382,10 +448,214 @@ smaller than their box, and always complete.
 <span>  geocode <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons_boxes"</span>: 500 rows in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  61.1 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  61.1 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons_boxes"</span>, intersects <span class="op">=</span> <span class="va">query</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 89</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="prepare-data-in-memory">Prepare data in memory<a class="anchor" aria-label="anchor" href="#prepare-data-in-memory"></a>
+</h2>
+<p>Three verbs do in memory, without a store, what a write adds and a
+read returns:</p>
+<ul>
+<li>
+<code><a href="../reference/rcs_geo_add.html">rcs_geo_add()</a></code> adds <code>h3</code>, <code>bbox</code>
+and, with <code>parents</code>, one column <code>h3_p&lt;r&gt;</code>
+per coarser resolution <code>r</code> (the parent cell of
+<code>h3</code>, handy for grouping). The values equal those a write
+computes with the same <code>h3_res</code> and
+<code>geocode_engine</code>.</li>
+<li>
+<code><a href="../reference/rcs_geo_add.html">rcs_geo_index()</a></code> gives the rows of the index table: one
+line per row and cell it touches, with the share of the row’s area (or
+length) in that cell, keyed by a column of yours instead of
+<code>.rcs_id</code>.</li>
+<li>
+<code><a href="../reference/rcs_geo_add.html">rcs_geo_strip()</a></code> removes the package’s columns
+(<code>.rcs_id</code>, <code>h3</code>, <code>h3_main</code>,
+<code>bbox</code>, every <code>h3_p&lt;r&gt;</code>), so that data read
+with <code>collect()</code> go back to the form they were written
+from.</li>
+</ul>
+<p>They keep the order of rows and columns; new columns go just before
+the geometry column.</p>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">prepared</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/rcs_geo_add.html">rcs_geo_add</a></span><span class="op">(</span><span class="va">polys</span>, h3_res <span class="op">=</span> <span class="fl">5</span>, parents <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span>
+<span><span class="va">prepared</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">3</span>, <span class="op">]</span></span>
+<span><span class="co">#&gt; Simple feature collection with 3 features and 6 fields</span></span>
+<span><span class="co">#&gt; Geometry type: POLYGON</span></span>
+<span><span class="co">#&gt; Dimension:     XY</span></span>
+<span><span class="co">#&gt; Bounding box:  xmin: -29.8 ymin: 6.1 xmax: -25.18752 ymax: 8.615313</span></span>
+<span><span class="co">#&gt; Geodetic CRS:  WGS 84</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 3 × 7</span></span></span>
+<span><span class="co">#&gt;      id   area cat   h3              h3_p3           bbox$xmin $ymin $xmax $ymax</span></span>
+<span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>                <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span>     1 <span style="text-decoration: underline;">46</span>041. d     857c4bd3fffffff 837c4bfffffffff     -<span style="color: #BB0000;">29.8</span>  6.1  -<span style="color: #BB0000;">27.3</span>  7.6 </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span>     2  <span style="text-decoration: underline;">4</span>487. a     8556494bfffffff 835649fffffffff     -<span style="color: #BB0000;">25.9</span>  7.88 -<span style="color: #BB0000;">25.2</span>  8.62</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span>     3  <span style="text-decoration: underline;">6</span>755. d     857c5ab3fffffff 837c5afffffffff     -<span style="color: #BB0000;">26.6</span>  6.2  -<span style="color: #BB0000;">25.8</span>  7   </span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 1 more variable: geometry &lt;POLYGON [°]&gt;</span></span></span>
+<span><span class="fu"><a href="../reference/rcs_geo_add.html">rcs_geo_index</a></span><span class="op">(</span><span class="va">polys</span>, <span class="st">"id"</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 533 × 4</span></span></span>
+<span><span class="co">#&gt;       id h3              h3_main             share</span></span>
+<span><span class="co">#&gt;    <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;h3&gt;</span>                <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 1</span>     1 85565907fffffff 857c4bd3fffffff 0.000<span style="text-decoration: underline;">372</span> </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 2</span>     1 8556590bfffffff 857c4bd3fffffff 0.000<span style="text-decoration: underline;">019</span>9</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 3</span>     1 8556590ffffffff 857c4bd3fffffff 0.003<span style="text-decoration: underline;">16</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 4</span>     1 85565923fffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">64</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 5</span>     1 85565927fffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">63</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 6</span>     1 8556592bfffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">65</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 7</span>     1 8556592ffffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">65</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 8</span>     1 85565933fffffff 857c4bd3fffffff 0.003<span style="text-decoration: underline;">75</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;"> 9</span>     1 85565937fffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">62</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">10</span>     1 8556593bfffffff 857c4bd3fffffff 0.005<span style="text-decoration: underline;">64</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># ℹ 523 more rows</span></span></span></code></pre></div>
+<p><code><a href="../reference/store_write.html">store_write()</a></code> accepts prepared data. It drops
+<code>.rcs_id</code>, computes <code>h3</code> and <code>bbox</code>
+itself, and compares them with the columns supplied: equal values are
+accepted silently, so a raw and a prepared write of the same data give
+the same version. The resolution is taken from the supplied cells when
+<code>h3_res</code> is not given. The <code>h3_p&lt;r&gt;</code> columns
+are stored as user columns, as cells; with
+<code>partition = "h3"</code>, a supplied column equal to the partition
+column the write chooses serves as that column.</p>
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">prepared</span>, <span class="st">"shapes/prepared"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Prepared polygons"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"Simulated polygons in open ocean, prepared in memory."</span>,</span>
+<span>  key <span class="op">=</span> <span class="st">"id"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/prepared"</span>: 500 rows in 1 file, and its index table in 1 file.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  2/2 files sent  73.6 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
+<p>Supplied values that differ (cells computed by another engine or
+resolution, or edited by hand) stop the write, which names the rows and
+the engine it used:</p>
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">tampered</span> <span class="op">&lt;-</span> <span class="va">prepared</span></span>
+<span><span class="va">tampered</span><span class="op">$</span><span class="va">h3</span><span class="op">[</span><span class="fl">3</span><span class="op">]</span> <span class="op">&lt;-</span> <span class="va">tampered</span><span class="op">$</span><span class="va">h3</span><span class="op">[</span><span class="fl">4</span><span class="op">]</span></span>
+<span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">tampered</span>, <span class="st">"shapes/tampered"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Tampered polygons"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"Simulated polygons with one cell changed."</span>,</span>
+<span>  key <span class="op">=</span> <span class="st">"id"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;"> in `store_write()`:</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> 1 row of `x` has <span style="color: #00BB00;">h3</span> values that differ from those the write computes.</span></span>
+<span><span class="co">#&gt; <span style="color: #BB0000;">✖</span> First: id = 3.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> The write geocodes with `geocode_engine = "auto"`.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Prepare `x` with `rcs_geo_add()` and the same `geocode_engine`, or call `rcs_geo_strip()` first.</span></span></code></pre></div>
+<p>The round trip gives the raw data back: the same attributes, the same
+geometries (identical WKB) and the same CRS, once both are ordered by
+the key.</p>
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">back</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"shapes/prepared"</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu"><a href="../reference/rcs_geo_add.html">rcs_geo_strip</a></span><span class="op">(</span><span class="op">)</span></span>
+<span><span class="va">back</span> <span class="op">&lt;-</span> <span class="va">back</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/order.html" class="external-link">order</a></span><span class="op">(</span><span class="va">back</span><span class="op">$</span><span class="va">id</span><span class="op">)</span>, <span class="op">]</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">back</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "id"       "area"     "cat"      "geometry"</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/all.equal.html" class="external-link">all.equal</a></span><span class="op">(</span></span>
+<span>  <span class="fu">tibble</span><span class="fu">::</span><span class="fu"><a href="https://tibble.tidyverse.org/reference/as_tibble.html" class="external-link">as_tibble</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">back</span><span class="op">)</span><span class="op">)</span>,</span>
+<span>  <span class="fu">tibble</span><span class="fu">::</span><span class="fu"><a href="https://tibble.tidyverse.org/reference/as_tibble.html" class="external-link">as_tibble</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_drop_geometry</a></span><span class="op">(</span><span class="va">polys</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/identical.html" class="external-link">identical</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_binary.html" class="external-link">st_as_binary</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_geometry</a></span><span class="op">(</span><span class="va">back</span><span class="op">)</span><span class="op">)</span>, <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_binary.html" class="external-link">st_as_binary</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_geometry.html" class="external-link">st_geometry</a></span><span class="op">(</span><span class="va">polys</span><span class="op">)</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span>
+<span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="va">back</span><span class="op">)</span> <span class="op">==</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="va">polys</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] TRUE</span></span></code></pre></div>
+</div>
+<div class="section level2">
+<h2 id="geocoding-engines">Geocoding engines<a class="anchor" aria-label="anchor" href="#geocoding-engines"></a>
+</h2>
+<p>A geometry can be valid in the plane and invalid on the sphere, where
+H3 cells live: a duplicated consecutive vertex, or a spike that almost
+touches an edge. Two such polygons, added to the simulated ones:</p>
+<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">wkt</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span>
+<span>  <span class="st">"POLYGON((-27.2 7.1, -26.9 7.1, -26.9 7.1, -26.9 7.4, -27.2 7.4, -27.2 7.1))"</span>,</span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/paste.html" class="external-link">paste0</a></span><span class="op">(</span></span>
+<span>    <span class="st">"POLYGON((-27.2 7.1, -26.9 7.1, -26.9 7.4, -27.05 7.4, "</span>,</span>
+<span>    <span class="st">"-27.05 7.1000000001, -27.06 7.4, -27.2 7.4, -27.2 7.1))"</span></span>
+<span>  <span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">odd</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/sf.html" class="external-link">st_sf</a></span><span class="op">(</span></span>
+<span>  id <span class="op">=</span> <span class="fl">501</span><span class="op">:</span><span class="fl">502</span>, area <span class="op">=</span> <span class="cn">NA_real_</span>, cat <span class="op">=</span> <span class="st">"z"</span>,</span>
+<span>  geometry <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="va">wkt</span>, crs <span class="op">=</span> <span class="fl">4326</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="fu">s2</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/s2/reference/s2_is_collection.html" class="external-link">s2_is_valid</a></span><span class="op">(</span><span class="va">odd</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] FALSE FALSE</span></span>
+<span><span class="va">mixed</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/cbind.html" class="external-link">rbind</a></span><span class="op">(</span><span class="va">polys</span>, <span class="va">odd</span><span class="op">)</span></span></code></pre></div>
+<p><code>geocode_engine</code> says how the cells of rows that cross
+cell edges are computed. Each such row is checked on the sphere on its
+own; rows inside one cell get the same cell from every engine.</p>
+<ul>
+<li>
+<code>"auto"</code> (the default): valid rows are geocoded on the
+sphere. An invalid row is rebuilt by s2; when the rebuilt copy keeps its
+area (length for lines) within the option
+<code>rcs.s2_rebuild_tol</code> (default <code>1e-3</code>), its cells
+are used, otherwise the row is geocoded in the plane instead.</li>
+<li>
+<code>"s2"</code>: on the sphere; invalid rows are rebuilt by
+s2.</li>
+<li>
+<code>"planar"</code>: every crossing row in the plane, as
+<code>sf</code> sees it with <code>sf_use_s2(FALSE)</code>. Slower; for
+data drawn and checked in the plane.</li>
+</ul>
+<p>Rebuilt copies serve only for the cells: the stored geometry is
+unchanged. One warning names the keys of the rows that were rebuilt or
+geocoded in the plane:</p>
+<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">mixed</span>, <span class="st">"shapes/mixed"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Polygons with invalid ones"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"Simulated polygons, two of them invalid on the sphere."</span>,</span>
+<span>  key <span class="op">=</span> <span class="st">"id"</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; Warning: Geocoding <span style="color: #0000BB;">"shapes/mixed"</span>: 2 rows are invalid on the sphere.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> 2 rebuilt by s2, 0 geocoded in the plane after a failed rebuild check.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Rebuilt: id = 501; id = 502.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/mixed"</span>: 502 rows in 1 file, and its index table in 1 file.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  2/2 files sent  73.3 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span>
+<span><span class="fu"><a href="../reference/store_describe.html">store_describe</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"shapes/mixed"</span><span class="op">)</span><span class="op">$</span><span class="va">entry</span><span class="op">$</span><span class="va">geocode_engine</span></span>
+<span><span class="co">#&gt; [1] "auto"</span></span></code></pre></div>
+<p>The engine is recorded with the dataset; an update uses it, and an
+update that asks for another engine stops. Rows whose box spans 180
+degrees or more (around a pole, across the antimeridian) are always
+geocoded on the sphere. For data in a projected CRS, the cells are
+computed the same way on a copy in EPSG:4326. The same rows give the
+same cells and the same version every time.</p>
+<div class="section level3">
+<h3 id="the-exact-test-on-reads">The exact test on reads<a class="anchor" aria-label="anchor" href="#the-exact-test-on-reads"></a>
+</h3>
+<p><code>exact_engine</code> of <code><a href="../reference/store_read.html">store_read()</a></code> and
+<code><a href="../reference/store_intersects.html">store_intersects()</a></code> chooses where the exact test runs. By
+default (<code>NULL</code>) it follows the dataset’s engine:
+<code>"s2"</code> on the sphere, <code>"planar"</code> in the plane, and
+<code>"auto"</code> on the sphere for candidate rows valid there and in
+the plane for the others, so that an invalid row never makes s2 fail.
+Datasets without a recorded engine (written before engines were
+recorded, or with <code>geocode = FALSE</code>) follow the session’s
+<code><a href="https://r-spatial.github.io/sf/reference/s2.html" class="external-link">sf::sf_use_s2()</a></code>. <code>"s2"</code>, <code>"planar"</code>
+and <code>"session"</code> override it. Data in a projected CRS are
+always tested in the plane of their CRS.</p>
+<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">near_odd</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span>
+<span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">27.1</span>, ymin <span class="op">=</span> <span class="fl">7.2</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">27.0</span>, ymax <span class="op">=</span> <span class="fl">7.3</span><span class="op">)</span>,</span>
+<span>  crs <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="fl">4326</span><span class="op">)</span></span>
+<span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"shapes/mixed"</span>, intersects <span class="op">=</span> <span class="va">near_odd</span>, columns <span class="op">=</span> <span class="va">id</span><span class="op">)</span><span class="op">$</span><span class="va">id</span></span>
+<span><span class="co">#&gt; [1] 501 502</span></span>
+<span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"shapes/mixed"</span>,</span>
+<span>  intersects <span class="op">=</span> <span class="va">near_odd</span>, columns <span class="op">=</span> <span class="va">id</span>, exact_engine <span class="op">=</span> <span class="st">"planar"</span></span>
+<span><span class="op">)</span><span class="op">$</span><span class="va">id</span></span>
+<span><span class="co">#&gt; [1] 501 502</span></span></code></pre></div>
+<p>Both reads find the two invalid rows. With
+<code>exact_engine = "session"</code> and
+<code>sf::sf_use_s2(TRUE)</code>, the exact test would run on the sphere
+for every row and stop at them.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="rasters">Rasters<a class="anchor" aria-label="anchor" href="#rasters"></a>
@@ -394,19 +664,19 @@ smaller than their box, and always complete.
 GeoTIFF, a format that lets a reader fetch only the tiles it needs.
 <code><a href="../reference/rcs_sim_polygons.html">rcs_sim_raster()</a></code> returns a simulated three-layer raster
 over the same box.</p>
-<div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">grid</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/rcs_sim_polygons.html">rcs_sim_raster</a></span><span class="op">(</span>seed <span class="op">=</span> <span class="fl">1</span>, nrow <span class="op">=</span> <span class="fl">200</span>, ncol <span class="op">=</span> <span class="fl">200</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">grid</span>, <span class="st">"grids/simulated"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Simulated raster"</span>,</span>
 <span>  description <span class="op">=</span> <span class="st">"A simulated three-layer raster in open ocean."</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/simulated"</span>: 40,000 cells in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  686.5 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  686.5 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p><code><a href="../reference/store_read.html">store_read()</a></code> opens the raster through GDAL.
 <code>intersects</code> crops it to the query’s bounding box, rounded
 outwards to whole cells.</p>
-<div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb28"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">area</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span>
 <span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">28</span>, ymin <span class="op">=</span> <span class="fl">7</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">27</span>, ymax <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span>
 <span>  crs <span class="op">=</span> <span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">st_crs</a></span><span class="op">(</span><span class="fl">4326</span><span class="op">)</span></span>
@@ -436,8 +706,10 @@ pole are stored and found correctly. The package detects them, finds
 their cells on the sphere, and always lists them in the index table,
 because their bounding box, which may span all longitudes, says little
 about where they lie. Query shapes of this kind are handled the same
-way. These rows are defined on the sphere: with
-<code>sf::sf_use_s2(FALSE)</code> a read is not guaranteed to find them.
+way. These rows are defined on the sphere and are geocoded there by
+every engine: a read whose exact test runs in the plane
+(<code>exact_engine = "planar"</code>, or the session rule with
+<code>sf::sf_use_s2(FALSE)</code>) is not guaranteed to find them.
 <code>rcs_sim_polygons(special = TRUE)</code> adds one such polygon of
 each kind, for trying this out.</p>
 </div>

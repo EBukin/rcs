@@ -1,16 +1,25 @@
-# Bring secondary locations up to date
+# Bring the locations of a store into step
 
-Copies datasets from the primary location to the secondary ones: every
-dataset whose copy in a secondary is missing or differs from the
-primary's (another version, or another entry). Only the files the
-secondary lacks are sent, each verified by MD5; the catalogs of the
-secondary are switched last, so that its readers always see a complete
-version. A geospatial dataset's index table travels with it.
+Copies datasets from one location, the source (by default the primary),
+to the other locations of the connection: every dataset whose copy in a
+target is missing or differs from the source's (another version, or
+another entry). Only the files a target lacks are sent, each verified by
+MD5; the catalogs of a target are switched last, so that its readers
+always see a complete version. A geospatial dataset's index table
+travels with it.
 
 ## Usage
 
 ``` r
-store_sync(st, datasets = NULL, to = NULL, dry_run = FALSE)
+store_sync(
+  st,
+  datasets = NULL,
+  to = NULL,
+  from = NULL,
+  delete = FALSE,
+  force = FALSE,
+  dry_run = FALSE
+)
 ```
 
 ## Arguments
@@ -23,44 +32,91 @@ store_sync(st, datasets = NULL, to = NULL, dry_run = FALSE)
 
 - datasets:
 
-  `NULL` for every dataset of the primary, or names of datasets (full
-  names, or last parts that are unique).
+  `NULL` for every dataset of the source, or names of datasets (full
+  names, or last parts that are unique in the source). With
+  `delete = TRUE` it restricts the deletions too, and a full name the
+  source does not hold is accepted.
 
 - to:
 
-  `NULL` for every secondary location, or the addresses of some of them.
+  `NULL` for every location other than the source, or the addresses of
+  some of them.
+
+- from:
+
+  `NULL` for the primary, or the address of the location to copy from.
+
+- delete:
+
+  `TRUE` deletes from each target the datasets the source does not hold.
+
+- force:
+
+  `TRUE` copies over versions that are newer in a target, and lets
+  `delete = TRUE` delete datasets from the primary.
 
 - dry_run:
 
-  `TRUE` reports what would be copied and changes nothing.
+  `TRUE` reports what would be copied, deleted and found in conflict,
+  and changes nothing.
 
 ## Value
 
-A tibble, invisibly, one row per secondary location: `location`,
-`status` (`"synced"`, `"same"` when nothing was missing, `"behind"` when
-it failed, `"unavailable"`, or `"to sync"` with `dry_run = TRUE`),
-`datasets` (a list column: the datasets copied, or to copy), `files`
-(files sent, or to send), `bytes` and `seconds`.
+A tibble, invisibly, one row per target location: `location`, `status`
+(`"synced"`, `"same"` when nothing was copied or deleted, `"conflict"`
+when the target holds a newer version of a dataset, `"behind"` when it
+failed, `"unavailable"`, or `"to sync"` with `dry_run = TRUE`), the list
+columns `datasets` (copied, or to copy), `deleted` (deleted, or to
+delete), `kept` (not deleted from the primary without `force`) and
+`conflicts`, then `files` (files sent, or to send), `bytes` and
+`seconds`.
 
 ## Details
 
-`store_sync()` never deletes a dataset: datasets found only in a
-secondary are left alone (see
+With `from` set to a secondary location, work done there (for example
+through a connection whose primary was that location, while the primary
+could not be reached) is brought to the primary and to the other
+secondaries.
+
+## Conflicts
+
+When a target holds another version of a dataset and its entry was
+updated later than the source's (the times recorded in the catalogs),
+the dataset is not copied there: it is a conflict. Every other copy and
+deletion goes ahead; after the last target the call aborts with class
+`rcs_error_sync_conflict`, listing the conflicts, and the condition's
+field `result` holds the result tibble. `force = TRUE` copies the source
+over the newer version instead. Every version of a target that is
+replaced by another one is listed in one warning (class
+`rcs_warning_sync_overwrite`). The times compared are those of the
+machines that wrote; their clocks may differ.
+
+## Deletions
+
+By default `store_sync()` never deletes a dataset: datasets found only
+in a target are left alone (see
 [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md),
-status `"extra"`). Files of a version the secondary replaces are deleted
-when the dataset keeps no history, as in
+status `"extra"`). With `delete = TRUE` they are deleted from that
+target, with their index table, after its copies, as
+[`store_delete()`](https://ebukin.github.io/rcs/reference/store_delete.md)
+does for one location (the history kept). The primary is a target only
+when `from` is a secondary; datasets are deleted there only with
+`force = TRUE`, and are otherwise reported in the result column `kept`.
+Files of a version a target replaces are deleted when the dataset keeps
+no history, as in
 [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md).
 
-A secondary that fails is reported as behind with a warning, and the
-next one is synced; running the call again sends only what is still
-missing.
+A target that fails is reported as behind with a warning, and the next
+one is synced; running the call again sends only what is still missing.
 
 ## See also
 
 [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md)
 to compare the locations,
 [`store_copy()`](https://ebukin.github.io/rcs/reference/store_copy.md)
-for one dataset between any two locations.
+for one dataset between any two locations;
+[`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)
+for syncs from a secondary, conflicts and deletions.
 
 ## Examples
 
@@ -84,6 +140,7 @@ st <- store_connect(file.path(root, "primary"),
   secondary = file.path(root, "copy")
 )
 store_status(st)
+#> Source: /tmp/Rtmp/rcs-example-sync/primary
 #> Locations: [1] /tmp/Rtmp/rcs-example-sync/copy
 #> # A tibble: 1 × 8
 #>   dataset     location status  newer primary_version  location_version
@@ -102,14 +159,33 @@ store_sync(st)
 #>   /tmp/Rtmp/rcs-example-sync/primary to 1
 #>   secondary location.
 #> ✔ secondary  /tmp/Rtmp/rcs-example-sync/copy     1
-#>   dataset, 2/2 files sent  23.7 kB  0.3s
+#>   dataset, 2/2 files sent  23.7 kB  0.2s
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
+
+# Work done on the secondary alone, brought back to the primary
+offline <- store_connect(file.path(root, "copy"))
+store_write(offline, rcs_sim_table(50, seed = 2), "sales/weekly",
+  title = "Weekly sales", description = "Simulated weekly sales."
+)
+#> ℹ Writing "sales/weekly": 50 rows in 1 file.
+#> ✔ primary  /tmp/Rtmp/rcs-example-sync/copy  1/1
+#>   files sent  11.7 kB  0.2s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+store_sync(st, from = file.path(root, "copy"))
+#> ℹ Syncing 2 datasets from the secondary
+#>   /tmp/Rtmp/rcs-example-sync/copy to 1
+#>   location.
+#> ✔ primary    /tmp/Rtmp/rcs-example-sync/primary  1
+#>   dataset, 1/1 files sent  11.7 kB  0.2s
+#> ✔ MD5 identical for 1 file sent to 1 location. Catalogs updated.
 store_status(st)
+#> Source: /tmp/Rtmp/rcs-example-sync/primary
 #> Locations: [1] /tmp/Rtmp/rcs-example-sync/copy
-#> # A tibble: 1 × 8
-#>   dataset     location status newer primary_version  location_version
-#>   <chr>       <chr>    <chr>  <chr> <chr>            <chr>           
-#> 1 sales/daily [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> # A tibble: 2 × 8
+#>   dataset      location status newer primary_version  location_version
+#>   <chr>        <chr>    <chr>  <chr> <chr>            <chr>           
+#> 1 sales/daily  [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> 2 sales/weekly [1]      same   NA    e8bcbde15b3cbebc e8bcbde15b3cbebc
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 unlink(root, recursive = TRUE)
 ```

@@ -99,7 +99,7 @@ store_write(st, sales, "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-check/primary  2/2
-#>   files sent  23.7 kB  0.1s
+#>   files sent  23.7 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_check(st, "sales/daily")
 #> ✔ 2 files checked in 1 location: no problem found.

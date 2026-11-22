@@ -29,7 +29,8 @@ version."></head><body>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -87,13 +88,15 @@ version.</p>
 <span>  mode <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"create"</span>, <span class="st">"replace"</span>, <span class="st">"update"</span><span class="op">)</span>,</span>
 <span>  h3_res <span class="op">=</span> <span class="fl">5L</span>,</span>
 <span>  geocode <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  geocode_engine <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"auto"</span>, <span class="st">"s2"</span>, <span class="st">"planar"</span><span class="op">)</span>,</span>
 <span>  max_files <span class="op">=</span> <span class="fl">50L</span>,</span>
 <span>  history <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  source <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  inputs <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  columns <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  check <span class="op">=</span> <span class="cn">TRUE</span>,</span>
-<span>  rows_per_group <span class="op">=</span> <span class="fl">50000L</span></span>
+<span>  rows_per_group <span class="op">=</span> <span class="fl">50000L</span>,</span>
+<span>  crs <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -107,7 +110,8 @@ place, so that it can be used for further writes without refreshing.</p></dd>
 
 
 <dt id="arg-x">x<a class="anchor" aria-label="anchor" href="#arg-x"></a></dt>
-<dd><p>The data: a data frame, an <code>sf</code> object or a <code><a href="https://rspatial.github.io/terra/reference/SpatRaster-class.html" class="external-link">terra::SpatRaster</a></code>.</p></dd>
+<dd><p>The data: a data frame, an <code>sf</code> object, a <code><a href="https://rspatial.github.io/terra/reference/SpatRaster-class.html" class="external-link">terra::SpatRaster</a></code>,
+or a lazy table on a DuckDB connection (see "DuckDB input").</p></dd>
 
 
 <dt id="arg-dataset">dataset<a class="anchor" aria-label="anchor" href="#arg-dataset"></a></dt>
@@ -141,7 +145,16 @@ by the H3 parent cell at the finest resolution that gives at most
 
 <dt id="arg-geocode">geocode<a class="anchor" aria-label="anchor" href="#arg-geocode"></a></dt>
 <dd><p><code>FALSE</code> writes geospatial data without H3 cells and
-without index table; spatial reads then use bounding boxes only.</p></dd>
+without index table (no engine is recorded); spatial reads then use
+bounding boxes only.</p></dd>
+
+
+<dt id="arg-geocode-engine">geocode_engine<a class="anchor" aria-label="anchor" href="#arg-geocode-engine"></a></dt>
+<dd><p><code>"auto"</code>, <code>"s2"</code> or <code>"planar"</code>: how the H3 cells of
+geometries that cross cell edges are computed (see "Geocoding
+engines"); recorded with the dataset. An update uses the stored engine
+(a different one aborts); a dataset written without one geocodes new
+rows with <code>"s2"</code>.</p></dd>
 
 
 <dt id="arg-max-files">max_files<a class="anchor" aria-label="anchor" href="#arg-max-files"></a></dt>
@@ -172,6 +185,13 @@ before anything is uploaded (see <code><a href="store_check.html">store_check()<
 <dt id="arg-rows-per-group">rows_per_group<a class="anchor" aria-label="anchor" href="#arg-rows-per-group"></a></dt>
 <dd><p>Rows per Parquet row group.</p></dd>
 
+
+<dt id="arg-crs">crs<a class="anchor" aria-label="anchor" href="#arg-crs"></a></dt>
+<dd><p>The coordinate reference system of the column <code>geometry</code> of
+a lazy DuckDB table (anything <code><a href="https://r-spatial.github.io/sf/reference/st_crs.html" class="external-link">sf::st_crs()</a></code> accepts, e.g. <code>4326</code>);
+required for such a table, ignored otherwise (an <code>sf</code> object carries
+its own).</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -191,9 +211,92 @@ H3 cell at <code>h3_res</code> holding the largest part of each geometry; not wi
 <code>geocode = FALSE</code>) and <code>bbox</code> (bounding box), and are sorted by <code>h3</code>.
 Rows that cross H3 cells are listed in an index table
 <code>&lt;dataset&gt;__h3</code>, written, replaced and removed with the dataset.</p></li>
+<li><p>Prepared geospatial data (<code><a href="rcs_geo_add.html">rcs_geo_add()</a></code>, or rows read back with
+<code>collect()</code>) may hold these columns already: <code>.rcs_id</code> is dropped and
+assigned again; <code>h3</code> and <code>bbox</code> must equal what the write computes
+(else the write aborts naming the rows; prepare with the same
+<code>geocode_engine</code>, or call <code><a href="rcs_geo_add.html">rcs_geo_strip()</a></code> first), and <code>h3_res</code>, when
+not given, is taken from the cells. Columns <code>h3_p&lt;r&gt;</code> are written as
+they are; with <code>partition = "h3"</code> one named as the chosen partition
+column must hold the same cells, and then serves as it. Raw and
+prepared data give the same version.</p></li>
 <li><p>A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 partitioned or updated.</p></li>
+<li><p>A lazy table on a DuckDB connection is a <code>table</code>, or <code>geospatial</code> when
+it has a column <code>geometry</code> (see "DuckDB input").</p></li>
 </ul></div>
+    <div class="section level2">
+    <h2 id="duckdb-input">DuckDB input<a class="anchor" aria-label="anchor" href="#duckdb-input"></a></h2>
+
+
+<p><code>x</code> may be a lazy table on a DuckDB connection (from <code><a href="https://dplyr.tidyverse.org/reference/tbl.html" class="external-link">dplyr::tbl()</a></code>, for
+example on a view of <code><a href="store_duckdb.html">store_duckdb()</a></code>, or from
+<code>store_open(engine = "duckdb")</code>), so that a result computed in DuckDB is
+stored without being collected into R as a whole. Its query runs once
+inside DuckDB into a temporary copy, the table <code>rcs_write_&lt;random&gt;</code> on
+the same connection, which every later step reads and which is dropped
+when the call ends, also after an error; the copy needs room in DuckDB's
+memory or its temporary folder. The key and the partitions are checked
+in DuckDB, and the rows are fetched in batches of
+<code>getOption("rcs.duckdb_batch_rows")</code> rows (default <code>5e5</code>), so that R
+holds about one batch at a time; a progress bar shows the batches unless
+<code>options(rcs.quiet = TRUE)</code>. DuckDB never uploads: the files are staged
+and land in every location as for any other write. The files equal those
+written from the same rows collected into R, so both give the same
+version.</p><ul><li><p>Modes <code>"create"</code> and <code>"replace"</code> only; <code>"update"</code> aborts (collect the
+rows and update from R, or write the whole dataset).</p></li>
+<li><p>Columns <code>.rcs_id</code>, <code>h3</code>, <code>bbox</code> and <code>geom</code> are the package's own: they
+are dropped with a message and computed again. Columns <code>h3_p&lt;r&gt;</code> are
+user columns.</p></li>
+<li><p>Types: integer, double, <code>VARCHAR</code>, <code>DATE</code> and <code>BOOLEAN</code> are stored as
+they are; <code>BIGINT</code> is stored as 64-bit integers read back as
+<code><a href="https://bit64.r-lib.org/reference/bit64-package.html" class="external-link">bit64::integer64</a></code>; <code>TIMESTAMP</code> is stored without time zone (its wall
+clock) and <code>TIMESTAMP WITH TIME ZONE</code> in UTC. <code>HUGEINT</code>, <code>UHUGEINT</code>,
+<code>INTERVAL</code>, <code>UNION</code> and <code>MAP</code> columns abort, naming them; cast them in
+the query. DuckDB's <code><a href="https://rdrr.io/r/base/sum.html" class="external-link">sum()</a></code> of an integer column is a <code>HUGEINT</code>: write
+<code>as.integer(sum(x))</code> or <code>as.numeric(sum(x))</code> in dbplyr. Values keep
+their storage types: a factor read through a view is <code>VARCHAR</code> and is
+stored as text.</p></li>
+<li><p>Geospatial data: a column <code>geometry</code> holding WKB (<code>BLOB</code>, as in views
+in arrow mode) or of type <code>GEOMETRY</code> (as in native views) makes the
+dataset geospatial, and <code>crs</code> is then required. The geometries pass
+through R in batches: for each batch the bounding boxes, the H3 cells
+and the index rows are computed as for an <code>sf</code> object (with
+<code>geocode_engine</code>, and the warning of "Geocoding engines") and kept in
+the staging folder; the rows are then sorted by cell and written from
+DuckDB. <code>partition = "h3"</code> and <code>geocode = FALSE</code> work as for an <code>sf</code>
+object.</p></li>
+<li><p>Lazy tables on other databases abort: collect them first.</p></li>
+</ul></div>
+    <div class="section level2">
+    <h2 id="geocoding-engines">Geocoding engines<a class="anchor" aria-label="anchor" href="#geocoding-engines"></a></h2>
+
+
+<p>A geospatial row whose geometry lies inside one H3 cell gets that cell.
+For a row that crosses cell edges, the package computes the cells it
+touches and the share of the row in each; <code>h3</code> is the cell of the largest
+share, and every touched cell goes to the index table. <code>geocode_engine</code>
+says how these cells are computed:</p><ul><li><p><code>"auto"</code> (the default): each such row is checked on the sphere (s2).
+A valid row is geocoded on the sphere. An invalid one (for example
+valid in the plane, but with a duplicated vertex or a spike that s2
+rejects) is rebuilt by s2; when the rebuilt copy is empty or does not
+keep its area (length for lines) within
+<code>getOption("rcs.s2_rebuild_tol")</code> (default <code>1e-3</code>), the row is geocoded
+in the plane instead.</p></li>
+<li><p><code>"s2"</code>: on the sphere; invalid rows are rebuilt by s2 (geocoded in the
+plane when the rebuild fails).</p></li>
+<li><p><code>"planar"</code>: every crossing row in the plane of the coordinates
+(slower).</p></li>
+</ul><p>Rows whose box spans 180 degrees of longitude or more are geocoded on the
+sphere with every engine. Rebuilt geometries are used only for the
+cells; the stored geometry is unchanged. One warning per write (class
+<code>rcs_warning_s2_rebuild</code>) counts the rows rebuilt and those geocoded in
+the plane, and names the first five of each by key (or <code>.rcs_id</code>). The
+engine is recorded with the dataset, and the exact test of
+<code><a href="store_read.html">store_read()</a></code> and <code><a href="store_intersects.html">store_intersects()</a></code> follows it by default
+(<code>exact_engine</code>). The same input always gives the same cells, shares and
+version. Data in a projected CRS are geocoded from a copy in EPSG:4326.</p>
+    </div>
     <div class="section level2">
     <h2 id="modes">Modes<a class="anchor" aria-label="anchor" href="#modes"></a></h2>
 
@@ -208,8 +311,9 @@ partitions are kept; new values add partitions. The columns and their
 types must equal the stored ones, and the key must stay unique across
 the whole dataset. A message lists every replaced partition with its old
 and new number of rows: rows of a replaced partition that are missing
-from <code>x</code> disappear. In this mode <code>key</code>, <code>partition</code>, <code>h3_res</code> and
-<code>geocode</code> come from the stored dataset; arguments that disagree abort.
+from <code>x</code> disappear. In this mode <code>key</code>, <code>partition</code>, <code>h3_res</code>,
+<code>geocode</code> and <code>geocode_engine</code> come from the stored dataset; arguments
+that disagree abort.
 With <code>partition = "h3"</code>, an update that would need more than
 <code>max_files</code> files re-partitions the whole dataset at a coarser H3
 resolution.</p></li>
@@ -241,7 +345,8 @@ continues with the next location and reports the secondary as behind;
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p><code><a href="store_check.html">store_check()</a></code>, <code><a href="store_history.html">store_history()</a></code>, <code><a href="store_prune.html">store_prune()</a></code>.</p></div>
+    <div class="dont-index"><p><code><a href="store_check.html">store_check()</a></code>, <code><a href="store_history.html">store_history()</a></code>, <code><a href="store_prune.html">store_prune()</a></code>,
+<code><a href="rcs_geo_add.html">rcs_geo_add()</a></code>, <code><a href="store_duckdb.html">store_duckdb()</a></code>.</p></div>
     </div>
 
     <div class="section level2">
@@ -260,7 +365,7 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     2/2</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
@@ -291,9 +396,9 @@ continues with the next location and reports the secondary as behind;
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> year = 2024: 97 rows -&gt; 97 rows</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
@@ -304,7 +409,7 @@ continues with the next location and reports the secondary as behind;
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated           1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.8 kB      2  2026-11-21 16:55  =</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.8 kB      2  2026-11-22 10:52  =</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

@@ -39,7 +39,8 @@
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles">
-<li><a class="dropdown-item" href="articles/locations.html">Primary and secondary locations</a></li>
+<li><a class="dropdown-item" href="articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -87,6 +88,10 @@
 <li>
 <strong>Reads fetch only what they need.</strong> Filters and column selections are passed to the Parquet reader. Spatial filters use H3 cells and bounding boxes stored with the data, so an area is read without scanning every geometry.</li>
 <li>
+<strong>Lazy first.</strong> <code><a href="reference/store_open.html">store_open()</a></code> opens a dataset without reading it; dplyr verbs describe the rows you want, and <code>collect()</code> reads them into R.</li>
+<li>
+<strong>DuckDB in one call.</strong> <code><a href="reference/store_duckdb.html">store_duckdb()</a></code> turns every dataset into a DuckDB view, in memory or in a database file next to your own tables, and <code><a href="reference/store_write.html">store_write()</a></code> stores a DuckDB result without loading it into R.</li>
+<li>
 <strong>Same data, same version.</strong> Writing identical data again changes nothing and copies nothing.</li>
 </ul>
 <div class="section level2">
@@ -95,7 +100,7 @@
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("pak")</span></span>
 <span><span class="fu">pak</span><span class="fu">::</span><span class="fu"><a href="https://pak.r-lib.org/reference/pak.html" class="external-link">pak</a></span><span class="op">(</span><span class="st">"EBukin/rcs"</span><span class="op">)</span></span></code></pre></div>
-<p>Geospatial datasets need the package h3o, rasters need terra, and Google Cloud Storage needs gargle and httr2 and an arrow build with GCS support.</p>
+<p>Geospatial datasets need the package h3o, rasters need terra, DuckDB needs duckdb, DBI and dbplyr, and Google Cloud Storage needs gargle and httr2 and an arrow build with GCS support.</p>
 </div>
 <div class="section level2">
 <h2 id="example">Example<a class="anchor" aria-label="anchor" href="#example"></a>
@@ -113,7 +118,7 @@
 <span>  partition <span class="op">=</span> <span class="st">"year"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; ℹ Writing "sales/daily": 500 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; ✔ primary  &lt;tempdir&gt;/my-store  2/2 files sent  38.2 kB  0.2s</span></span>
+<span><span class="co">#&gt; ✔ primary  &lt;tempdir&gt;/my-store  2/2 files sent  38.2 kB  0.4s</span></span>
 <span><span class="co">#&gt; ✔ MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>See what the store holds:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
@@ -125,12 +130,37 @@
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   500  38.2 kB      2  2026-11-20 20:10</span></span></code></pre></div>
-<p>Read part of a dataset. Only the file of the year 2024 is opened.</p>
+<span><span class="co">#&gt;     daily  table   500  38.2 kB      2  2026-11-22 13:26</span></span></code></pre></div>
+<p>Open a dataset. Nothing is read yet; printing shows a header and the first rows.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="fu"><a href="reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, <span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">45</span>,</span>
-<span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">product</span>, <span class="va">qty</span><span class="op">)</span></span>
-<span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span>
+<span><span class="va">q</span></span>
+<span><span class="co">#&gt; # Dataset:  sales/daily [500 x 15] (table)</span></span>
+<span><span class="co">#&gt; # Location: primary (local)</span></span>
+<span><span class="co">#&gt; # Version:  b454e301 (current)</span></span>
+<span><span class="co">#&gt; # Files:    2 of 2</span></span>
+<span><span class="co">#&gt;    shop_id date        year product   qty price promo grade delivered      big</span></span>
+<span><span class="co">#&gt;      &lt;int&gt; &lt;date&gt;     &lt;int&gt; &lt;fct&gt;   &lt;int&gt; &lt;dbl&gt; &lt;lgl&gt; &lt;ord&gt; &lt;date&gt;     &lt;int64&gt;</span></span>
+<span><span class="co">#&gt;  1       1 2023-01-22  2023 p07        31  69.1 FALSE low   NA           9 e15</span></span>
+<span><span class="co">#&gt;  2       1 2023-01-24  2023 p19        42 182.  FALSE low   2023-01-28   3 e 2</span></span>
+<span><span class="co">#&gt;  3       1 2023-01-28  2023 p17        12  83.4 TRUE  mid   2023-01-29   2 e 2</span></span>
+<span><span class="co">#&gt;  4       1 2023-03-12  2023 p07        21 129.  FALSE low   NA           6 e 2</span></span>
+<span><span class="co">#&gt;  5       1 2023-03-15  2023 p18        29 157.  FALSE mid   2023-03-25   9 e15</span></span>
+<span><span class="co">#&gt;  6       1 2023-03-27  2023 p08        NA  81.9 FALSE high  2023-04-03   9 e15</span></span>
+<span><span class="co">#&gt;  7       1 2023-04-14  2023 p06        10 152.  TRUE  high  2023-04-16   3.e 2</span></span>
+<span><span class="co">#&gt;  8       1 2023-05-11  2023 p04        39 180.  TRUE  mid   2023-05-18   9 e15</span></span>
+<span><span class="co">#&gt;  9       1 2023-05-30  2023 p18        43 193.  FALSE high  2023-06-09   9 e15</span></span>
+<span><span class="co">#&gt; 10       1 2023-06-04  2023 p08        28 153.  FALSE low   2023-06-13   8 e 2</span></span>
+<span><span class="co">#&gt; # ℹ 5 more variables: wait &lt;drtn&gt;, note &lt;chr&gt;, tags &lt;list&gt;, ts &lt;dttm&gt;,</span></span>
+<span><span class="co">#&gt; #   ts_local &lt;dttm&gt;</span></span>
+<span><span class="co">#&gt; # ℹ 490 more rows</span></span>
+<span><span class="co">#&gt; # ℹ Use `collect()` to read the rows into R.</span></span></code></pre></div>
+<p>Describe the rows you want with dplyr verbs and read them with <code>collect()</code>. Only the file of the year 2024 is opened.</p>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">q</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">45</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">select</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">product</span>, <span class="va">qty</span><span class="op">)</span> <span class="op">|&gt;</span></span>
+<span>  <span class="fu">dplyr</span><span class="fu">::</span><span class="fu"><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect</a></span><span class="op">(</span><span class="op">)</span></span>
 <span><span class="co">#&gt; # A tibble: 20 × 4</span></span>
 <span><span class="co">#&gt;    shop_id date       product   qty</span></span>
 <span><span class="co">#&gt;      &lt;int&gt; &lt;date&gt;     &lt;fct&gt;   &lt;int&gt;</span></span>
@@ -154,8 +184,18 @@
 <span><span class="co">#&gt; 18      19 2024-08-26 p07        49</span></span>
 <span><span class="co">#&gt; 19      20 2024-10-01 p05        50</span></span>
 <span><span class="co">#&gt; 20      20 2024-10-10 p09        48</span></span></code></pre></div>
+<p><code>store_read(st, "sales/daily", year == 2024, qty &gt; 45)</code> does the same in one call.</p>
+<p>Query the whole store with SQL in DuckDB, without copying any data:</p>
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">con</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_duckdb.html">store_duckdb</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span>
+<span><span class="co">#&gt; ✔ DuckDB view (native mode, nothing read yet): `sales.daily`.</span></span>
+<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbGetQuery.html" class="external-link">dbGetQuery</a></span><span class="op">(</span><span class="va">con</span>, <span class="st">"SELECT year, sum(qty) AS qty FROM sales.daily GROUP BY year ORDER BY year"</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   year  qty</span></span>
+<span><span class="co">#&gt; 1 2023 5851</span></span>
+<span><span class="co">#&gt; 2 2024 6065</span></span>
+<span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <p>Keep the same store in a bucket and in a local copy; writes reach both and reads use the local copy:</p>
-<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>, secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span><span class="op">)</span></span></code></pre></div>
 </div>
 <div class="section level2">
@@ -163,11 +203,13 @@
 </h2>
 <ul>
 <li>
-<code><a href="articles/rcs.html">vignette("rcs")</a></code>: getting started with a local store.</li>
+<code><a href="articles/rcs.html">vignette("rcs")</a></code>: getting started with a local store: write, open, read, update, keep versions.</li>
 <li>
-<code><a href="articles/locations.html">vignette("locations")</a></code>: primary and secondary locations, environment variables, cloud credentials.</li>
+<code><a href="articles/duckdb.html">vignette("duckdb")</a></code>: datasets as DuckDB views, database files, spatial filters in DuckDB, writing from DuckDB, the local-first workflow.</li>
 <li>
-<code><a href="articles/geospatial.html">vignette("geospatial")</a></code>: <code>sf</code> objects, spatial filters, rasters.</li>
+<code><a href="articles/locations.html">vignette("locations")</a></code>: primary and secondary locations, environment variables, cloud credentials, sync.</li>
+<li>
+<code><a href="articles/geospatial.html">vignette("geospatial")</a></code>: <code>sf</code> objects, spatial filters, geocoding engines, rasters.</li>
 </ul>
 <p>The package is developed and tested on simulated data only.</p>
 </div>

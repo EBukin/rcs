@@ -83,6 +83,6 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.7 kB      2  2026-11-21 16:55
+#>     daily  table   100  23.7 kB      2  2026-11-22 10:52
 unlink(location, recursive = TRUE)
 ```

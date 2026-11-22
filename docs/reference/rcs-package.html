@@ -23,7 +23,8 @@ store."></head><body>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -71,10 +72,11 @@ store.</p>
 
 
 <p>All options are read through the internal <code>rcs_option()</code>, which holds the
-defaults.</p><table class="table table"><tr><td>Option</td><td>Default</td><td>Meaning</td></tr><tr><td><code>rcs.quiet</code></td><td><code>FALSE</code></td><td>Silence informative messages.</td></tr><tr><td><code>rcs.trace</code></td><td><code>FALSE</code></td><td>Record work counters, see <code><a href="rcs_trace.html">rcs_trace()</a></code>.</td></tr><tr><td><code>rcs.staging_dir</code></td><td><code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir()</a></code></td><td>Folder where files are staged before upload.</td></tr><tr><td><code>rcs.chunk_size</code></td><td><code>1e5</code></td><td>Rows per chunk in vectorised geospatial work.</td></tr><tr><td><code>rcs.workers</code></td><td><code>1</code></td><td>Parallel workers for geocoding.</td></tr><tr><td><code>rcs.lock_timeout</code></td><td><code>600</code></td><td>Seconds after which a local lock is stale.</td></tr><tr><td><code>rcs.record_writer</code></td><td><code>FALSE</code></td><td>Record the user name in the catalog.</td></tr></table></div>
+defaults.</p><table class="table table"><tr><td>Option</td><td>Default</td><td>Meaning</td></tr><tr><td><code>rcs.quiet</code></td><td><code>FALSE</code></td><td>Silence informative messages.</td></tr><tr><td><code>rcs.trace</code></td><td><code>FALSE</code></td><td>Record work counters, see <code><a href="rcs_trace.html">rcs_trace()</a></code>.</td></tr><tr><td><code>rcs.staging_dir</code></td><td><code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir()</a></code></td><td>Folder where files are staged before upload.</td></tr><tr><td><code>rcs.chunk_size</code></td><td><code>1e5</code></td><td>Rows per chunk in vectorised geospatial work.</td></tr><tr><td><code>rcs.workers</code></td><td><code>1</code></td><td>Parallel workers for geocoding.</td></tr><tr><td><code>rcs.lock_timeout</code></td><td><code>600</code></td><td>Seconds after which a local lock is stale.</td></tr><tr><td><code>rcs.record_writer</code></td><td><code>FALSE</code></td><td>Record the user name in the catalog.</td></tr><tr><td><code>rcs.print_rows</code></td><td><code>10</code></td><td>Rows shown when a lazy query is printed.</td></tr><tr><td><code>rcs.duckdb_batch_rows</code></td><td><code>5e5</code></td><td>Rows per batch when writing from DuckDB.</td></tr><tr><td><code>rcs.s2_rebuild_tol</code></td><td><code>1e-3</code></td><td>Relative area change accepted for a geometry repaired on the sphere.</td></tr></table></div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
-    <div class="dont-index"><p>Useful links:</p><ul><li><p><a href="https://github.com/EBukin/rcs" class="external-link">https://github.com/EBukin/rcs</a></p></li>
+    <div class="dont-index"><p>Useful links:</p><ul><li><p><a href="https://ebukin.github.io/rcs/">https://ebukin.github.io/rcs/</a></p></li>
+<li><p><a href="https://github.com/EBukin/rcs" class="external-link">https://github.com/EBukin/rcs</a></p></li>
 <li><p>Report bugs at <a href="https://github.com/EBukin/rcs/issues" class="external-link">https://github.com/EBukin/rcs/issues</a></p></li>
 </ul></div>
     </div>

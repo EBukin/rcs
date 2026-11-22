@@ -15,7 +15,8 @@ store_read(
   intersects = NULL,
   geometry = TRUE,
   version = NULL,
-  exact = TRUE
+  exact = TRUE,
+  exact_engine = NULL
 )
 ```
 
@@ -66,11 +67,22 @@ store_read(
 
 - exact:
 
-  `TRUE` tests the candidate rows of a spatial filter exactly with
-  [`sf::st_intersects()`](https://r-spatial.github.io/sf/reference/geos_binary_pred.html),
-  under the session's
+  `TRUE` tests the candidate rows of a spatial filter exactly, on the
+  sphere or in the plane as `exact_engine` says.
+
+- exact_engine:
+
+  How the exact test of a spatial filter reads the geometries: `NULL`
+  (the default) follows the geocoding engine the dataset was written
+  with (`"s2"`: on the sphere; `"planar"`: in the plane; `"auto"`: on
+  the sphere for rows valid on the sphere, in the plane for the others),
+  and the session's
   [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html)
-  setting.
+  setting for a dataset with no recorded engine (written before engines
+  were recorded, or with `geocode = FALSE`). `"s2"`, `"planar"` or
+  `"session"` override it. Data in a projected CRS are always tested in
+  the plane of that CRS. See
+  [`store_intersects()`](https://ebukin.github.io/rcs/reference/store_intersects.md).
 
 ## Value
 
@@ -162,7 +174,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
 )
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  41.1 kB  0.2s
+#>   files sent  41.2 kB  0.3s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(
   c(xmin = -28, ymin = 7, xmax = -27, ymax = 8),
@@ -175,39 +187,39 @@ store_read(st, "polygons", intersects = area)
 #> Bounding box:  xmin: -29.8 ymin: 6.1 xmax: -27.08777 ymax: 7.969043
 #> Geodetic CRS:  WGS 84
 #> # A tibble: 16 × 6
-#>       id       area cat        h3 bbox$xmin $ymin                       geometry
-#>    <int>      <dbl> <chr> <int64>     <dbl> <dbl>                 <GEOMETRY [°]>
-#>  1     6     0.392  b        6e17     -28.0  7.73 MULTIPOLYGON (((-27.96559 7.7…
-#>  2   119     0.272  b        6e17     -28.0  7.74 POLYGON ((-27.97298 7.736041,…
-#>  3    19     0.166  e        6e17     -27.6  7.34 POLYGON ((-27.63064 7.34118, …
-#>  4   117     0.428  d        6e17     -27.5  7.33 POLYGON ((-27.5089 7.333518, …
-#>  5     8     4.90   a        6e17     -27.6  7.49 POLYGON ((-27.59022 7.49, -27…
-#>  6   196     0.0479 a        6e17     -27.5  7.43 POLYGON ((-27.49999 7.429893,…
-#>  7    34     0.180  a        6e17     -27.6  7.80 POLYGON ((-27.59195 7.798493,…
-#>  8    49     0.463  b        6e17     -27.5  7.85 POLYGON ((-27.53358 7.846119,…
-#>  9    10     0.134  c        6e17     -27.6  7.97 POLYGON ((-27.6311 7.965744, …
-#> 10    21     0.204  a        6e17     -27.8  7.89 POLYGON ((-27.76669 7.894771,…
-#> 11     1 46041.     a        6e17     -29.8  6.1  POLYGON ((-29.8 6.1, -27.3 6.…
-#> 12    53     0.310  c        6e17     -27.9  7.15 POLYGON ((-27.86865 7.154465,…
-#> 13    64     0.0367 e        6e17     -27.8  7.13 POLYGON ((-27.84618 7.131019,…
-#> 14    22     0.0558 a        6e17     -27.1  7.31 POLYGON ((-27.08991 7.31366, …
-#> 15    59     0.0445 b        6e17     -27.1  7.43 POLYGON ((-27.13006 7.433258,…
-#> 16    74     0.138  d        6e17     -27.1  7.00 POLYGON ((-27.09025 6.99834, …
-#> # ℹ 2 more variables: bbox$xmax <dbl>, $ymax <dbl>
+#>       id       area cat   h3              bbox$xmin                     geometry
+#>    <int>      <dbl> <chr> <h3>                <dbl>               <GEOMETRY [°]>
+#>  1     6     0.392  b     85565903fffffff     -28.0 MULTIPOLYGON (((-27.96559 7…
+#>  2   119     0.272  b     85565903fffffff     -28.0 POLYGON ((-27.97298 7.73604…
+#>  3    19     0.166  e     85565927fffffff     -27.6 POLYGON ((-27.63064 7.34118…
+#>  4   117     0.428  d     85565927fffffff     -27.5 POLYGON ((-27.5089 7.333518…
+#>  5     8     4.90   a     85565937fffffff     -27.6 POLYGON ((-27.59022 7.49, -…
+#>  6   196     0.0479 a     85565937fffffff     -27.5 POLYGON ((-27.49999 7.42989…
+#>  7    34     0.180  a     855659a3fffffff     -27.6 POLYGON ((-27.59195 7.79849…
+#>  8    49     0.463  b     855659a3fffffff     -27.5 POLYGON ((-27.53358 7.84611…
+#>  9    10     0.134  c     855659b3fffffff     -27.6 POLYGON ((-27.6311 7.965744…
+#> 10    21     0.204  a     855659bbfffffff     -27.8 POLYGON ((-27.76669 7.89477…
+#> 11     1 46041.     a     857c4bd3fffffff     -29.8 POLYGON ((-29.8 6.1, -27.3 …
+#> 12    53     0.310  c     857c596ffffffff     -27.9 POLYGON ((-27.86865 7.15446…
+#> 13    64     0.0367 e     857c596ffffffff     -27.8 POLYGON ((-27.84618 7.13101…
+#> 14    22     0.0558 a     857c5b0ffffffff     -27.1 POLYGON ((-27.08991 7.31366…
+#> 15    59     0.0445 b     857c5b3bfffffff     -27.1 POLYGON ((-27.13006 7.43325…
+#> 16    74     0.138  d     857c5b8ffffffff     -27.1 POLYGON ((-27.09025 6.99834…
+#> # ℹ 3 more variables: bbox$ymin <dbl>, $xmax <dbl>, $ymax <dbl>
 store_read(st, "polygons", geometry = FALSE)
 #> # A tibble: 200 × 5
-#>       id   area cat        h3 bbox$xmin $ymin $xmax $ymax
-#>    <int>  <dbl> <chr> <int64>     <dbl> <dbl> <dbl> <dbl>
-#>  1   185 0.269  e        6e17     -26.2  8.78 -26.2  8.79
-#>  2   188 0.425  c        6e17     -25.9  8.31 -25.9  8.32
-#>  3     7 0.391  a        6e17     -26.4  8.28 -25.9  8.54
-#>  4   158 0.287  c        6e17     -26.6  8.56 -26.6  8.56
-#>  5    93 0.476  d        6e17     -26.4  8.49 -26.4  8.49
-#>  6    44 0.0618 b        6e17     -26.2  8.33 -26.2  8.33
-#>  7    23 0.191  a        6e17     -26.4  8.28 -26.4  8.29
-#>  8   168 0.414  b        6e17     -26.1  8.46 -26.1  8.46
-#>  9    63 0.0938 d        6e17     -25.6  8.60 -25.6  8.60
-#> 10   139 0.499  c        6e17     -25.7  8.62 -25.7  8.62
+#>       id   area cat   h3              bbox$xmin $ymin $xmax $ymax
+#>    <int>  <dbl> <chr> <h3>                <dbl> <dbl> <dbl> <dbl>
+#>  1   185 0.269  e     8556481bfffffff     -26.2  8.78 -26.2  8.79
+#>  2   188 0.425  c     8556482bfffffff     -25.9  8.31 -25.9  8.32
+#>  3     7 0.391  a     8556483bfffffff     -26.4  8.28 -25.9  8.54
+#>  4   158 0.287  c     8556484bfffffff     -26.6  8.56 -26.6  8.56
+#>  5    93 0.476  d     8556484ffffffff     -26.4  8.49 -26.4  8.49
+#>  6    44 0.0618 b     85564863fffffff     -26.2  8.33 -26.2  8.33
+#>  7    23 0.191  a     8556486bfffffff     -26.4  8.28 -26.4  8.29
+#>  8   168 0.414  b     85564877fffffff     -26.1  8.46 -26.1  8.46
+#>  9    63 0.0938 d     855648affffffff     -25.6  8.60 -25.6  8.60
+#> 10   139 0.499  c     855648affffffff     -25.7  8.62 -25.7  8.62
 #> # ℹ 190 more rows
 unlink(location, recursive = TRUE)
 ```

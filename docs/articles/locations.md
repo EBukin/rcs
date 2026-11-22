@@ -70,8 +70,8 @@ store_write(st, rcs_sim_table(200, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
 #> ✔ primary    <tempdir>/locations/primary  2/2 files sent  27.8 kB  0.2s
-#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  27.8 kB  0.1s
-#> ✔ secondary  <tempdir>/locations/copy-2   2/2 files sent  27.8 kB  0.1s
+#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  27.8 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-2   2/2 files sent  27.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 3 locations. Catalogs updated.
 ```
 
@@ -91,7 +91,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.8 kB      2  2026-11-21 21:57  =  =
+#>     daily  table   200  27.8 kB      2  2026-11-22 15:55  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -150,7 +150,7 @@ st_env
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.8 kB      2  2026-11-21 21:57  =  =
+#>     daily  table   200  27.8 kB      2  2026-11-22 15:55  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -206,7 +206,7 @@ store_write(st, rcs_sim_table(300, seed = 2), "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  31.2 kB  0.2s
+#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  31.2 kB  0.1s
 #> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  31.2 kB  0.1s
 #> ! secondary  <tempdir>/locations/copy-2   unavailable, skipped
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
@@ -239,7 +239,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   300  31.2 kB      2  2026-11-21 21:57  =  ≠
+#>     daily  table   300  31.2 kB      2  2026-11-22 15:55  =  ≠
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -263,23 +263,44 @@ store_refresh(st)
 compares every secondary with the primary, dataset by dataset, from the
 catalogs alone. `status` is `same`, `differs` (another version),
 `missing` (not in the secondary) or `extra` (only in the secondary); for
-`differs`, `newer` says which side was written last, a hint only, as
-clocks of different machines can differ. Printed, the addresses of the
-secondaries are listed once above the table and numbered in the column
-`location`.
+`differs`, `newer` says which side was written last: `"source"` (the
+primary here) or `"target"` (the location of the row). It is a hint
+only, as clocks of different machines can differ. Printed, the source is
+named first, and the addresses of the other locations are listed once
+above the table and numbered in the column `location`.
 
 ``` r
 
-store_status(st)[c("dataset", "location", "status", "newer")]
+store_status(st)
+#> Source: <tempdir>/locations/primary
 #> Locations: [1] <tempdir>/locations/copy-1
 #>            [2] <tempdir>/locations/copy-2
-#> # A tibble: 4 × 4
-#>   dataset      location status  newer  
-#>   <chr>        <chr>    <chr>   <chr>  
-#> 1 sales/daily  [1]      same    NA     
-#> 2 sales/weekly [1]      missing NA     
-#> 3 sales/daily  [2]      differs primary
-#> 4 sales/weekly [2]      missing NA
+#> # A tibble: 4 × 8
+#>   dataset      location status  newer  primary_version  location_version
+#>   <chr>        <chr>    <chr>   <chr>  <chr>            <chr>           
+#> 1 sales/daily  [1]      same    NA     9a645b5061657398 9a645b5061657398
+#> 2 sales/weekly [1]      missing NA     72f66b800c3fa743 NA              
+#> 3 sales/daily  [2]      differs source 9a645b5061657398 e39540d1414c4708
+#> 4 sales/weekly [2]      missing NA     72f66b800c3fa743 NA              
+#> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
+```
+
+`from` compares every other location, the primary included, with one of
+the secondaries instead. The columns keep their names: `primary_version`
+and `primary_updated` then describe that source.
+
+``` r
+
+store_status(st, from = copy_2)[c("dataset", "location", "status", "newer")]
+#> Source: <tempdir>/locations/copy-2
+#> Locations: [1] <tempdir>/locations/primary
+#>            [2] <tempdir>/locations/copy-1
+#> # A tibble: 3 × 4
+#>   dataset      location status  newer 
+#>   <chr>        <chr>    <chr>   <chr> 
+#> 1 sales/daily  [1]      differs target
+#> 2 sales/weekly [1]      extra   NA    
+#> 3 sales/daily  [2]      differs target
 ```
 
 A copy that is behind is never read: reads go to a location that holds
@@ -290,11 +311,12 @@ held.
 ## Bringing secondaries up to date
 
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-copies datasets from the primary to the secondaries: by default every
-dataset that is missing or differs, to every secondary. Like a write, it
-copies only the files a location lacks, checks each by MD5 and switches
-the catalog last. It never deletes a dataset. `dry_run = TRUE` shows
-what it would do.
+copies datasets from one location, the *source*, to the others, the
+*targets*: by default from the primary, every dataset that is missing or
+differs, to every secondary. Like a write, it copies only the files a
+location lacks, checks each by MD5 and switches the catalog last. By
+default it never deletes a dataset. `dry_run = TRUE` shows what it would
+do and changes nothing.
 
 ``` r
 
@@ -318,6 +340,9 @@ store_sync(st, to = copy_2)
 #>   location.
 #> ✔ secondary  <tempdir>/locations/copy-2   2 datasets, 3/3 files sent  42.9 kB  0.2s
 #> ✔ MD5 identical for 3 files sent to 1 location. Catalogs updated.
+#> Warning: `store_sync()` replaced 1 version held by the target locations:
+#> • '<tempdir>/locations/copy-2': "sales/daily" version e39540d1414c4708 (updated
+#>   2026-11-22 15:55:00) replaced by version 9a645b5061657398 (updated 2026-11-22 15:55:02).
 ```
 
 [`store_copy()`](https://ebukin.github.io/rcs/reference/store_copy.md)
@@ -334,6 +359,7 @@ store_copy(st, "sales/weekly", from = copy_2, to = copy_1)
 #> ✔ 1/1 file sent (11.7 kB) in 0.1s, MD5 verified. Catalogs of
 #>   <tempdir>/locations/copy-1 updated.
 store_status(st)[c("dataset", "location", "status")]
+#> Source: <tempdir>/locations/primary
 #> Locations: [1] <tempdir>/locations/copy-1
 #>            [2] <tempdir>/locations/copy-2
 #> # A tibble: 4 × 3
@@ -367,6 +393,189 @@ store_rebuild(st, copy_2)
 #>   versions.
 ```
 
+## Syncing from a secondary
+
+Work can also start on a secondary: on a laptop without network, say, a
+connection whose primary is the local copy writes there alone.
+
+``` r
+
+offline <- store_connect(copy_1)
+store_write(offline, rcs_sim_table(80, seed = 4), "sales/monthly",
+  title = "Monthly sales",
+  description = "Simulated monthly sales."
+)
+#> ℹ Writing "sales/monthly": 80 rows in 1 file.
+#> ✔ primary  <tempdir>/locations/copy-1  1/1 files sent  13.1 kB  0.1s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+```
+
+Back on the full connection, `from` names the location to sync from. The
+targets are then every other location, the primary included; `to` limits
+them as before.
+
+``` r
+
+store_refresh(st)
+store_sync(st, from = copy_1)
+#> ℹ Syncing 2 datasets from the secondary <tempdir>/locations/copy-1 to 2 locations.
+#> ✔ primary    <tempdir>/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 1/1 files sent  13.1 kB  0.1s
+#> ✔ MD5 identical for 2 files sent to 2 locations. Catalogs updated.
+st
+#> ── rcs store ───────────────────────────────────────────────────────────────────
+#> Locations:
+#>   primary      local  <tempdir>/locations/primary
+#>   secondary 1  local  <tempdir>/locations/copy-1
+#>   secondary 2  local  <tempdir>/locations/copy-2
+#> History: off (store default)
+#> Datasets: 2
+#>   name       kind   rows     size  files  updated           1  2
+#>   sales/
+#>     daily    table   300  31.2 kB      2  2026-11-22 15:55  =  =
+#>     monthly  table    80  13.1 kB      1  2026-11-22 15:55  =  =
+#> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
+```
+
+## Conflicts
+
+A dataset may have changed on both sides: here `sales/daily` is written
+through a connection to the primary alone, and later through the
+connection to the first copy alone.
+
+``` r
+
+store_write(only_primary, rcs_sim_table(120, seed = 5), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+#> ℹ Replacing "sales/daily": 120 rows in 2 files (partition year).
+#> ✔ primary  <tempdir>/locations/primary  2/2 files sent  24.6 kB  0.2s
+#> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
+Sys.sleep(1)
+store_write(offline, rcs_sim_table(140, seed = 6), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product.",
+  key = c("shop_id", "date", "product"),
+  partition = "year",
+  mode = "replace"
+)
+#> ℹ Replacing "sales/daily": 140 rows in 2 files (partition year).
+#> ✔ primary  <tempdir>/locations/copy-1  2/2 files sent  25.7 kB  0.1s
+#> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
+store_refresh(st)
+```
+
+A sync from the primary finds that the first copy holds another version
+that was written *later* than the primary’s: a **conflict**. That
+dataset is not copied there. Everything else goes ahead (here the second
+copy, which held an older version, gets the primary’s, and a warning
+lists the version it replaced); after the last target the call stops
+with an error of class `rcs_error_sync_conflict` that lists every
+conflict. The condition’s field `result` holds the result table, so a
+script can inspect it.
+
+``` r
+
+store_sync(st)
+#> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary to 2 secondary
+#>   locations.
+#> ✖ secondary  <tempdir>/locations/copy-1   1 conflict, newer here: "sales/daily"
+#> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 2/2 files sent  24.6 kB  0.2s
+#> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
+#> Warning: `store_sync()` replaced 1 version held by the target locations:
+#> • '<tempdir>/locations/copy-2': "sales/daily" version 9a645b5061657398 (updated
+#>   2026-11-22 15:55:02) replaced by version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+#> Error in `store_sync()`:
+#> ! 1 dataset was not copied: the target holds a newer version.
+#> ✖ '<tempdir>/locations/copy-1': "sales/daily" version 18f5b5dad2633fac (updated
+#>   2026-11-22 15:55:09) is newer than the source's version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+#> ℹ The other copies and deletions were made.
+#> ℹ Run with `force = TRUE` to copy the source over it, or sync from the location that holds the newer version.
+```
+
+Conflicts are detected by the times of the last writes recorded in the
+catalogs, which come from the clocks of the machines that wrote. Decide
+which version to keep: to keep the primary’s, `force = TRUE` copies it
+over the newer one, and the warning names the version that was replaced.
+To keep the copy’s, sync from the copy instead.
+
+``` r
+
+store_sync(st, force = TRUE)
+#> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary to 2 secondary
+#>   locations.
+#> ✔ secondary  <tempdir>/locations/copy-1   1 dataset, 2/2 files sent  24.6 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-2   up to date
+#> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
+#> Warning: `store_sync()` replaced 1 version held by the target locations:
+#> • '<tempdir>/locations/copy-1': "sales/daily" version 18f5b5dad2633fac (updated
+#>   2026-11-22 15:55:09) replaced by version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+```
+
+When the source is the newer side, the copy goes ahead without `force`;
+the warning (class `rcs_warning_sync_overwrite`) still lists every
+target version that was overwritten.
+
+## Deletions
+
+A dataset deleted in one location stays in the others:
+[`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md)
+shows it there as `extra`, and a sync leaves it alone. `delete = TRUE`
+deletes from each target the datasets the source no longer holds, with
+their index tables, after the copies; history versions are kept, as with
+`store_delete(history = FALSE)`. `datasets` limits the deletions too.
+
+Here `sales/monthly` is deleted on the first copy only, then the
+deletion is synced from there:
+
+``` r
+
+store_delete(offline, "sales/monthly", confirm = "sales/monthly")
+#> ℹ Deleting "sales/monthly" and its index table from every location, keeping its history.
+#> ✔ primary  <tempdir>/locations/copy-1  2 files deleted  13.1 kB
+#> ✔ "sales/monthly" is removed from 1 location.
+store_refresh(st)
+store_sync(st, from = copy_1, delete = TRUE)
+#> ℹ Syncing 1 dataset from the secondary <tempdir>/locations/copy-1 to 2 locations.
+#> ! primary    <tempdir>/locations/primary  1 dataset kept, delete on primary needs
+#>   force: "sales/monthly"
+#> ✔ secondary  <tempdir>/locations/copy-2   1 dataset deleted: "sales/monthly"
+#> ✔ 1 dataset deleted in 1 location.
+#> ! 1 dataset kept in the primary: delete on primary needs force (`force = TRUE`).
+```
+
+The second copy lost the dataset, but the primary kept it: deleting from
+the primary, the truth of the store, also needs `force = TRUE`. Until
+then the result lists it in the column `kept`.
+
+``` r
+
+store_sync(st, from = copy_1, delete = TRUE, force = TRUE)
+#> ℹ Syncing 1 dataset from the secondary <tempdir>/locations/copy-1 to 2 locations.
+#> ✔ primary    <tempdir>/locations/primary  1 dataset deleted: "sales/monthly"
+#> ✔ secondary  <tempdir>/locations/copy-2   up to date
+#> ✔ 1 dataset deleted in 1 location.
+st
+#> ── rcs store ───────────────────────────────────────────────────────────────────
+#> Locations:
+#>   primary      local  <tempdir>/locations/primary
+#>   secondary 1  local  <tempdir>/locations/copy-1
+#>   secondary 2  local  <tempdir>/locations/copy-2
+#> History: off (store default)
+#> Datasets: 1
+#>   name     kind   rows     size  files  updated           1  2
+#>   sales/
+#>     daily  table   120  24.6 kB      2  2026-11-22 15:55  =  =
+#> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
+```
+
+Deletions run also when conflicts were found, and are reported with
+them.
+
 ## Cloud locations
 
 A Google Cloud Storage location is given by its address. Nothing else
@@ -392,42 +601,147 @@ store_create("gs://my-bucket/new-store")
 Data are streamed: a read with filters fetches only the files and blocks
 of rows it needs, without downloading whole datasets.
 
-### Authentication
+### Credentials
 
-Three clients talk to Google Cloud Storage, and each finds its
-credentials on its own.
-
-- **Arrow** reads data and copies files. It uses Google’s default
-  credentials: the key file named by the environment variable
-  `GOOGLE_APPLICATION_CREDENTIALS` (a service account), or the
-  credentials written by `gcloud auth application-default login`, or, on
-  Google Cloud machines, those of the machine. The installed arrow
-  package must support GCS:
-  [`arrow::arrow_with_gcs()`](https://arrow.apache.org/docs/r/reference/arrow_info.html)
-  returns `TRUE`.
-- **The storage JSON API** reads the MD5 checksums of stored files, so
-  that files need not be downloaded to be verified. It needs the
-  packages gargle and httr2 and uses the same credentials as Arrow.
-- **GDAL** reads rasters through its `/vsigs/` path. It does not find
-  the credentials of `gcloud auth application-default login` by itself.
-  Set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key, or to
-  the credentials file that `gcloud` wrote, or set
-  `GS_OAUTH2_REFRESH_TOKEN`, `GS_OAUTH2_CLIENT_ID` and
-  `GS_OAUTH2_CLIENT_SECRET`.
-
-For a personal account, one setup covers all three: log in once in a
-terminal, then point the variable to the file it wrote, for example in
-`.Renviron`:
-
-    # after: gcloud auth application-default login
-    GOOGLE_APPLICATION_CREDENTIALS=/path/to/application_default_credentials.json
-
-For a service account, point the same variable to its key file instead.
-
-When a location cannot be reached, the error lists what each client
-needs. A primary that cannot be reached stops
+Four clients of the package talk to Google Cloud Storage: **Arrow**
+reads data and copies files (the installed arrow package must support
+GCS:
+[`arrow::arrow_with_gcs()`](https://arrow.apache.org/docs/r/reference/arrow_info.html)
+returns `TRUE`); the **storage JSON API** reads the MD5 checksums of
+stored files, so that files need not be downloaded to be verified (it
+needs the packages gargle and httr2); **GDAL** reads rasters through its
+`/vsigs/` path; and **DuckDB** reads data files when a store is opened
+in DuckDB (see
+[`vignette("duckdb")`](https://ebukin.github.io/rcs/articles/duckdb.md)).
+They all get their credentials from the connection: set them once, with
+the argument `auth` of
 [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md)
-with that list; a secondary gives a warning that includes it.
+or
+[`store_create()`](https://ebukin.github.io/rcs/reference/store_create.md),
+and every client uses them. No environment variable is needed or
+changed.
+
+Without `auth`, every bucket location uses
+[`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md),
+the default lookup. It is a chain in which the first variable that is
+set decides; it does not fall through to the next step:
+
+1.  when the environment variable `GOOGLE_APPLICATION_CREDENTIALS` is
+    set, the key file it names, and only that file: a missing file is an
+    error (class `rcs_error_backend`);
+2.  else, when `CLOUDSDK_CONFIG` is set,
+    `application_default_credentials.json` in that folder only; gcloud’s
+    own folder is not tried;
+3.  else the same file in gcloud’s own folder (`%APPDATA%/gcloud` on
+    Windows, `~/.config/gcloud` elsewhere), written once by
+    `gcloud auth application-default login`;
+4.  when the file of step 2 or 3 does not exist, *ambient* credentials:
+    Arrow and the JSON API use Google’s own defaults, such as the
+    machine’s account on Google Cloud. GDAL and DuckDB cannot use these.
+
+For a personal account, the usual setup is therefore one command in a
+terminal, once per machine, and nothing in R:
+
+    gcloud auth application-default login
+
+[`rcs_auth_gcs()`](https://ebukin.github.io/rcs/reference/rcs_auth_gcs.md)
+also takes a credential explicitly: `key` is a JSON key file, of a
+service account or of a user login; `token` is an access token obtained
+elsewhere; `fun` is a function that returns a fresh token each time it
+is called. `auth` accepts such an object, the path of a key file, or a
+list named by address that gives each location its own credential
+(locations left out use the default lookup):
+
+``` r
+
+# A service account for every bucket of the connection
+st <- store_connect("gs://my-bucket/store",
+  auth = rcs_auth_gcs(key = "~/keys/reader.json")
+)
+
+# The same, with the path alone
+st <- store_connect("gs://my-bucket/store", auth = "~/keys/reader.json")
+
+# One credential per location
+st <- store_connect("gs://my-bucket/store",
+  secondary = c("~/data/my-store", "gs://other-bucket/store"),
+  auth = list(
+    "gs://my-bucket/store" = "~/keys/reader.json",
+    "gs://other-bucket/store" = rcs_auth_gcs(fun = my_token_function)
+  )
+)
+```
+
+Tokens of a key file or a function are renewed five minutes before they
+expire, so a long session never needs to sign in again; a `token` given
+directly cannot be renewed and lasts as long as its issuer allows,
+usually an hour. Asking for the same source twice gives the same object,
+with its token. Printing a credential never contacts the network and
+never shows a secret; the identity (the account’s e-mail) is known after
+the first token:
+
+``` r
+
+rcs_auth_gcs(token = "<an access token>")
+#> <rcs_auth_gcs>
+#> Source:   an access token given to rcs_auth_gcs(token = )
+#> Identity: known after the first token
+#> Token:    given by the caller, not renewed
+```
+
+Credentials are never written to files, catalogs or logs, nor put in
+environment variables, with one exception: **GDAL’s options are
+process-wide**. Reading a raster from a bucket gives GDAL the credential
+of that location (the three `GS_OAUTH2_*` options for a user login,
+`GOOGLE_APPLICATION_CREDENTIALS` as a GDAL option for a service account,
+an `Authorization` header for a token or a function), and it applies to
+every GDAL read in the R process. Reading rasters through two
+connections with different credentials therefore switches GDAL from one
+to the other; the first switch warns (class
+`rcs_warning_gdal_credential`), because a raster opened with the
+previous credential reads its tiles lazily and may fail on its next
+read. Also, GDAL remembers a failed open: after a credential problem is
+fixed, a raster that failed may need a new R session.
+
+DuckDB gets a temporary secret in its own connection, made from the
+location’s token. A secret holds a token, not a key: after about an hour
+of DuckDB work on a bucket, call
+[`store_duckdb()`](https://ebukin.github.io/rcs/reference/store_duckdb.md)
+again to refresh it.
+
+[`store_auth_check()`](https://ebukin.github.io/rcs/reference/store_auth_check.md)
+tries each client on each location with a small probe and reports,
+without stopping, which work. Local folders need no credentials; each
+local location gives one row (the column `location`, the address, is
+left out here):
+
+``` r
+
+store_auth_check(st)[c("client", "ok", "note")]
+#> # A tibble: 3 × 3
+#>   client ok    note                               
+#>   <chr>  <lgl> <chr>                              
+#> 1 all    TRUE  local folder: no credentials needed
+#> 2 all    TRUE  local folder: no credentials needed
+#> 3 all    TRUE  local folder: no credentials needed
+```
+
+On a bucket it gives one row per client: Arrow and the JSON API look up
+the catalog file, GDAL opens the first raster of the location (`ok` is
+`NA` when there is none), and DuckDB counts the rows of the catalog
+(`NA` when duckdb is not installed):
+
+``` r
+
+st <- store_connect("gs://my-bucket/store")
+store_auth_check(st)
+```
+
+When a location cannot be reached, the error names the credential in use
+and how to pass another one with `auth`. A primary that cannot be
+reached stops
+[`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md);
+a secondary gives a warning.
 
 ## History per connection
 
@@ -450,6 +764,6 @@ st_keep
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1
 #>   sales/
-#>     daily  table   300  31.2 kB      2  2026-11-21 21:57  =
+#>     daily  table   120  24.6 kB      2  2026-11-22 15:55  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```

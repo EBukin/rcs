@@ -2,8 +2,10 @@
 
 Cells are stored as 64-bit integers
 ([`bit64::integer64`](https://bit64.r-lib.org/reference/bit64-package.html)),
-the compact form that Parquet filters and sorts fast. `store_h3_hex()`
-converts them to the 15-character hex strings that other H3 tools use.
+the compact form that Parquet filters and sorts fast, and a read returns
+them as [rcs_h3](https://ebukin.github.io/rcs/reference/rcs_h3.md)
+(`integer64` printed as hex). `store_h3_hex()` converts them to the
+15-character hex strings that other H3 tools use.
 
 ## Usage
 
@@ -17,7 +19,8 @@ store_h3_hex(x, columns = NULL)
 
   A data frame returned by a read (a tibble or an `sf` object), or a
   vector of cells
-  ([`bit64::integer64`](https://bit64.r-lib.org/reference/bit64-package.html),
+  ([rcs_h3](https://ebukin.github.io/rcs/reference/rcs_h3.md),
+  [`bit64::integer64`](https://bit64.r-lib.org/reference/bit64-package.html),
   hex strings or `h3o` `H3`).
 
 - columns:

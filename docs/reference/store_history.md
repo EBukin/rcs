@@ -63,14 +63,14 @@ store_write(st, sales, "sales/daily",
 )
 #> ℹ Replacing "sales/daily": 100 rows in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-history/primary  1/1
-#>   files sent  13.7 kB  0.2s
+#>   files sent  13.7 kB  0.4s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 store_history(st, "sales/daily")
 #> # A tibble: 2 × 8
 #>   version    current written             replaced            n_files  rows bytes
 #>   <chr>      <lgl>   <dttm>              <dttm>                <int> <dbl> <dbl>
-#> 1 e359aee05… TRUE    2026-11-21 16:55:18 NA                        1   100 13733
-#> 2 9eda87d6a… FALSE   2026-11-21 16:55:18 2026-11-21 16:55:18       1   100 13733
+#> 1 e359aee05… TRUE    2026-11-22 10:52:06 NA                        1   100 13733
+#> 2 9eda87d6a… FALSE   2026-11-22 10:52:06 2026-11-22 10:52:06       1   100 13733
 #> # ℹ 1 more variable: complete <lgl>
 unlink(root, recursive = TRUE)
 ```

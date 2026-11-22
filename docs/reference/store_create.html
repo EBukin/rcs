@@ -25,7 +25,8 @@ already holds catalogs is left unchanged and the call aborts."></head><body>
 <li class="active nav-item"><a class="nav-link" href="../reference/index.html">Reference</a></li>
 <li class="nav-item dropdown">
   <button class="nav-link dropdown-toggle" type="button" id="dropdown-articles" data-bs-toggle="dropdown" aria-expanded="false" aria-haspopup="true">Articles</button>
-  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
+  <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
+    <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
@@ -70,7 +71,7 @@ already holds catalogs is left unchanged and the call aborts.</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">store_create</span><span class="op">(</span><span class="va">location</span>, history <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">store_create</span><span class="op">(</span><span class="va">location</span>, history <span class="op">=</span> <span class="cn">FALSE</span>, auth <span class="op">=</span> <span class="cn">NULL</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -87,6 +88,12 @@ missing) or <code>gs://bucket/prefix</code>.</p></dd>
 datasets, <code>FALSE</code> unless switched on. A connection
 (<code>store_connect(history = )</code>) and a dataset (<code>store_write(history = )</code>)
 can override it.</p></dd>
+
+
+<dt id="arg-auth">auth<a class="anchor" aria-label="anchor" href="#arg-auth"></a></dt>
+<dd><p>Credentials when <code>location</code> is on Google Cloud Storage: <code>NULL</code>
+uses <code><a href="rcs_auth_gcs.html">rcs_auth_gcs()</a></code>, the default lookup; else an object made by
+<code><a href="rcs_auth_gcs.html">rcs_auth_gcs()</a></code> or the path of a key file.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -111,7 +118,7 @@ can override it.</p></dd>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 100 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-create  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.1s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
@@ -121,7 +128,7 @@ can override it.</p></dd>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.7 kB      2  2026-11-21 16:55</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.7 kB      2  2026-11-22 10:51</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">location</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

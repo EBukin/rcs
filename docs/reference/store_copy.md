@@ -74,9 +74,10 @@ store_copy(st, "sales/daily",
 #> ℹ Copying "sales/daily" (version bf16efd1aebea856, 2 files) from
 #>   /tmp/Rtmp/rcs-example-copy/primary to
 #>   /tmp/Rtmp/rcs-example-copy/copy.
-#> ✔ 2/2 files sent (23.7 kB) in 0.2s, MD5 verified. Catalogs of
+#> ✔ 2/2 files sent (23.7 kB) in 0.3s, MD5 verified. Catalogs of
 #>   /tmp/Rtmp/rcs-example-copy/copy updated.
 store_status(st)
+#> Source: /tmp/Rtmp/rcs-example-copy/primary
 #> Locations: [1] /tmp/Rtmp/rcs-example-copy/copy
 #> # A tibble: 1 × 8
 #>   dataset     location status newer primary_version  location_version
