@@ -191,10 +191,13 @@ partition_plan_h3 <- function(data, max_files, h3_max_res, call) {
     if (vctrs::vec_unique_count(cell_parents) <= max_files) {
       parents <- cell_parents[at_cell]
       column <- paste0("h3_p", res)
+      if (column %in% names(data)) {
+        check_supplied_partition(data[[column]], parents, column, call)
+      }
       data <- tibble::as_tibble(data)
       data[[column]] <- parents
-      at <- match("h3", names(data))
       others <- setdiff(names(data), column)
+      at <- match("h3", others)
       data <- data[c(others[seq_len(at)], column, others[-seq_len(at)])]
       groups <- partition_groups(data, column)
       return(list(data = data, partition = column, res = res, groups = groups))
@@ -206,6 +209,28 @@ partition_plan_h3 <- function(data, max_files, h3_max_res, call) {
       i = "Raise {.arg max_files}."
     ),
     class = "rcs_error_argument", call = call
+  )
+}
+
+# D27: a column of the data named as the chosen partition column serves as
+# it when it holds the same cells (moved after `h3`); a different one aborts.
+check_supplied_partition <- function(supplied, parents, column, call) {
+  same <- if (inherits(supplied, "integer64") && length(supplied) == length(parents)) {
+    geo_cells_equal(supplied, parents)
+  } else {
+    rep(FALSE, length(parents))
+  }
+  if (all(same)) {
+    return(invisible())
+  }
+  n <- sum(!same)
+  cli::cli_abort(
+    c(
+      "The column {.field {column}} of {.arg x} differs from the partition column the write computes ({n} row{?s}).",
+      i = "With {.code partition = \"h3\"} the write partitions by {.field {column}}.",
+      i = "Remove the column with {.fn rcs_geo_strip}, or prepare it with {.fn rcs_geo_add} from the same cells."
+    ),
+    class = "rcs_error_prepared", call = call
   )
 }
 

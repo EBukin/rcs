@@ -852,20 +852,21 @@ test_that("prepared data equal to the write's own columns are accepted, with the
   skip_if_no_h3()
   s <- local_store()
   raw <- rcs_sim_polygons(60, seed = 8)
-  write_shapes(s$st, raw, key = "id", partition = "h3", max_files = 4)
+  p <- local_store()
+  write_prepared(p$st, raw, key = "id", partition = "h3", max_files = 4)
   prepared <- rcs_geo_add(raw)
   prepared$.rcs_id <- bit64::as.integer64(rev(seq_len(60)))
   write_prepared(s$st, prepared, key = "id", partition = "h3", max_files = 4)
-  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(p$st)$version)
   expect_identical(prepared_entry(s$st)$h3_res, 5L)
   # bbox alone, h3 alone, and integer64 instead of rcs_h3
   only_bbox <- rcs_geo_add(raw, h3_res = NULL)
   write_prepared(s$st, only_bbox, mode = "replace", key = "id", partition = "h3", max_files = 4)
-  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(p$st)$version)
   only_h3 <- rcs_geo_add(raw, bbox = FALSE)
   only_h3$h3 <- rcs_h3_strip(only_h3$h3)
   write_prepared(s$st, only_h3, mode = "replace", key = "id", partition = "h3", max_files = 4)
-  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(p$st)$version)
   expect_store_valid(s$st)
 })
 
@@ -910,9 +911,12 @@ test_that("tampered h3 or bbox abort naming the rows", {
 test_that("cells prepared with another engine abort and name the write's engine", {
   skip_if_no_h3()
   s <- local_store()
-  x <- sf::st_sf(id = 1:2, geometry = geo_sfc_of_wkt(c(geo_long_edge_wkt(), "POINT(-27 7)")))
-  planar <- rcs_geo_add(x, h3_res = 3L, geocode_engine = "planar")
-  sphere <- rcs_geo_add(x, h3_res = 3L, geocode_engine = "s2")
+  # a sliver along 60 degrees north: its long edges bow north on the sphere,
+  # so its main cell at resolution 2 differs between the plane and the sphere
+  sliver <- "POLYGON((-40 60, 0 60, 0 60.5, -40 60.5, -40 60))"
+  x <- sf::st_sf(id = 1:2, geometry = geo_sfc_of_wkt(c(sliver, "POINT(-27 7)")))
+  planar <- rcs_geo_add(x, h3_res = 2L, geocode_engine = "planar")
+  sphere <- rcs_geo_add(x, h3_res = 2L, geocode_engine = "s2")
   expect_false(identical(as.character(planar$h3), as.character(sphere$h3)))
   err <- expect_error(write_prepared(s$st, planar, key = "id"), class = "rcs_error_prepared")
   expect_match(conditionMessage(err), "\"auto\"", fixed = TRUE)
@@ -979,6 +983,7 @@ test_that("update handles prepared data the same way", {
   partition <- prepared_entry(s$st)$partition[[1]]
   r <- as.integer(sub("h3_p", "", partition))
   write_prepared(s$st, rcs_geo_add(part, parents = r), mode = "update")
+  write_prepared(plain$st, part, mode = "update")
   expect_identical(prepared_entry(s$st)$version, prepared_entry(plain$st)$version)
   wrong <- rcs_geo_add(part, parents = r)
   wrong[[partition]][1] <- h3_parent(rcs_geo_add(sf::st_sf(geometry = geo_sfc_of_wkt("POINT(-10 50)")))$h3, r)
@@ -1003,13 +1008,14 @@ test_that("with partition = \"h3\" an equal h3_p<r> serves as partition column, 
   skip_if_no_h3()
   s <- local_store()
   raw <- rcs_sim_polygons(60, seed = 10)
-  write_shapes(s$st, raw, key = "id", partition = "h3", max_files = 4)
-  partition <- shapes_entry(s$st)$partition[[1]]
+  p <- local_store()
+  write_prepared(p$st, raw, key = "id", partition = "h3", max_files = 4)
+  partition <- prepared_entry(p$st)$partition[[1]]
   r <- as.integer(sub("h3_p", "", partition))
   prepared <- rcs_geo_add(raw, parents = r)
   write_prepared(s$st, prepared, key = "id", partition = "h3", max_files = 4)
   expect_identical(prepared_entry(s$st)$partition[[1]], partition)
-  expect_identical(prepared_entry(s$st)$version, shapes_entry(s$st)$version)
+  expect_identical(prepared_entry(s$st)$version, prepared_entry(p$st)$version)
   wrong <- prepared
   wrong[[partition]][1] <- h3_parent(rcs_geo_add(sf::st_sf(geometry = geo_sfc_of_wkt("POINT(-10 50)")))$h3, r)
   expect_error(

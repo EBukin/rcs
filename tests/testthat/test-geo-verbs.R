@@ -11,8 +11,10 @@ encoded_by_row <- function(x, h3_res = 5L, geocode_engine = "auto") {
   list(h3 = h3, bbox = bbox, enc = enc)
 }
 
+# The 64 bits of cells as plain integer64.
 as_bits <- function(x) {
-  bit64::as.integer64(unclass(x))
+  class(x) <- "integer64"
+  x
 }
 
 local_geo_store <- function(frame = parent.frame()) {
@@ -62,7 +64,7 @@ test_that("rcs_geo_add() keeps equal columns, aborts on different ones unless re
   once <- rcs_geo_add(raw, h3_res = 5L)
   expect_identical(rcs_geo_add(once, h3_res = 5L), once)
   tampered <- once
-  tampered$h3[3] <- tampered$h3[1]
+  tampered$h3[3] <- tampered$h3[which(as.character(once$h3) != as.character(once$h3[3]))[1]]
   expect_false(identical(as_bits(tampered$h3[3]), as_bits(once$h3[3])))
   expect_error(rcs_geo_add(tampered, h3_res = 5L), "h3", class = "rcs_error_prepared")
   expect_identical(rcs_geo_add(tampered, h3_res = 5L, replace = TRUE), once)
@@ -144,7 +146,7 @@ test_that("rcs_geo_index(crossing_only = FALSE) adds one line per inside row wit
   raw <- rcs_sim_polygons(40, seed = 6)
   crossing <- rcs_geo_index(raw, "id", h3_res = 5L)
   all <- rcs_geo_index(raw, "id", h3_res = 5L, crossing_only = FALSE)
-  inside <- setdiff(raw$id, crossing$id)
+  inside <- setdiff(raw$id[!sf::st_is_empty(raw)], crossing$id)
   expect_gt(length(inside), 0)
   extra <- all[all$id %in% inside, ]
   expect_identical(sort(extra$id), sort(inside))
@@ -204,7 +206,7 @@ expect_round_trip <- function(st, raw, prepared, dataset, key, ...) {
     lapply(sf::st_as_binary(sf::st_geometry(back), EWKB = FALSE), as.raw),
     lapply(sf::st_as_binary(sf::st_geometry(raw), EWKB = FALSE), as.raw)
   )
-  expect_equal(sf::st_crs(back), sf::st_crs(raw))
+  expect_true(sf::st_crs(back) == sf::st_crs(raw))
 }
 
 test_that("raw -> rcs_geo_add() -> store -> collect() -> rcs_geo_strip() gives raw back", {

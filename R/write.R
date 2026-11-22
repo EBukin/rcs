@@ -212,8 +212,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   args <- list(
     x = x, kind = kind, dataset = dataset, title = title,
     description = description, key = key, partition = partition,
-    h3_res = h3_res, geocode = geocode, geocode_engine = geocode_engine,
-    engine_given = engine_given, max_files = max_files,
+    h3_res = h3_res, h3_res_given = !missing(h3_res), geocode = geocode,
+    geocode_engine = geocode_engine, engine_given = engine_given, max_files = max_files,
     history = dataset_history, source = source %||% NA_character_,
     inputs = inputs %||% NA_character_, columns = columns,
     rows_per_group = rows_per_group, existing = existing,
@@ -409,10 +409,14 @@ stage_full <- function(a) {
     )
     return(list(data = staged_src(staged), index = NULL, reference = data, data_dir = data_dir))
   }
+  prepared <- prepared_split(a$x, a$h3_res, a$h3_res_given, a$geocode, a$call)
+  a$x <- prepared$x
+  a$h3_res <- prepared$h3_res
   enc <- geo_encode(
     a$x, h3_res = a$h3_res, geocode = a$geocode, key = a$key,
     geocode_engine = a$geocode_engine
   )
+  prepared_compare(prepared, enc, a$x, a$key, a$geocode_engine, a$call)
   descriptions <- a$columns %||% stored_descriptions(a$existing, names(enc$data))
   staged <- files_stage(
     enc$data, a$dataset, a$title, a$description,
@@ -572,16 +576,27 @@ stage_update <- function(st, a) {
     names(ids) <- old_files$path
     all_ids <- do.call(c, c(list(bit64::integer64()), unname(ids)))
     id_start <- if (length(all_ids) > 0) max(all_ids) + bit64::as.integer64(1) else bit64::as.integer64(1)
+    prepared <- prepared_split(a$x, h3_res, TRUE, geocode, call)
+    a$x <- prepared$x
     enc <- geo_encode(
       a$x, h3_res = if (geocode) h3_res else 5L, geocode = geocode,
       key = if (length(key)) key, id_start = id_start, geocode_engine = encode_engine
     )
+    prepared_compare(prepared, enc, a$x, if (length(key)) key, encode_engine, call)
     data <- enc$data
   } else {
     data <- tibble::as_tibble(a$x)
   }
   check_key(data, key, call = call)
-  data <- check_update_columns(data, spec_old, exclude = if (is_h3) old_partition, dataset, call)
+  # D27: a supplied partition column is checked by `partition_plan()`.
+  supplied_partition <- if (is_h3 && old_partition %in% names(data)) data[[old_partition]]
+  data <- check_update_columns(
+    data[setdiff(names(data), if (is_h3) old_partition)], spec_old,
+    exclude = if (is_h3) old_partition, dataset, call
+  )
+  if (!is.null(supplied_partition)) {
+    data[[old_partition]] <- supplied_partition
+  }
 
   plan_new <- partition_plan(
     data, given_partition, max_files = .Machine$integer.max,
@@ -711,6 +726,120 @@ check_update_engine <- function(given, stored, dataset, geocode, call) {
   invisible()
 }
 
+# Prepared data (D27) ------------------------------------------------------------
+
+# The package's columns of a prepared `sf`: `.rcs_id` is dropped; `h3` and
+# `bbox` are set aside, to be compared with what the write computes. With
+# cells, `h3_res` comes from them when not given; mixed resolutions, a given
+# `h3_res` that differs, and cells with `geocode = FALSE` abort.
+# Returns `x` without those columns, the supplied `h3` (hex, input order) and
+# `bbox`, and the resolution to geocode at.
+prepared_split <- function(x, h3_res, h3_res_given, geocode, call) {
+  out <- list(x = x, h3 = NULL, bbox = NULL, h3_res = h3_res)
+  present <- intersect(c(".rcs_id", "h3", "bbox"), names(x))
+  if (length(present) == 0) {
+    return(out)
+  }
+  if ("h3" %in% present) {
+    if (!geocode) {
+      cli::cli_abort(
+        c(
+          "{.arg x} has a column {.field h3}, but {.code geocode = FALSE} writes no cells.",
+          i = "Remove it with {.code rcs_geo_strip(x, \"h3\")}, or leave out {.code geocode = FALSE}."
+        ),
+        class = "rcs_error_prepared", call = call
+      )
+    }
+    hex <- h3_input_hex(x[["h3"]], arg = "x$h3", call = call)
+    res <- sort(unique(h3_hex_res(hex[!is.na(hex)])))
+    if (length(res) > 1) {
+      cli::cli_abort(
+        c(
+          "The column {.field h3} of {.arg x} holds cells of several resolutions: {res}.",
+          i = "Prepare {.arg x} with {.fn rcs_geo_add} at one {.arg h3_res}, or call {.fn rcs_geo_strip} first."
+        ),
+        class = "rcs_error_prepared", call = call
+      )
+    }
+    if (length(res) == 1) {
+      if (isTRUE(h3_res_given) && !identical(as.integer(res), as.integer(h3_res))) {
+        cli::cli_abort(
+          c(
+            "The column {.field h3} of {.arg x} holds cells of resolution {res}, but the write uses {.code h3_res = {h3_res}}.",
+            i = "Leave out {.arg h3_res} to write at resolution {res}, or call {.fn rcs_geo_strip} first."
+          ),
+          class = "rcs_error_prepared", call = call
+        )
+      }
+      out$h3_res <- as.integer(res)
+    }
+    out$h3 <- hex
+  }
+  if ("bbox" %in% present) {
+    out$bbox <- x[["bbox"]]
+  }
+  out$x <- geo_drop_columns(x, present)
+  out
+}
+
+# Compares the supplied `h3` and `bbox` with those of `geo_encode()`, row by
+# row of `x`; any difference aborts naming the first five keys (or rows).
+prepared_compare <- function(prepared, enc, x, key, geocode_engine, call) {
+  if (is.null(prepared$h3) && is.null(prepared$bbox)) {
+    return(invisible())
+  }
+  n <- length(enc$order)
+  differs <- rep(FALSE, n)
+  columns <- character()
+  if (!is.null(prepared$h3)) {
+    computed <- character(n)
+    computed[enc$order] <- h3_int64_to_hex_raw(enc$data$h3)
+    bad <- !((computed == prepared$h3) %in% TRUE | (is.na(computed) & is.na(prepared$h3)))
+    if (any(bad)) columns <- c(columns, "h3")
+    differs <- differs | bad
+  }
+  if (!is.null(prepared$bbox)) {
+    computed <- enc$data$bbox
+    computed[enc$order, ] <- enc$data$bbox
+    supplied <- prepared$bbox
+    bad <- if (!is.data.frame(supplied) || !all(bbox_names %in% names(supplied))) {
+      rep(TRUE, n)
+    } else {
+      Reduce(`|`, lapply(bbox_names, function(b) {
+        s <- supplied[[b]]
+        if (!is.numeric(s)) {
+          return(rep(TRUE, n))
+        }
+        s <- as.double(s)
+        !((s == computed[[b]]) %in% TRUE | (is.na(s) & is.na(computed[[b]])))
+      }))
+    }
+    if (any(bad)) columns <- c(columns, "bbox")
+    differs <- differs | bad
+  }
+  if (!any(differs)) {
+    return(invisible())
+  }
+  rows <- which(differs)
+  shown <- utils::head(rows, 5L)
+  keys <- if (length(key) > 0) {
+    format_key_values(tibble::as_tibble(sf::st_drop_geometry(x))[shown, key, drop = FALSE])
+  } else {
+    paste("row", shown)
+  }
+  more <- if (length(rows) > 5) paste0("; and ", length(rows) - 5, " more") else ""
+  first <- paste0(paste(keys, collapse = "; "), more, ".")
+  cli::cli_abort(
+    c(
+      "{length(rows)} row{?s} of {.arg x} {?has/have} {.field {columns}} values that differ from those the write computes.",
+      x = paste("First:", first),
+      i = "The write geocodes with {.code geocode_engine = \"{geocode_engine}\"}.",
+      i = "Prepare {.arg x} with {.fn rcs_geo_add} and the same {.arg geocode_engine}, or call {.fn rcs_geo_strip} first."
+    ),
+    class = "rcs_error_prepared", call = call
+  )
+}
+
 # Geocoding repairs (D32) ----------------------------------------------------------
 
 # Keys of the rows of `x` that `geo_encode()` rebuilt on the sphere or
@@ -736,6 +865,13 @@ rebuild_keys <- function(enc, x, key) {
 # (unless the caller set `warn >= 1`), so that a top-level call prints it at
 # once, before the upload lines, instead of deferring it to the end.
 warn_s2_rebuild <- function(dataset, rebuild) {
+  warn_geo_rebuild("{.val {dataset}}", rebuild, list(dataset = dataset))
+}
+
+# The same warning for any subject: `subject` is cli text interpolated in
+# `env` (a list), e.g. "{.arg x}" for the geospatial verbs, whose keys are
+# row numbers.
+warn_geo_rebuild <- function(subject, rebuild, env = list()) {
   n_rebuilt <- length(rebuild$rebuilt)
   n_fallback <- length(rebuild$fallback)
   if (n_rebuilt + n_fallback == 0) {
@@ -751,12 +887,13 @@ warn_s2_rebuild <- function(dataset, rebuild) {
   }
   cli::cli_warn(
     c(
-      "Geocoding {.val {dataset}}: {n_rebuilt + n_fallback} row{?s} {?is/are} invalid on the sphere.",
+      paste0("Geocoding ", subject, ": {n_rebuilt + n_fallback} row{?s} {?is/are} invalid on the sphere."),
       i = "{n_rebuilt} rebuilt by s2, {n_fallback} geocoded in the plane after a failed rebuild check.",
       "*" = if (n_rebuilt > 0) paste("Rebuilt:", shown(rebuild$rebuilt)),
       "*" = if (n_fallback > 0) paste("In the plane:", shown(rebuild$fallback))
     ),
-    class = "rcs_warning_s2_rebuild"
+    class = "rcs_warning_s2_rebuild",
+    .envir = list2env(env, parent = rlang::current_env())
   )
   invisible()
 }

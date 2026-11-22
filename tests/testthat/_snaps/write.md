@@ -275,3 +275,63 @@
       ! Another writer changed '<root>/primary' since this call read its catalog.
       i Nothing was changed there; run the call again.
 
+# tampered h3 or bbox abort naming the rows
+
+    Code
+      store_write(s$st, tampered, "shapes/prepared", title = "t", description = "d", key = "id")
+    Condition
+      Error in `store_write()`:
+      ! 2 rows of `x` have h3 values that differ from those the write computes.
+      x First: id = 4; id = 9.
+      i The write geocodes with `geocode_engine = "auto"`.
+      i Prepare `x` with `rcs_geo_add()` and the same `geocode_engine`, or call `rcs_geo_strip()` first.
+
+---
+
+    Code
+      store_write(s$st, moved, "shapes/prepared", title = "t", description = "d")
+    Condition
+      Error in `store_write()`:
+      ! 1 row of `x` has bbox values that differ from those the write computes.
+      x First: row 7.
+      i The write geocodes with `geocode_engine = "auto"`.
+      i Prepare `x` with `rcs_geo_add()` and the same `geocode_engine`, or call `rcs_geo_strip()` first.
+
+# cells prepared with another engine abort and name the write's engine
+
+    Code
+      store_write(s$st, planar, "shapes/other", title = "t", description = "d", geocode_engine = "s2")
+    Condition
+      Error in `store_write()`:
+      ! 1 row of `x` has h3 values that differ from those the write computes.
+      x First: row 1.
+      i The write geocodes with `geocode_engine = "s2"`.
+      i Prepare `x` with `rcs_geo_add()` and the same `geocode_engine`, or call `rcs_geo_strip()` first.
+
+# h3_res is taken from the cells; mixed or other resolutions abort
+
+    Code
+      store_write(s$st, mixed, "shapes/other", title = "t", description = "d")
+    Condition
+      Error in `store_write()`:
+      ! The column h3 of `x` holds cells of several resolutions: 6 and 7.
+      i Prepare `x` with `rcs_geo_add()` at one `h3_res`, or call `rcs_geo_strip()` first.
+
+---
+
+    Code
+      store_write(s$st, prepared7, "shapes/other", title = "t", description = "d", h3_res = 5L)
+    Condition
+      Error in `store_write()`:
+      ! The column h3 of `x` holds cells of resolution 7, but the write uses `h3_res = 5`.
+      i Leave out `h3_res` to write at resolution 7, or call `rcs_geo_strip()` first.
+
+---
+
+    Code
+      store_write(s$st, prepared7, "shapes/other", title = "t", description = "d", geocode = FALSE)
+    Condition
+      Error in `store_write()`:
+      ! `x` has a column h3, but `geocode = FALSE` writes no cells.
+      i Remove it with `rcs_geo_strip(x, "h3")`, or leave out `geocode = FALSE`.
+
