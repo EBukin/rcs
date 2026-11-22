@@ -61,6 +61,25 @@ test_that("be_new() describes a bucket with and without a prefix", {
   expect_error(be_new("gs://"), "no bucket", class = "rcs_error_argument")
 })
 
+test_that("a gcs backend holds its credential, a local one has no auth field", {
+  auth <- rcs_auth_gcs(token = "some-token")
+  be <- be_new("gs://my-bucket/store", auth = auth)
+  expect_named(be, c("type", "uri", "root", "bucket", "prefix", "auth"))
+  expect_identical(be$auth, auth)
+  expect_s3_class(be_new("gs://my-bucket")$auth, "rcs_auth_gcs")
+
+  key <- file.path(withr::local_tempdir(), "key.json")
+  jsonlite::write_json(list(type = "service_account", private_key = "x"), key, auto_unbox = TRUE)
+  from_path <- be_new("gs://my-bucket", auth = key)
+  expect_identical(from_path$auth, rcs_auth_gcs(key = key))
+  expect_identical(from_path$auth$source, "key")
+
+  local <- be_new(withr::local_tempdir(), auth = auth)
+  expect_named(local, c("type", "uri", "root", "bucket", "prefix"))
+  expect_error(be_new("gs://my-bucket", auth = 1), class = "rcs_error_argument")
+  expect_identical(names(formals(be_new)), c("uri", "auth"))
+})
+
 test_that("be_new() passes the object through be_init()", {
   local_mocked_s3_method("be_init", "rcs_backend_gcs", function(be) {
     be$checked <- TRUE

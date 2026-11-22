@@ -87,13 +87,13 @@
 # an unreachable primary on GCS aborts with the hint of every client
 
     Code
-      store_connect("gs://example-bucket/store")
+      store_connect("gs://example-bucket/store", auth = rcs_auth_gcs(token = "some-token"))
     Condition
       Error in `store_connect()`:
       ! Cannot reach the primary location 'gs://example-bucket/store'.
-      i Arrow (reading and transfers) uses Google's default credentials: `GOOGLE_APPLICATION_CREDENTIALS` (a service-account key file), or `gcloud auth application-default login`.
-      i The JSON API (MD5 of stored files) uses the same credentials through gargle with the scope "cloud-platform"; it needs the packages gargle and httr2.
-      i GDAL (`/vsigs/`, rasters) does not find the credentials of `gcloud auth application-default login` by itself: set `GOOGLE_APPLICATION_CREDENTIALS` to a service-account key or to that credentials file, or set `GS_OAUTH2_REFRESH_TOKEN`, `GS_OAUTH2_CLIENT_ID` and `GS_OAUTH2_CLIENT_SECRET`.
+      i Credentials in use: an access token given to rcs_auth_gcs(token = ), not renewed.
+      i Pass other credentials with `auth` of `store_connect()` or `store_create()`: a key file path, `rcs_auth_gcs(key = )`, `rcs_auth_gcs(token = )` or `rcs_auth_gcs(fun = )`.
+      i Without `auth`, the default lookup uses `GOOGLE_APPLICATION_CREDENTIALS`, else the login of `gcloud auth application-default login`; see `rcs_auth_gcs()`.
       Caused by error in `location_exists()`:
       ! Injected: no route to the bucket.
 
@@ -122,4 +122,33 @@
       The secondary location '<root>/secondary2' is not available; it is skipped.
       i It holds no store catalogs.
       i Run `store_refresh()` to try it again.
+
+# auth = is checked
+
+    Code
+      store_connect("gs://bucket/store", auth = 1)
+    Condition
+      Error in `store_connect()`:
+      ! `auth` must be `NULL`, an object made by `rcs_auth_gcs()` or the path of a key file, not a number.
+    Code
+      store_connect("gs://bucket/store", auth = list("gs://bucket/store", "x"))
+    Condition
+      Error in `store_connect()`:
+      ! A list given to `auth` must be named by address.
+    Code
+      store_connect("gs://bucket/store", auth = list(`gs://other/store` = "key.json"))
+    Condition
+      Error in `store_connect()`:
+      ! `auth` names an address not given in the call: "gs://other/store".
+      i Name each credential by its address exactly as given to `primary` or `secondary`.
+    Code
+      store_connect("gs://bucket/store", auth = list(`gs://bucket/store` = 1))
+    Condition
+      Error in `store_connect()`:
+      ! `auth[["gs://bucket/store"]]` must be `NULL`, an object made by `rcs_auth_gcs()` or the path of a key file, not a number.
+    Code
+      store_create("gs://bucket/store", auth = TRUE)
+    Condition
+      Error in `store_create()`:
+      ! `auth` must be `NULL`, an object made by `rcs_auth_gcs()` or the path of a key file, not `TRUE`.
 

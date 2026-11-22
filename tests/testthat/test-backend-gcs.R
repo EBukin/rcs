@@ -4,8 +4,9 @@
 
 # Offline fake ----------------------------------------------------------------
 
-# Replace the clients: `gcs_fs()` gives a file system rooted in a temporary
-# folder that holds `<bucket>/<prefix>/...`, and the JSON API answers from the
+# Replace the clients: every credential's Arrow file system
+# (`auth_arrow_fs_create()`) is rooted in a temporary folder that holds
+# `<bucket>/<prefix>/...`, tokens are fake, and the JSON API answers from the
 # files in it. Returns the folder.
 local_fake_gcs <- function(md5 = TRUE, status = NULL, env = parent.frame()) {
   skip_if_not_installed("gargle")
@@ -26,8 +27,8 @@ local_fake_gcs <- function(md5 = TRUE, status = NULL, env = parent.frame()) {
   gcs_reset_clients()
   withr::defer(gcs_reset_clients(), envir = env)
   testthat::local_mocked_bindings(
-    gcs_fs = function(be) fake_fs,
-    gcs_fetch_token = function() "fake-token",
+    auth_arrow_fs_create = function(token, expiration) fake_fs,
+    auth_token = function(auth) "fake-token",
     gcs_perform = function(reqs) {
       lapply(reqs, function(req) {
         bucket <- sub("^.*/b/([^/]+)/o/.*$", "\\1", req$url)
@@ -62,7 +63,7 @@ local_src <- function(text = "some content", env = parent.frame()) {
 
 test_that("be_init() keeps a gcs backend offline and unchanged", {
   be <- be_new("gs://my-bucket/store")
-  expect_named(be, c("type", "uri", "root", "bucket", "prefix"))
+  expect_named(be, c("type", "uri", "root", "bucket", "prefix", "auth"))
   expect_identical(be_init(be), be)
 })
 
@@ -129,14 +130,14 @@ test_that("be_md5() aborts with the authentication hint on 401 and 403", {
   local_fake_gcs(status = 403L)
   be <- be_new("gs://my-bucket/store")
   err <- expect_error(be_md5(be, "a.txt"), "HTTP 403", class = "rcs_error_backend")
-  expect_match(conditionMessage(err), "GOOGLE_APPLICATION_CREDENTIALS")
+  expect_match(conditionMessage(err), "Credentials in use")
 })
 
 test_that("be_md5() aborts on other HTTP errors without the hint", {
   local_fake_gcs(status = 500L)
   be <- be_new("gs://my-bucket/store")
   err <- expect_error(be_md5(be, "a.txt"), "HTTP 500", class = "rcs_error_backend")
-  expect_no_match(conditionMessage(err), "GOOGLE_APPLICATION_CREDENTIALS")
+  expect_no_match(conditionMessage(err), "Credentials in use")
 })
 
 test_that("be_md5() aborts when the request itself fails", {
@@ -202,13 +203,13 @@ test_that("Arrow errors become rcs_error_backend, with the hint when it may be a
   )
   local_mocked_bindings(gcs_fs = function(be) fake)
   err <- expect_error(be_exists(be, "a"), "Looking up files", class = "rcs_error_backend")
-  expect_match(conditionMessage(err), "gcloud auth application-default login")
+  expect_match(conditionMessage(err), "Credentials in use")
   expect_error(be_put(be, local_src(), "a"), "Uploading", class = "rcs_error_backend")
   expect_error(be_list(be), "Listing", class = "rcs_error_backend")
 
   fake$GetFileInfo <- function(...) stop("connection reset")
   err <- expect_error(be_exists(be, "a"), class = "rcs_error_backend")
-  expect_no_match(conditionMessage(err), "gcloud auth")
+  expect_no_match(conditionMessage(err), "Credentials in use")
 })
 
 test_that("be_lock() and be_unlock() do nothing on gcs", {
@@ -217,77 +218,73 @@ test_that("be_lock() and be_unlock() do nothing on gcs", {
   expect_true(be_unlock(be))
 })
 
-test_that("be_auth_hint() names each client", {
-  hint <- be_auth_hint(be_new("gs://my-bucket/store"))
+test_that("be_auth_hint() names the credential in use and how to pass another", {
+  hint <- be_auth_hint(be_new("gs://my-bucket/store", auth = rcs_auth_gcs(token = "some-token")))
   expect_length(hint, 3)
   expect_named(hint, rep("i", 3))
-  expect_match(hint[[1]], "Arrow")
-  expect_match(hint[[2]], "JSON API")
-  expect_match(hint[[3]], "GDAL")
+  expect_match(hint[[1]], "Credentials in use: an access token")
+  expect_match(hint[[2]], "auth")
+  expect_no_match(paste(hint, collapse = " "), "some-token")
   withr::local_options(cli.width = 1000)
   expect_snapshot(cli::cli_abort(c("Cannot reach the location.", hint)), error = TRUE)
+
+  # A file path with braces is shown as it is, not interpolated.
+  dir <- file.path(withr::local_tempdir(), "a{b}")
+  dir.create(dir)
+  key <- file.path(dir, "key.json")
+  jsonlite::write_json(list(type = "service_account", private_key = "x"), key, auto_unbox = TRUE)
+  hint <- be_auth_hint(be_new("gs://my-bucket", auth = key))
+  err <- expect_error(cli::cli_abort(c("Failed.", hint)))
+  expect_match(conditionMessage(err), "a{b}/key.json", fixed = TRUE)
+  expect_match(conditionMessage(err), "key file", fixed = TRUE)
 })
 
-test_that("gcs_fs() aborts when Arrow lacks GCS and caches the file system", {
-  gcs_reset_clients()
-  withr::defer(gcs_reset_clients())
-  be <- be_new("gs://my-bucket")
+test_that("gcs_fs() aborts when Arrow lacks GCS", {
+  be <- be_new("gs://my-bucket", auth = rcs_auth_gcs(token = "some-token"))
   local_mocked_bindings(arrow_with_gcs = function() FALSE, .package = "arrow")
   expect_error(gcs_fs(be), "cannot reach Google Cloud Storage", class = "rcs_error_backend")
 })
 
-test_that("gcs_fs() creates the Arrow file system once", {
-  skip_if_not(arrow::arrow_with_gcs())
+test_that("gcs_fs() uses the file system of the backend's credential", {
   gcs_reset_clients()
   withr::defer(gcs_reset_clients())
-  be <- be_new("gs://my-bucket")
-  fs <- gcs_fs(be)
-  expect_s3_class(fs, "GcsFileSystem")
-  expect_identical(gcs_fs(be), fs)
+  local_mocked_bindings(
+    arrow_with_gcs = function() TRUE, .package = "arrow"
+  )
+  made <- 0
+  local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    auth_arrow_fs_create = function(token, expiration) {
+      made <<- made + 1
+      structure(list(token = token), class = "fake_fs")
+    }
+  )
+  a <- be_new("gs://my-bucket", auth = rcs_auth_gcs(token = "token-a"))
+  b <- be_new("gs://my-bucket", auth = rcs_auth_gcs(token = "token-b"))
+  fs <- gcs_fs(a)
+  expect_identical(gcs_fs(a), fs)
+  expect_identical(fs$token, "token-a")
+  expect_identical(gcs_fs(b)$token, "token-b")
+  expect_identical(made, 2)
+
+  local_mocked_bindings(auth_arrow_fs_create = function(token, expiration) stop("refused"))
+  gcs_reset_clients()
+  err <- expect_error(gcs_fs(a), "Arrow file system", class = "rcs_error_backend")
+  expect_match(conditionMessage(err), "Credentials in use")
 })
 
-test_that("gcs_token() fetches once, renews and aborts without credentials", {
-  gcs_reset_clients()
-  withr::defer(gcs_reset_clients())
-  be <- be_new("gs://my-bucket")
-  n <- 0
-  local_mocked_bindings(gcs_fetch_token = function() {
-    n <<- n + 1
-    paste0("token-", n)
-  })
-  expect_identical(gcs_token(be), "token-1")
-  expect_identical(gcs_token(be), "token-1")
-  the_gcs$token_time <- Sys.time() - 3600
-  expect_identical(gcs_token(be), "token-2")
+test_that("gcs_token() gives the credential's token and aborts with the hint", {
+  local_mocked_bindings(auth_tokeninfo = function(token) NA_character_)
+  be <- be_new("gs://my-bucket", auth = rcs_auth_gcs(token = "token-a"))
+  skip_if_not(gcs_clients_installed())
+  expect_identical(gcs_token(be), "token-a")
 
-  gcs_reset_clients()
-  local_mocked_bindings(gcs_fetch_token = function() NULL)
-  err <- expect_error(gcs_token(be), "No credentials", class = "rcs_error_backend")
-  expect_match(conditionMessage(err), "GOOGLE_APPLICATION_CREDENTIALS")
-  local_mocked_bindings(gcs_fetch_token = function() stop("refresh failed"))
-  expect_error(gcs_token(be), "No credentials", class = "rcs_error_backend")
+  failing <- be_new("gs://my-bucket", auth = rcs_auth_gcs(fun = function() stop("refresh failed")))
+  err <- expect_error(gcs_token(failing), "JSON API", class = "rcs_error_backend")
+  expect_match(conditionMessage(err), "Credentials in use: a function")
 
   local_mocked_bindings(gcs_clients_installed = function() FALSE)
   expect_error(gcs_token(be), "gargle", class = "rcs_error_backend")
-})
-
-test_that("gcs_fetch_token() asks gargle for the cloud-platform scope", {
-  skip_if_not_installed("gargle")
-  scopes <- NULL
-  local_mocked_bindings(
-    credentials_app_default = function(scopes, ...) {
-      scopes <<- scopes
-      NULL
-    },
-    .package = "gargle"
-  )
-  expect_null(gcs_fetch_token())
-  expect_identical(scopes, "https://www.googleapis.com/auth/cloud-platform")
-  local_mocked_bindings(
-    credentials_app_default = function(scopes, ...) list(credentials = list(access_token = "abc")),
-    .package = "gargle"
-  )
-  expect_identical(gcs_fetch_token(), "abc")
 })
 
 test_that("gcs_perform() sends one request alone and several in parallel", {
@@ -385,4 +382,39 @@ test_that("GDAL reads a file from the bucket through /vsigs/", {
   be_put(be, tif, "r/part-a.tif")
   r <- terra::rast(be_gdal_path(be, "r/part-a.tif"))
   expect_equal(sum(terra::values(r)), 5050)
+})
+
+test_that("a store on the bucket works with the default credential and renews its token", {
+  be <- local_test_bucket()
+  withr::local_options(rcs.quiet = TRUE)
+  store_create(be$uri)
+  st <- store_connect(be$uri)
+  auth <- st$primary$backend$auth
+  expect_identical(auth, rcs_auth_gcs())
+  x <- rcs_sim_table(200, seed = 1)
+  store_write(st, x, "sales/daily",
+    title = "Daily sales", description = "Simulated daily sales.",
+    key = c("shop_id", "date", "product"), partition = "year"
+  )
+  expect_identical(nrow(store_read(st, "sales/daily")), nrow(x))
+
+  # Expire the token: the next call renews it and reading goes on.
+  old <- auth$cache$token
+  auth$cache$expires <- auth_now() - 60
+  expect_identical(nrow(store_read(st, "sales/daily")), nrow(x))
+  if (auth$source != "ambient") {
+    expect_false(identical(auth$cache$token, old))
+    expect_true(auth$cache$expires > auth_now() + 300)
+  }
+  store_refresh(st)
+  expect_true("sales/daily" %in% st$primary$catalog$dataset)
+})
+
+test_that("a rejected token aborts rcs_error_backend with the credential hint", {
+  be <- local_test_bucket()
+  err <- expect_error(
+    store_connect(be$uri, auth = rcs_auth_gcs(token = "invalid")),
+    class = "rcs_error_backend"
+  )
+  expect_match(conditionMessage(err), "Credentials in use: an access token", fixed = TRUE)
 })
