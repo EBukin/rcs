@@ -334,6 +334,18 @@ auth_fetch_service_account <- function(auth) {
 # A user login (`authorized_user`): its refresh token, read once into the
 # cache, is exchanged for an access token.
 auth_fetch_user <- function(auth) {
+  cache <- auth_user_secrets(auth)
+  auth_http_token(list(
+    grant_type = "refresh_token",
+    refresh_token = cache$refresh_token,
+    client_id = cache$client_id,
+    client_secret = cache$client_secret
+  ))
+}
+
+# The refresh token, client id and client secret of a user login, read once
+# from its file into the cache; returns the cache.
+auth_user_secrets <- function(auth) {
   cache <- auth$cache
   if (is.null(cache$refresh_token)) {
     info <- jsonlite::read_json(auth$file)
@@ -341,12 +353,7 @@ auth_fetch_user <- function(auth) {
     cache$client_id <- info$client_id
     cache$client_secret <- info$client_secret
   }
-  auth_http_token(list(
-    grant_type = "refresh_token",
-    refresh_token = cache$refresh_token,
-    client_id = cache$client_id,
-    client_secret = cache$client_secret
-  ))
+  cache
 }
 
 # Seams -------------------------------------------------------------------------
@@ -384,6 +391,25 @@ auth_tokeninfo <- function(token) {
     },
     error = function(e) NA_character_
   )
+}
+
+#' Seams around GDAL and DuckDB
+#'
+#' `gdal_config(option, value)` sets one process-wide GDAL configuration
+#' option through `terra::setGDALconfig()`; the value `""` clears it
+#' (`terra::setGDALconfig("KEY=")` would set the text `"NA"`).
+#' `duckdb_exec(con, sql)` runs one statement with `DBI::dbExecute()` and
+#' returns its result. Tests mock them.
+#' @noRd
+gdal_config <- function(option, value) {
+  rlang::check_installed("terra", reason = "to read rasters through GDAL.")
+  terra::setGDALconfig(option, value)
+  invisible()
+}
+
+duckdb_exec <- function(con, sql) {
+  rlang::check_installed(c("duckdb", "DBI"), reason = "to query the store with DuckDB.")
+  DBI::dbExecute(con, sql)
 }
 
 auth_arrow_fs_create <- function(token, expiration) {
@@ -446,6 +472,315 @@ auth_resolve <- function(auth, arg = "auth", call = caller_env()) {
     "{.arg {arg}} must be {.code NULL}, an object made by {.fn rcs_auth_gcs} or the path of a key file, not {.obj_type_friendly {auth}}.",
     class = "rcs_error_argument", call = call
   )
+}
+
+# GDAL --------------------------------------------------------------------------
+
+# GDAL's options are process-wide and a `SpatRaster` reads its tiles lazily,
+# so the credential of the last GCS location whose raster was opened stays
+# set (it cannot be scoped to one call). `the_auth$gdal_id` is the `cache$id`
+# of the credential GDAL holds and `the_auth$gdal_header` the bearer header
+# it was given (token and function credentials).
+gdal_auth_options <- c(
+  "GS_OAUTH2_REFRESH_TOKEN", "GS_OAUTH2_CLIENT_ID", "GS_OAUTH2_CLIENT_SECRET",
+  "GOOGLE_APPLICATION_CREDENTIALS", "GDAL_HTTP_HEADERS"
+)
+
+#' Give GDAL a credential
+#'
+#' Sets GDAL's options for `auth` when GDAL holds another credential (or
+#' none): a user login gives the three `GS_OAUTH2_*` options, a
+#' service-account key `GOOGLE_APPLICATION_CREDENTIALS` (as a GDAL option,
+#' never an environment variable), a token or a function the bearer header
+#' `GDAL_HTTP_HEADERS`, ambient credentials none (GDAL's own defaults); the
+#' other options of `gdal_auth_options` are cleared. A renewed token of the
+#' credential GDAL holds updates the header silently. Switching from one
+#' credential to another warns once per session (class
+#' `rcs_warning_gdal_credential`): rasters opened with the previous one may
+#' fail to read further tiles.
+#'
+#' @param auth An `rcs_auth_gcs` object.
+#' @return `NULL`, invisibly.
+#' @noRd
+auth_gdal_use <- function(auth) {
+  id <- auth$cache$id
+  if (identical(the_auth$gdal_id, id)) {
+    if (auth$source %in% c("token", "function")) {
+      header <- auth_gdal_header(auth)
+      if (!identical(the_auth$gdal_header, header)) {
+        gdal_config("GDAL_HTTP_HEADERS", header)
+        the_auth$gdal_header <- header
+      }
+    }
+    return(invisible())
+  }
+  options <- auth_gdal_options(auth)
+  if (!is.null(the_auth$gdal_id) && !isTRUE(the_auth$gdal_warned)) {
+    the_auth$gdal_warned <- TRUE
+    in_use <- cli_escape(auth_describe(auth))
+    cli::cli_warn(
+      c(
+        paste0("GDAL now uses another credential for Google Cloud Storage: ", in_use, "."),
+        i = "GDAL's options are process-wide: rasters opened earlier with the previous credential may fail to read further tiles.",
+        i = "This warning is shown once per session."
+      ),
+      class = "rcs_warning_gdal_credential"
+    )
+  }
+  for (option in setdiff(gdal_auth_options, names(options))) {
+    gdal_config(option, "")
+  }
+  for (option in names(options)) {
+    gdal_config(option, options[[option]])
+  }
+  the_auth$gdal_id <- id
+  the_auth$gdal_header <- if ("GDAL_HTTP_HEADERS" %in% names(options)) {
+    options[["GDAL_HTTP_HEADERS"]]
+  }
+  invisible()
+}
+
+# GDAL options of a credential, a named character vector.
+auth_gdal_options <- function(auth) {
+  switch(auth_kind(auth),
+    ambient = character(),
+    authorized_user = {
+      cache <- auth_user_secrets(auth)
+      c(
+        GS_OAUTH2_REFRESH_TOKEN = cache$refresh_token,
+        GS_OAUTH2_CLIENT_ID = cache$client_id,
+        GS_OAUTH2_CLIENT_SECRET = cache$client_secret
+      )
+    },
+    service_account = c(GOOGLE_APPLICATION_CREDENTIALS = auth$file),
+    c(GDAL_HTTP_HEADERS = auth_gdal_header(auth))
+  )
+}
+
+auth_gdal_header <- function(auth) {
+  paste("Authorization: Bearer", auth_token(auth))
+}
+
+# DuckDB --------------------------------------------------------------------------
+
+#' DuckDB secret of a credential
+#'
+#' Creates (or replaces) a temporary secret in the DuckDB connection `con`
+#' that gives `read_parquet('gs://...')` and `COPY ... TO 'gs://...'` the
+#' credential's current access token for every path below `scope`. The
+#' secret lives only in that connection and holds the token as it is now:
+#' call again after an hour of work to renew it. The statement and the token
+#' are never shown in messages.
+#'
+#' @param auth An `rcs_auth_gcs` object (not ambient credentials, which
+#'   DuckDB cannot use).
+#' @param con A DuckDB connection.
+#' @param scope The address the secret covers, `"gs://bucket"` or
+#'   `"gs://bucket/prefix"` (a trailing `/` is dropped).
+#' @return The secret's name, `rcs_<MD5 of scope>`, invisibly. Aborts with
+#'   class `rcs_error_argument` for an invalid `scope`, `rcs_error_backend`
+#'   for ambient credentials or when no token can be obtained, and
+#'   `rcs_error_duckdb` when DuckDB refuses the statement.
+#' @noRd
+auth_duckdb_secret <- function(auth, con, scope, call = caller_env()) {
+  if (!rlang::is_string(scope) || !grepl("^gs://[^/]+", scope)) {
+    cli::cli_abort(
+      "{.arg scope} must be one address {.code gs://bucket[/prefix]}, not {.val {scope}}.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  scope <- sub("/+$", "", scope)
+  if (identical(auth$source, "ambient")) {
+    cli::cli_abort(
+      c(
+        "DuckDB cannot use ambient credentials (no credential file was found).",
+        i = "Pass a key file, a token or a function to {.arg auth}; see {.fn rcs_auth_gcs}."
+      ),
+      class = "rcs_error_backend", call = call
+    )
+  }
+  token <- auth_token(auth)
+  name <- paste0("rcs_", md5_string(scope))
+  sql <- paste0(
+    "CREATE OR REPLACE TEMPORARY SECRET ", name,
+    " (TYPE gcs, BEARER_TOKEN ", sql_string(token), ", SCOPE ", sql_string(scope), ")"
+  )
+  done <- tryCatch(
+    {
+      duckdb_exec(con, sql)
+      NULL
+    },
+    error = function(e) e
+  )
+  if (!is.null(done)) {
+    problem <- auth_scrub(conditionMessage(done), c(sql, token, auth_secrets(auth)))
+    cli::cli_abort(
+      c(
+        "DuckDB refused the secret for {.val {scope}}.",
+        x = "{problem}"
+      ),
+      class = "rcs_error_duckdb", call = call
+    )
+  }
+  invisible(name)
+}
+
+# A string literal of SQL.
+sql_string <- function(x) {
+  paste0("'", gsub("'", "''", x, fixed = TRUE), "'")
+}
+
+# Every secret a credential holds in its cache, for `auth_scrub()`.
+auth_secrets <- function(auth) {
+  cache <- auth$cache
+  fields <- intersect(c("token", "given_token", "refresh_token", "client_secret"), ls(cache))
+  unlist(mget(fields, envir = cache), use.names = FALSE)
+}
+
+# One line of an error message with every secret in `hide` replaced.
+auth_scrub <- function(text, hide) {
+  text <- cli::ansi_strip(paste(text, collapse = " "))
+  for (secret in hide[!is.na(hide) & nzchar(hide)]) {
+    text <- gsub(secret, "<hidden>", text, fixed = TRUE)
+  }
+  text <- gsub("\\s+", " ", trimws(text))
+  if (nchar(text) > 300) {
+    text <- paste0(substr(text, 1, 297), "...")
+  }
+  text
+}
+
+# store_auth_check() ----------------------------------------------------------------
+
+#' Check which clients reach each location of a store
+#'
+#' Tries every client the package uses for Google Cloud Storage with the
+#' credential of each location: Arrow (the file system that reads and writes
+#' data files), the JSON API (MD5 checksums), GDAL (rasters, through
+#' `/vsigs/`) and DuckDB (`read_parquet()` with a secret). Local folders need
+#' no credentials and give one row.
+#'
+#' Each probe is small: Arrow and the JSON API look up `_catalog.parquet`,
+#' GDAL opens the first raster file in the location's catalog, DuckDB counts
+#' the rows of `_catalog.parquet`. A failing client is reported, never
+#' raised. GDAL and DuckDB cannot use ambient credentials (no credential
+#' file found); their rows then say so. Opening a raster through GDAL gives
+#' GDAL's process-wide options the location's credential, as reading a
+#' raster does.
+#'
+#' @param st A store connection from [store_connect()].
+#' @return A tibble with one row per location and client: `location` (the
+#'   address), `client` (`"arrow"`, `"json_api"`, `"gdal"`, `"duckdb"`, or
+#'   `"all"` for a local folder), `ok` (`TRUE`, `FALSE`, or `NA` when the
+#'   client was not tried) and `note` (`"ok"`, the error, or why it was not
+#'   tried).
+#' @seealso [rcs_auth_gcs()] for the credentials and [store_connect()] to
+#'   pass them.
+#' @export
+#' @examples
+#' primary <- file.path(tempdir(), "rcs-example-auth-check")
+#' st <- store_connect(primary, create = TRUE)
+#' store_auth_check(st)
+#' unlink(primary, recursive = TRUE)
+store_auth_check <- function(st) {
+  validate_store(st)
+  locations <- c(list(st$primary), st$secondary)
+  vctrs::vec_rbind(!!!lapply(locations, auth_check_location))
+}
+
+auth_check_location <- function(location) {
+  be <- location$backend
+  uri <- location$uri
+  if (!inherits(be, "rcs_backend_gcs")) {
+    return(auth_check_row(uri, "all", TRUE, "local folder: no credentials needed"))
+  }
+  auth <- gcs_auth(be)
+  probe <- function(client, f) {
+    failed <- tryCatch(
+      {
+        f()
+        NULL
+      },
+      error = function(e) e
+    )
+    if (is.null(failed)) {
+      return(auth_check_row(uri, client, TRUE, "ok"))
+    }
+    note <- auth_scrub(conditionMessage(failed), auth_secrets(auth))
+    auth_check_row(uri, client, FALSE, note)
+  }
+  ambient <- identical(auth$source, "ambient")
+  not_supported <- "not supported for ambient credentials"
+
+  raster <- auth_check_raster(location)
+  gdal <- if (ambient) {
+    auth_check_row(uri, "gdal", NA, not_supported)
+  } else if (is.na(raster)) {
+    auth_check_row(uri, "gdal", NA, "no raster to test with")
+  } else if (!rlang::is_installed("terra")) {
+    auth_check_row(uri, "gdal", NA, "terra is not installed")
+  } else {
+    probe("gdal", function() auth_check_gdal(be, auth, raster))
+  }
+  duckdb <- if (ambient) {
+    auth_check_row(uri, "duckdb", NA, not_supported)
+  } else if (!rlang::is_installed(c("duckdb", "DBI"))) {
+    auth_check_row(uri, "duckdb", NA, "duckdb is not installed")
+  } else {
+    probe("duckdb", function() auth_check_duckdb(be, auth))
+  }
+  vctrs::vec_rbind(
+    probe("arrow", function() auth_check_arrow(be, auth)),
+    probe("json_api", function() auth_check_json_api(be, auth)),
+    gdal,
+    duckdb
+  )
+}
+
+auth_check_row <- function(location, client, ok, note) {
+  tibble::tibble(location = location, client = client, ok = ok, note = note)
+}
+
+# Relative path of the first raster file in a location's catalog, or NA.
+auth_check_raster <- function(location) {
+  catalog <- location$catalog
+  files <- location$files
+  rasters <- catalog$dataset[catalog$kind %in% "raster"]
+  paths <- files$path[files$dataset %in% rasters]
+  if (length(paths) == 0) NA_character_ else paths[[1]]
+}
+
+# Probes; each aborts when its client fails.
+auth_check_arrow <- function(be, auth) {
+  info <- auth_arrow_fs(auth)$GetFileInfo(paste0(be$root, "/_catalog.parquet"))[[1]]
+  if (info$type != arrow::FileType$File) {
+    cli::cli_abort("No {.file _catalog.parquet} found.")
+  }
+  invisible()
+}
+
+auth_check_json_api <- function(be, auth) {
+  if (is.na(be_md5(be, "_catalog.parquet"))) {
+    cli::cli_abort("No MD5 of {.file _catalog.parquet} found.")
+  }
+  invisible()
+}
+
+auth_check_gdal <- function(be, auth, path) {
+  r <- terra::rast(be_gdal_path(be, path))
+  terra::ncell(r)
+  invisible()
+}
+
+auth_check_duckdb <- function(be, auth) {
+  # Quiet: duckdb's note on where it keeps extensions is not about this check.
+  con <- suppressMessages(DBI::dbConnect(duckdb::duckdb(), bigint = "integer64"))
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  scope <- paste0("gs://", be$root)
+  auth_duckdb_secret(auth, con, scope)
+  file <- sql_string(paste0(scope, "/_catalog.parquet"))
+  DBI::dbGetQuery(con, paste0("SELECT count(*) AS n FROM read_parquet(", file, ")"))
+  invisible()
 }
 
 # Text ------------------------------------------------------------------------
