@@ -303,6 +303,18 @@ test_that("a user column h3_p<r> with other cells aborts as for the sf, the same
     class = "rcs_error_prepared"
   )
   expect_error(dgeo_write(s$st, x, key = "id", partition = "h3", max_files = 1000L), class = "rcs_error_prepared")
+
+  # the same cells serve as the partition column
+  x$h3_p5 <- NULL
+  dgeo_write(s$st, x, key = "id", partition = "h3", max_files = 1000L)
+  stored <- store_read(s$st, "geo/shapes", columns = c("id", "h3_p5"), geometry = FALSE)
+  x$h3_p5 <- bit64::as.integer64(stored$h3_p5)[match(x$id, stored$id)]
+  tbl <- dgeo_table(con, x, "pts_same")
+  a <- dgeo_store()
+  b <- dgeo_store()
+  out_a <- dgeo_write(a$st, tbl, key = "id", partition = "h3", max_files = 1000L, crs = 4326)
+  out_b <- dgeo_write(b$st, x, key = "id", partition = "h3", max_files = 1000L)
+  expect_dgeo_same(a, b, out_a, out_b)
 })
 
 test_that("geocode = FALSE from DuckDB equals store_write() of the sf", {
