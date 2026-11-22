@@ -439,3 +439,346 @@ test_that("auth_arrow_fs_create() and auth_now() call Arrow and the clock", {
   expect_s3_class(auth_arrow_fs_create("abc", Sys.time() + 3600), "GcsFileSystem")
   expect_s3_class(auth_arrow_fs_create(NULL, NULL), "GcsFileSystem")
 })
+
+# GDAL ------------------------------------------------------------------------
+
+# Fresh record of the credential GDAL holds, restored afterwards.
+local_gdal_state <- function(env = parent.frame()) {
+  fields <- c("gdal_id", "gdal_header", "gdal_warned")
+  old <- mget(fields, envir = the_auth, ifnotfound = list(NULL))
+  rm(list = intersect(fields, ls(the_auth)), envir = the_auth)
+  withr::defer(
+    {
+      rm(list = intersect(fields, ls(the_auth)), envir = the_auth)
+      for (f in names(old)) if (!is.null(old[[f]])) assign(f, old[[f]], envir = the_auth)
+    },
+    envir = env
+  )
+}
+
+# `gdal_config()` replaced by a recorder: `log$calls` (one `c(option, value)`
+# per call).
+local_gdal_mock <- function(env = parent.frame()) {
+  local_gdal_state(env)
+  log <- new.env()
+  log$calls <- list()
+  testthat::local_mocked_bindings(
+    gdal_config = function(option, value) {
+      log$calls[[length(log$calls) + 1]] <- c(option, value)
+      invisible()
+    },
+    .env = env
+  )
+  log
+}
+
+# Values set since the last look, as a named character vector (last value per
+# option, sorted by option); empties the record.
+gdal_set <- function(log) {
+  calls <- log$calls
+  log$calls <- list()
+  if (length(calls) == 0) {
+    return(character())
+  }
+  out <- vapply(calls, `[[`, character(1), 2)
+  names(out) <- vapply(calls, `[[`, character(1), 1)
+  out <- out[!duplicated(names(out), fromLast = TRUE)]
+  out[order(names(out))]
+}
+
+gdal_cleared <- function(...) {
+  all <- c(
+    "GDAL_HTTP_HEADERS", "GOOGLE_APPLICATION_CREDENTIALS", "GS_OAUTH2_CLIENT_ID",
+    "GS_OAUTH2_CLIENT_SECRET", "GS_OAUTH2_REFRESH_TOKEN"
+  )
+  out <- stats::setNames(rep("", length(all)), all)
+  given <- c(...)
+  out[names(given)] <- given
+  out[order(names(out))]
+}
+
+test_that("be_gdal_path() gives GDAL the options of each credential type", {
+  local_env_unchanged()
+  local_auth_registry()
+  log <- local_gdal_mock()
+  local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    auth_http_token = function(body) stop("GDAL options need no token for a user login")
+  )
+  dir <- withr::local_tempdir()
+  user <- write_key(file.path(dir, "user.json"))
+  robot <- write_key(file.path(dir, "robot.json"), "service_account")
+  path <- "r/part-a.tif"
+
+  be <- be_new("gs://bucket/store", auth = rcs_auth_gcs(key = user))
+  expect_identical(be_gdal_path(be, path), "/vsigs/bucket/store/r/part-a.tif")
+  expect_identical(gdal_set(log), gdal_cleared(
+    GS_OAUTH2_REFRESH_TOKEN = "FAKE-REFRESH-TOKEN",
+    GS_OAUTH2_CLIENT_ID = "fake-client-id.apps.example.com",
+    GS_OAUTH2_CLIENT_SECRET = "FAKE-CLIENT-SECRET"
+  ))
+  # The same credential again: nothing to change.
+  expect_identical(be_gdal_path(be, c(path, "b.tif")), c(
+    "/vsigs/bucket/store/r/part-a.tif", "/vsigs/bucket/store/b.tif"
+  ))
+  expect_identical(gdal_set(log), character())
+  expect_identical(be_gdal_path(be, character()), character())
+  expect_identical(gdal_set(log), character())
+
+  suppressWarnings({
+    be_gdal_path(be_new("gs://bucket/store", auth = rcs_auth_gcs(key = robot)), path)
+    expect_identical(gdal_set(log), gdal_cleared(GOOGLE_APPLICATION_CREDENTIALS = robot))
+
+    be_gdal_path(be_new("gs://bucket", auth = rcs_auth_gcs(token = "ya29-fake-access")), path)
+    expect_identical(gdal_set(log), gdal_cleared(GDAL_HTTP_HEADERS = "Authorization: Bearer ya29-fake-access"))
+
+    be_gdal_path(be_new("gs://bucket", auth = rcs_auth_gcs(fun = function() "fun-token")), path)
+    expect_identical(gdal_set(log), gdal_cleared(GDAL_HTTP_HEADERS = "Authorization: Bearer fun-token"))
+
+    local_clean_lookup()
+    be_gdal_path(be_new("gs://bucket", auth = rcs_auth_gcs()), path)
+    expect_identical(gdal_set(log), gdal_cleared())
+  })
+})
+
+test_that("a renewed token of the same credential updates the header silently", {
+  local_env_unchanged()
+  local_auth_registry()
+  log <- local_gdal_mock()
+  clock <- local_clock()
+  local_mocked_bindings(auth_tokeninfo = function(token) NA_character_)
+  n <- 0
+  auth <- rcs_auth_gcs(fun = function() {
+    n <<- n + 1
+    list(access_token = paste0("token-", n), expires_in = 3600)
+  })
+  be <- be_new("gs://bucket", auth = auth)
+  be_gdal_path(be, "a.tif")
+  expect_identical(gdal_set(log)[["GDAL_HTTP_HEADERS"]], "Authorization: Bearer token-1")
+  be_gdal_path(be, "a.tif")
+  expect_identical(gdal_set(log), character())
+
+  clock$now <- clock$now + 3400
+  expect_no_warning(be_gdal_path(be, "a.tif"))
+  expect_identical(gdal_set(log), c(GDAL_HTTP_HEADERS = "Authorization: Bearer token-2"))
+})
+
+test_that("a switch to another credential warns once per session", {
+  local_env_unchanged()
+  local_auth_registry()
+  log <- local_gdal_mock()
+  local_mocked_bindings(auth_tokeninfo = function(token) NA_character_)
+  a <- be_new("gs://bucket-a", auth = rcs_auth_gcs(token = "token-a"))
+  b <- be_new("gs://bucket-b", auth = rcs_auth_gcs(token = "token-b"))
+  expect_no_warning(be_gdal_path(a, "x.tif"))
+  expect_snapshot(be_gdal_path(b, "x.tif"))
+  gdal_set(log)
+  expect_no_warning(be_gdal_path(a, "x.tif"))
+  expect_identical(gdal_set(log), gdal_cleared(GDAL_HTTP_HEADERS = "Authorization: Bearer token-a"))
+  expect_no_warning(be_gdal_path(b, "x.tif"))
+})
+
+test_that("the warning on a switch has its class", {
+  local_auth_registry()
+  local_gdal_mock()
+  local_mocked_bindings(auth_tokeninfo = function(token) NA_character_)
+  be_gdal_path(be_new("gs://bucket-a", auth = rcs_auth_gcs(token = "token-a")), "x.tif")
+  expect_warning(
+    be_gdal_path(be_new("gs://bucket-b", auth = rcs_auth_gcs(token = "token-b")), "x.tif"),
+    class = "rcs_warning_gdal_credential"
+  )
+})
+
+test_that("gdal_config() sets and clears a GDAL option through terra", {
+  skip_if_not_installed("terra")
+  withr::defer(terra::setGDALconfig("RCS_TEST_OPTION", ""))
+  gdal_config("RCS_TEST_OPTION", "some value")
+  expect_identical(terra::getGDALconfig("RCS_TEST_OPTION"), "some value")
+  gdal_config("RCS_TEST_OPTION", "")
+  expect_identical(terra::getGDALconfig("RCS_TEST_OPTION"), "")
+})
+
+# DuckDB secret -----------------------------------------------------------------
+
+test_that("auth_duckdb_secret() creates a temporary secret for the scope", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_mocked_bindings(auth_tokeninfo = function(token) NA_character_)
+  sent <- character()
+  local_mocked_bindings(duckdb_exec = function(con, sql) {
+    sent <<- c(sent, sql)
+    0
+  })
+  auth <- rcs_auth_gcs(token = "ya29-it's-fake")
+  name <- withVisible(auth_duckdb_secret(auth, "con", "gs://bucket/some/prefix"))
+  expect_false(name$visible)
+  expect_identical(name$value, paste0("rcs_", md5_string("gs://bucket/some/prefix")))
+  expect_identical(sent, paste0(
+    "CREATE OR REPLACE TEMPORARY SECRET ", name$value,
+    " (TYPE gcs, BEARER_TOKEN 'ya29-it''s-fake', SCOPE 'gs://bucket/some/prefix')"
+  ))
+  # A trailing slash names the same scope.
+  expect_identical(auth_duckdb_secret(auth, "con", "gs://bucket/some/prefix/"), name$value)
+  expect_identical(sent[[2]], sent[[1]])
+})
+
+test_that("a failing secret aborts rcs_error_duckdb without echoing the token", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    duckdb_exec = function(con, sql) stop(paste("Parser Error near", sql))
+  )
+  auth <- rcs_auth_gcs(token = "ya29-fake-access")
+  err <- expect_error(auth_duckdb_secret(auth, "con", "gs://bucket"), class = "rcs_error_duckdb")
+  shown <- paste(conditionMessage(err), format(err), collapse = "\n")
+  expect_false(grepl("ya29-fake-access", shown, fixed = TRUE))
+  expect_null(err$parent)
+  expect_snapshot(auth_duckdb_secret(auth, "con", "gs://bucket"), error = TRUE)
+  expect_snapshot(auth_duckdb_secret(auth, "con", "bucket/prefix"), error = TRUE)
+})
+
+test_that("auth_duckdb_secret() refuses ambient credentials", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_clean_lookup()
+  local_mocked_bindings(duckdb_exec = function(con, sql) stop("must not be called"))
+  expect_error(auth_duckdb_secret(rcs_auth_gcs(), "con", "gs://bucket"), class = "rcs_error_backend")
+})
+
+test_that("duckdb_exec() runs a statement", {
+  con <- local_duckdb()
+  expect_equal(duckdb_exec(con, "CREATE TABLE t AS SELECT 1 AS x"), 1)
+})
+
+# store_auth_check() ----------------------------------------------------------------
+
+test_that("store_auth_check() gives one row per local location", {
+  withr::local_options(rcs.quiet = TRUE)
+  dir <- withr::local_tempdir()
+  a <- file.path(dir, "a")
+  b <- file.path(dir, "b")
+  store_create(a)
+  st <- store_connect(a, b, create = TRUE)
+  got <- store_auth_check(st)
+  expect_identical(got, tibble::tibble(
+    location = c(st$primary$uri, st$secondary[[1]]$uri),
+    client = "all",
+    ok = TRUE,
+    note = "local folder: no credentials needed"
+  ))
+})
+
+# A store object with one GCS location, built offline.
+gcs_store <- function(auth, catalog = catalog_empty(), files = files_empty()) {
+  be <- be_new("gs://bucket/store", auth = auth)
+  new_store(primary = new_location(backend = be, catalog = catalog, files = files))
+}
+
+test_that("store_auth_check() reports each failing client without aborting", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_gdal_mock()
+  local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    auth_check_arrow = function(be, auth) stop("arrow refused ya29-fake-access"),
+    auth_check_json_api = function(be, auth) stop("403 forbidden"),
+    auth_check_gdal = function(be, auth, path) stop("GDAL cannot open"),
+    auth_check_duckdb = function(be, auth) stop("DuckDB failed")
+  )
+  st <- gcs_store(rcs_auth_gcs(token = "ya29-fake-access"))
+  got <- expect_no_error(store_auth_check(st))
+  expect_identical(got$location, rep("gs://bucket/store", 4))
+  expect_identical(got$client, c("arrow", "json_api", "gdal", "duckdb"))
+  ok_duckdb <- if (rlang::is_installed(c("duckdb", "DBI"))) FALSE else NA
+  expect_identical(got$ok, c(FALSE, FALSE, NA, ok_duckdb))
+  expect_identical(got$note[[3]], "no raster to test with")
+  expect_match(got$note[[1]], "arrow refused")
+  expect_false(any(grepl("ya29-fake-access", got$note, fixed = TRUE)))
+  expect_identical(got$note[[2]], "403 forbidden")
+})
+
+test_that("store_auth_check() probes the first raster and passes when every client works", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_gdal_mock()
+  probed <- NULL
+  local_mocked_bindings(
+    auth_tokeninfo = function(token) NA_character_,
+    auth_check_arrow = function(be, auth) invisible(),
+    auth_check_json_api = function(be, auth) invisible(),
+    auth_check_gdal = function(be, auth, path) probed <<- path,
+    auth_check_duckdb = function(be, auth) invisible()
+  )
+  catalog <- catalog_empty()[rep(NA_integer_, 3), ]
+  catalog$dataset <- c("t", "grid", "grid2")
+  catalog$kind <- c("table", "raster", "raster")
+  files <- files_empty()[rep(NA_integer_, 3), ]
+  files$dataset <- c("t", "grid", "grid2")
+  files$path <- c("t/part-a.parquet", "grid/part-a.tif", "grid2/part-a.tif")
+  st <- gcs_store(rcs_auth_gcs(token = "ya29-fake-access"), catalog, files)
+  got <- store_auth_check(st)
+  expect_identical(probed, "grid/part-a.tif")
+  expect_identical(got$ok[1:3], c(TRUE, TRUE, TRUE))
+  expect_identical(got$note[1:3], rep("ok", 3))
+})
+
+test_that("store_auth_check() does not try GDAL and DuckDB with ambient credentials", {
+  local_env_unchanged()
+  local_auth_registry()
+  local_gdal_mock()
+  local_clean_lookup()
+  local_mocked_bindings(
+    auth_check_arrow = function(be, auth) invisible(),
+    auth_check_json_api = function(be, auth) invisible(),
+    auth_check_gdal = function(be, auth, path) stop("must not be called"),
+    auth_check_duckdb = function(be, auth) stop("must not be called")
+  )
+  got <- store_auth_check(gcs_store(rcs_auth_gcs()))
+  expect_identical(got$ok, c(TRUE, TRUE, NA, NA))
+  expect_identical(got$note[3:4], rep("not supported for ambient credentials", 2))
+})
+
+# Against the test bucket ------------------------------------------------------------
+
+test_that("a store on the bucket passes store_auth_check() and reads a raster through GDAL", {
+  skip_below_level("full")
+  uri <- Sys.getenv("RCS_TEST_GCS")
+  skip_if(!nzchar(uri), "RCS_TEST_GCS is not set.")
+  skip_if_not(arrow::arrow_with_gcs(), "Arrow is built without GCS.")
+  skip_if_not_installed("gargle")
+  skip_if_not_installed("httr2")
+  skip_if_not_installed("terra")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("DBI")
+  local_env_unchanged()
+  gdal_options <- names(gdal_cleared())
+  old <- vapply(gdal_options, terra::getGDALconfig, character(1))
+  withr::defer(for (k in gdal_options) terra::setGDALconfig(k, old[[k]]))
+  local_gdal_state()
+  withr::local_options(rcs.quiet = TRUE)
+  gcs_reset_clients()
+  prefix <- paste0("rcs-test-", paste(sample(c(letters, 0:9), 12, TRUE), collapse = ""))
+  be <- be_new(paste0(sub("/+$", "", uri), "/", prefix))
+  withr::defer({
+    left <- be_list(be)$path
+    if (length(left) > 0) be_delete(be, left)
+    expect_identical(be_list(be)$path, character())
+  })
+
+  store_create(be$uri)
+  st <- store_connect(be$uri)
+  store_write(st, rcs_sim_table(100, seed = 1), "t", title = "Table", description = "Simulated table.")
+  x <- rcs_sim_raster(nrow = 50, ncol = 50)
+  store_write(st, x, "grid", title = "Grid", description = "Simulated raster.")
+
+  got <- store_auth_check(st)
+  expect_identical(got$client, c("arrow", "json_api", "gdal", "duckdb"))
+  expect_true(all(got$ok), info = paste(got$client, got$note, collapse = "; "))
+
+  r <- store_read(st, "grid")
+  first <- terra::global(r, "mean", na.rm = TRUE)
+  second <- terra::global(r, "mean", na.rm = TRUE)
+  expect_identical(first, second)
+  expect_equal(first[[1]], terra::global(x, "mean", na.rm = TRUE)[[1]])
+})

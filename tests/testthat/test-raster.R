@@ -271,7 +271,6 @@ test_that("a raster opens from GCS through /vsigs/", {
   skip_below_level("full")
   uri <- Sys.getenv("RCS_TEST_GCS")
   skip_if(!nzchar(uri), "RCS_TEST_GCS is not set.")
-  skip_if(!nzchar(Sys.getenv("GOOGLE_APPLICATION_CREDENTIALS")), "GDAL needs GOOGLE_APPLICATION_CREDENTIALS.")
   skip_if_not(arrow::arrow_with_gcs(), "Arrow is built without GCS.")
   skip_if_not_installed("gargle")
   skip_if_not_installed("httr2")
