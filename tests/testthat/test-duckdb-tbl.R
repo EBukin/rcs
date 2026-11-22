@@ -45,10 +45,11 @@ test_that("store_open(engine = 'duckdb') returns a lazy dbplyr table with the rc
   expect_identical(rcs$mode, "native")
   expect_identical(rcs$tests, list())
   # the view of D12 (fact 2: DBI::Id)
-  expect_match(dbplyr::sql_render(x), '"sales"."daily"', fixed = TRUE)
-  # D3: dbplyr's own print
+  expect_match(dbplyr::sql_render(x), "FROM sales.daily", fixed = TRUE)
+  # D3: dbplyr's own print, not the header of the Arrow engine's queries
   out <- utils::capture.output(print(x))
-  expect_match(out[[1]], "^# Source:")
+  expect_true(any(grepl("^# Database: DuckDB", out)))
+  expect_false(any(grepl("Dataset:", out, fixed = TRUE)))
 })
 
 test_that("store_open(engine = 'duckdb') is quiet and the Arrow engine is unchanged", {

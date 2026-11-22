@@ -47,6 +47,16 @@
 #'   that is unique in the store.
 #' @param version `NULL` for the current version, or the 16 hex characters of
 #'   an earlier version kept in the history (see `store_history()`).
+#'   Only `NULL` with `engine = "duckdb"`.
+#' @param engine `"arrow"` (the default) for a lazy Arrow query of class
+#'   `rcs_query`; `"duckdb"` for a dbplyr table on the dataset's DuckDB view
+#'   (see [store_duckdb()]), of class `rcs_duckdb_tbl`. Its `collect()`
+#'   restores the R types and the geometry as for the Arrow engine; it
+#'   needs the packages duckdb, DBI and dbplyr.
+#' @param con With `engine = "duckdb"`: `NULL` for an in-memory connection
+#'   that the package keeps, one per store, or a DuckDB connection made with
+#'   `bigint = "integer64"`.
+#' @param mode,spatial With `engine = "duckdb"`: as in [store_duckdb()].
 #' @return A lazy query of class `rcs_query`. Print it to see the dataset,
 #'   the files left after pruning and the columns.
 #' @seealso [store_read()], [store_intersects()].
@@ -65,13 +75,31 @@
 #'   dplyr::select(shop_id, date, qty) |>
 #'   dplyr::collect()
 #' unlink(location, recursive = TRUE)
-store_open <- function(st, dataset, version = NULL) {
+store_open <- function(st, dataset, version = NULL, engine = c("arrow", "duckdb"),
+                       con = NULL, mode = "native", spatial = FALSE) {
   validate_store(st)
   local_trace("store_open")
   call <- rlang::current_env()
+  engine <- rlang::arg_match(engine, error_call = call)
+  if (engine == "duckdb") {
+    mode <- rlang::arg_match(mode, c("native", "arrow"), error_call = call)
+    check_flag(spatial, call = call)
+    if (!is.null(version)) {
+      cli::cli_abort(
+        c(
+          "{.arg version} must be {.code NULL} with {.code engine = \"duckdb\"}.",
+          i = "DuckDB views show the current versions; read an earlier version with {.code engine = \"arrow\"}."
+        ),
+        class = "rcs_error_argument", call = call
+      )
+    }
+  }
   target <- read_target(st, dataset, version, call = call)
   if (identical(target$entry$kind, "raster")) {
     abort_raster_verb("store_open", call = call)
+  }
+  if (engine == "duckdb") {
+    return(duckdb_tbl_open(st, target$dataset, con, mode, spatial, call = call))
   }
   query_new(st, target)
 }
