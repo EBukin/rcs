@@ -84,7 +84,9 @@ h3_hex_is_cell <- function(hex) {
 # An `integer64` is a double vector whose 8 bytes hold the integer. These two
 # helpers split it into its high and low 32-bit halves (as signed integers)
 # and back, through the bytes, which is much faster than integer64
-# arithmetic.
+# arithmetic. A half whose bits are 0x80000000 (INT_MIN) is NA_integer_ in R,
+# both ways: `int64_halves()` gives NA_integer_ for it and
+# `int64_from_halves()` writes NA_integer_ as those bits.
 int64_halves <- function(x) {
   if (length(x) == 0) {
     return(list(high = integer(), low = integer()))
@@ -113,7 +115,10 @@ int64_from_halves <- function(high, low) {
 h3_int64_to_hex_raw <- function(x) {
   halves <- int64_halves(x)
   high <- halves$high
-  out <- sprintf("%07x%08x", high, halves$low)
+  low_hex <- sprintf("%08x", halves$low)
+  low_hex[is.na(halves$low)] <- "80000000"
+  out <- paste0(sprintf("%07x", high), low_hex)
+  # a high half of 0x80000000 (NA here) sets the sign bit: never a cell
   bad <- is.na(x) | is.na(high) | bitwShiftR(high, 24L) != 8L
   out[bad] <- NA_character_
   out
@@ -124,9 +129,12 @@ h3_hex_to_int64_raw <- function(hex) {
   high <- strtoi(substr(hex, 1, 7), 16L)
   low_high <- strtoi(substr(hex, 8, 11), 16L)
   low_low <- strtoi(substr(hex, 12, 15), 16L)
-  # the low half as a signed 32-bit integer
+  # the low half as a signed 32-bit integer; 0x80000000 is NA_integer_, which
+  # `int64_from_halves()` writes as those bits
   low <- low_high * 65536 + low_low
-  low <- as.integer(low - (low >= 2^31) * 2^32)
+  low <- low - (low >= 2^31) * 2^32
+  low[!is.na(low) & low == -2^31] <- NA_real_
+  low <- as.integer(low)
   out <- int64_from_halves(high, low)
   out[is.na(hex)] <- bit64::NA_integer64_
   out

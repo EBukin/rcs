@@ -212,6 +212,23 @@ rev.rcs_h3 <- function(x) {
   x[rev(seq_along(x))]
 }
 
+# bit64 keeps the subclass on these logical results; give plain logicals.
+
+#' @export
+is.na.rcs_h3 <- function(x) {
+  is.na(rcs_h3_strip(x))
+}
+
+#' @export
+is.finite.rcs_h3 <- function(x) {
+  is.finite(rcs_h3_strip(x))
+}
+
+#' @export
+is.infinite.rcs_h3 <- function(x) {
+  is.infinite(rcs_h3_strip(x))
+}
+
 # pillar ---------------------------------------------------------------------------
 
 #' @exportS3Method pillar::pillar_shaft
@@ -236,8 +253,16 @@ vec_proxy.rcs_h3 <- function(x, ...) {
   unclass(x)
 }
 
+# vctrs fills missing slots of the double proxy with NA_real_, whose bits are
+# not NA_integer64_; a double NA or NaN bit pattern is never a valid cell, so
+# every such element becomes NA_integer64_.
+
 #' @exportS3Method vctrs::vec_restore
 vec_restore.rcs_h3 <- function(x, to, ...) {
+  filled <- is.na(unclass(x))
+  if (any(filled)) {
+    x[filled] <- unclass(bit64::NA_integer64_)
+  }
   class(x) <- c("rcs_h3", "integer64")
   x
 }
