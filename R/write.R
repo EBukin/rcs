@@ -156,6 +156,9 @@
 #' @param check `TRUE` compares sampled rows of the staged files with `x`
 #'   before anything is uploaded (see [store_check()]).
 #' @param rows_per_group Rows per Parquet row group.
+#' @param crs The coordinate reference system of the WKB column `geometry`
+#'   of a lazy DuckDB table (anything [sf::st_crs()] accepts, e.g. `4326`);
+#'   required for such a table, ignored otherwise.
 #' @return A tibble with one row per location, invisibly: `location`,
 #'   `role`, `status` (`"written"`, `"unchanged"`, `"same"` for a secondary
 #'   that already held the version, `"behind"` or `"unavailable"`), `files`
@@ -201,7 +204,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
                         h3_res = 5L, geocode = TRUE,
                         geocode_engine = c("auto", "s2", "planar"),
                         max_files = 50L, history = NULL, source = NULL, inputs = NULL,
-                        columns = NULL, check = TRUE, rows_per_group = 50000L) {
+                        columns = NULL, check = TRUE, rows_per_group = 50000L,
+                        crs = NULL) {
   validate_store(st)
   local_trace("store_write")
   call <- rlang::current_env()
@@ -253,7 +257,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     geocode_engine = geocode_engine, engine_given = engine_given, max_files = max_files,
     history = dataset_history, source = source %||% NA_character_,
     inputs = inputs %||% NA_character_, columns = columns,
-    rows_per_group = rows_per_group, existing = existing,
+    rows_per_group = rows_per_group, crs = crs, existing = existing,
     existing_index = existing_index, dir = dir, now = now, mode = mode,
     call = call
   )
