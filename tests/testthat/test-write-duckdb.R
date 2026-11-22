@@ -221,6 +221,42 @@ test_that("files, catalog rows, manifest and version equal those of the collecte
   }
 })
 
+test_that("keys mixing case and NULL give the files of the collected data, in byte order, whatever the locale", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- tibble::tibble(
+    code = c("b", "B", "a", "A", NA, "c"),
+    grp = c("x", "Y", "y", "x", "Y", "y"),
+    flag = c(TRUE, NA, FALSE, TRUE, FALSE, NA),
+    day = as.Date(c("2024-01-02", NA, "2024-01-01", "2024-01-02", "2023-12-31", NA)),
+    qty = 1:6
+  )
+  tbl <- duck_table(con, x, "mixed")
+  cases <- list(
+    one_file = list(key = "code", partition = NULL, order = c("A", "B", "a", "b", "c", NA)),
+    partitioned = list(key = "code", partition = "grp", order = c("B", NA, "A", "b", "a", "c")),
+    logical_date_key = list(key = c("flag", "day", "code"), partition = NULL, order = c(NA, "a", "A", "b", "B", "c"))
+  )
+  # testthat collates in C; a language locale must not change the files
+  works <- function(locale) {
+    suppressWarnings(withr::with_collate(locale, identical(Sys.getlocale("LC_COLLATE"), locale)))
+  }
+  locales <- Filter(works, c("en_US.UTF-8", "English_United States.utf8", "C"))
+  withr::local_collate(locales[[1]])
+  for (name in names(cases)) {
+    args <- cases[[name]]
+    a <- duck_store()
+    b <- duck_store()
+    out_a <- duck_write(a$st, tbl, key = args$key, partition = args$partition)
+    out_b <- duck_write(b$st, x, key = args$key, partition = args$partition)
+    expect_identical(attr(out_a, "version"), attr(out_b, "version"), label = name)
+    expect_identical(duck_facts(a), duck_facts(b), label = name)
+    files <- a$st$primary$files$path[a$st$primary$files$dataset == "sales/daily"]
+    stored <- unlist(lapply(files, function(p) read_stored(a$st$primary$backend, p)$code))
+    expect_identical(stored, args$order, label = name)
+  }
+})
+
 # g. Landing, and the temporary table -----------------------------------------------
 
 test_that("a DuckDB write lands in a local primary and secondary with MD5 verification", {
