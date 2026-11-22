@@ -162,6 +162,99 @@ test_that("dplyr verbs keep values and give rcs_h3", {
   expect_s3_class(b2$h3, "rcs_h3")
 })
 
+test_that("vctrs and dplyr fill missing values with NA_integer64_", {
+  x <- test_cells()
+  na_ok <- function(y, missing, values) {
+    expect_s3_class(y, c("rcs_h3", "integer64"), exact = TRUE)
+    expect_identical(is.na(y), missing)
+    expect_identical(format(y[!missing]), values)
+    expect_identical(unclass(y[missing]), unclass(rep(bit64::NA_integer64_, sum(missing))))
+  }
+  na_ok(vctrs::vec_slice(x, c(1, NA)), c(FALSE, TRUE), test_hex[1])
+  na_ok(vctrs::vec_init(x), TRUE, character())
+  na_ok(vctrs::vec_init(x, 2), c(TRUE, TRUE), character())
+  na_ok(vctrs::vec_c(x, NA), c(rep(FALSE, 4), TRUE), test_hex)
+  na_ok(dplyr::lag(x), c(TRUE, rep(FALSE, 3)), test_hex[1:3])
+  na_ok(dplyr::lead(x), c(rep(FALSE, 3), TRUE), test_hex[2:4])
+
+  left <- tibble::tibble(id = 1:3)
+  right <- tibble::tibble(id = c(1L, 3L), h3 = x[c(1, 3)])
+  lj <- dplyr::left_join(left, right, by = "id")
+  na_ok(lj$h3, c(FALSE, TRUE, FALSE), test_hex[c(1, 3)])
+  rj <- dplyr::right_join(right, left, by = "id")
+  na_ok(rj$h3[order(rj$id)], c(FALSE, TRUE, FALSE), test_hex[c(1, 3)])
+  fj <- dplyr::full_join(right, tibble::tibble(id = 5L), by = "id")
+  na_ok(fj$h3, c(FALSE, FALSE, TRUE), test_hex[c(1, 3)])
+
+  b <- dplyr::bind_rows(tibble::tibble(id = 1:2, h3 = x[1:2]), tibble::tibble(id = 3L))
+  na_ok(b$h3, c(FALSE, FALSE, TRUE), test_hex[1:2])
+  b2 <- dplyr::bind_rows(tibble::tibble(id = 3L), tibble::tibble(id = 1:2, h3 = x[1:2]))
+  na_ok(b2$h3, c(TRUE, FALSE, FALSE), test_hex[1:2])
+
+  # existing NA values keep their bits, other values are unchanged
+  y <- c(x, new_rcs_h3(bit64::NA_integer64_))
+  expect_identical(unclass(vctrs::vec_slice(y, 5:1)), unclass(rev(y)))
+})
+
+test_that("plain integer64 is unchanged by the rcs_h3 vctrs methods", {
+  i <- bit64::as.integer64(c(1, 2))
+  s <- vctrs::vec_slice(i, c(1, NA))
+  expect_identical(class(s), "integer64")
+  expect_identical(is.na(s), c(FALSE, TRUE))
+  expect_identical(is.na(dplyr::lag(i)), c(TRUE, FALSE))
+  expect_identical(class(vctrs::vec_c(i, NA)), "integer64")
+})
+
+test_that("is.na(), is.finite() and is.infinite() give plain logicals", {
+  x <- c(test_cells()[1:2], new_rcs_h3(bit64::NA_integer64_))
+  for (f in list(is.na, is.finite, is.infinite)) {
+    out <- f(x)
+    expect_identical(class(out), "logical")
+    expect_null(attributes(out))
+  }
+  expect_identical(is.na(x), c(FALSE, FALSE, TRUE))
+  expect_identical(is.finite(x), c(TRUE, TRUE, FALSE))
+  expect_identical(is.infinite(x), c(FALSE, FALSE, FALSE))
+  expect_identical(utils::capture.output(print(is.na(x))), "[1] FALSE FALSE  TRUE")
+  expect_identical(dplyr::if_else(is.na(x), 0L, 1L), c(1L, 1L, 0L))
+  expect_identical(as.vector(table(is.na(x))), c(2L, 1L))
+  expect_identical(names(table(is.na(x))), c("FALSE", "TRUE"))
+  df <- tibble::tibble(h3 = x)
+  expect_identical(dplyr::mutate(df, m = is.na(h3))$m, c(FALSE, FALSE, TRUE))
+})
+
+# A 32-bit half equal to INT_MIN (0x80000000) --------------------------------------
+
+test_that("a cell whose low half is 0x80000000 converts both ways", {
+  hex <- "8f2834780000000"
+  expect_true(h3_hex_is_cell(hex))
+  expect_no_warning(cell <- h3_hex_to_int64_raw(hex))
+  expect_identical(as.character(cell), as.character(
+    bit64::as.integer64("644722039780802560")
+  ))
+  expect_identical(h3_int64_to_hex_raw(cell), hex)
+  h <- new_rcs_h3(cell)
+  expect_identical(format(h), hex)
+  expect_identical(rcs_h3_hex(h), hex)
+  expect_identical(rcs_h3_hex(cell), hex)
+  expect_identical(rcs_h3_hex(hex), hex)
+  expect_identical(format(c(test_cells(), h)), c(test_hex, hex))
+})
+
+test_that("format() handles any value with a half equal to INT_MIN", {
+  # a high half of 0x80000000 sets the sign bit: never a cell (and the
+  # pattern of NA_integer64_ when the low half is 0)
+  int_min <- NA_integer_
+  high <- c(int_min, int_min, int_min, 0x08f28347L, 0L, -1L)
+  low <- c(0L, 1L, int_min, int_min, int_min, int_min)
+  x <- new_rcs_h3(int64_from_halves(high, low))
+  out <- expect_no_error(format(x))
+  expect_identical(out, c("NA", "<invalid>", "<invalid>", "8f2834780000000", "<invalid>", "<invalid>"))
+  expect_identical(h3_int64_to_hex_raw(rcs_h3_strip(x))[4], "8f2834780000000")
+  expect_no_error(rcs_h3_hex(x[c(1, 4)]))
+  expect_error(rcs_h3_hex(x[2]), class = "rcs_error_h3_input")
+})
+
 # rcs_h3_hex() ---------------------------------------------------------------------
 
 test_that("rcs_h3_hex() converts every input form", {
