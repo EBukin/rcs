@@ -93,7 +93,7 @@ test_that("a DuckDB table is written as one file and by partitions, with its key
   entry <- s$st$primary$catalog
   expect_identical(entry$kind, "table")
   expect_identical(entry$key[[1]], duck_key)
-  expect_identical(entry$n_files, 1L)
+  expect_identical(as.numeric(entry$n_files), 1)
   expect_identical(as.numeric(entry$rows), 300)
   expect_identical(attr(out, "version"), entry$version)
   expect_equal(duck_sorted(duck_stored_rows(s$st$primary)), duck_sorted(x))
@@ -103,7 +103,7 @@ test_that("a DuckDB table is written as one file and by partitions, with its key
   duck_write(s2$st, tbl, key = duck_key, partition = "year")
   entry <- s2$st$primary$catalog
   expect_identical(entry$partition[[1]], "year")
-  expect_identical(entry$n_files, length(unique(x$year)))
+  expect_identical(as.numeric(entry$n_files), as.numeric(length(unique(x$year))))
   files <- s2$st$primary$files
   expect_setequal(files$partition_values, vapply(sort(unique(x$year)), function(y) {
     partition_values_json(list(year = y))
@@ -200,6 +200,8 @@ test_that("files, catalog rows, manifest and version equal those of the collecte
   x <- duck_sales_data(1200, seed = 3)
   tbl <- duck_table(con, x)
   collected <- tibble::as_tibble(dplyr::collect(tbl))
+  # batches that cut row groups and partitions anywhere
+  withr::local_options(rcs.duckdb_batch_rows = 170)
 
   cases <- list(
     one_file = list(key = duck_key, partition = NULL),
@@ -251,7 +253,7 @@ test_that("a DuckDB write lands in a local primary and secondary with MD5 verifi
   expect_length(during, 1L)
   expect_identical(duck_write_tables(con), character())
   # the user's table is untouched
-  expect_identical(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sales")$n, 200)
+  expect_identical(as.numeric(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sales")$n), 200)
 })
 
 test_that("the temporary DuckDB table is dropped after an error", {
