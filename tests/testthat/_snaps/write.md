@@ -169,6 +169,16 @@
       ! "shapes/polygons" has no geocoding engine recorded; an update geocodes its new rows with "s2".
       i Leave out `geocode_engine`, or use `mode = "replace"` to set one.
 
+# an explicit engine on update of a geocode = FALSE dataset aborts without naming s2
+
+    Code
+      store_write(s$st, x[16:22, ], "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", mode = "update", geocode_engine = "s2")
+    Condition
+      Error in `store_write()`:
+      ! "shapes/polygons" is stored with `geocode = FALSE`, so it has no geocoding engine.
+      i Leave out `geocode_engine`, or use `mode = "replace"` to geocode it.
+
 # the rebuild warning names rebuilt rows and fallbacks, before the upload lines
 
     Code

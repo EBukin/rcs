@@ -555,6 +555,44 @@ test_that("update of a dataset without engine geocodes new rows with s2; an expl
   expect_store_valid(st)
 })
 
+test_that("an explicit engine on update of a geocode = FALSE dataset aborts without naming s2", {
+  skip_if_no_h3()
+  s <- local_store()
+  x <- geo_with_invalid()
+  x$grp <- rep(c("a", "b"), length.out = nrow(x))
+  write_shapes(s$st, x[1:15, ], key = "id", partition = "grp", geocode = FALSE)
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, x[16:22, ], "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", mode = "update", geocode_engine = "s2"
+    )
+  })
+})
+
+test_that("the rebuild warning is signalled with warn >= 1, so it shows at once", {
+  skip_if_no_h3()
+  x <- geo_with_invalid()
+  warn_seen <- function(warn) {
+    s <- local_store()
+    withr::local_options(warn = warn)
+    seen <- NULL
+    withCallingHandlers(
+      write_shapes(s$st, x, key = "id"),
+      rcs_warning_s2_rebuild = function(w) {
+        seen <<- as.integer(getOption("warn"))
+        invokeRestart("muffleWarning")
+      }
+    )
+    seen
+  }
+  expect_identical(warn_seen(0), 1L)
+  expect_identical(warn_seen(-1), 1L)
+  expect_identical(warn_seen(1), 1L)
+  expect_identical(warn_seen(2), 2L)
+  s <- local_store()
+  withr::local_options(warn = 2)
+  expect_error(write_shapes(s$st, x, key = "id"), "invalid on the sphere")
+})
+
 test_that("the rebuild warning names rebuilt rows and fallbacks, before the upload lines", {
   skip_if_no_h3()
   s <- local_store()

@@ -556,7 +556,7 @@ stage_update <- function(st, a) {
   # on the sphere ("s2") and keeps no engine.
   stored_engine <- existing$geocode_engine
   if (a$kind == "geospatial" && isTRUE(a$engine_given)) {
-    check_update_engine(a$geocode_engine, stored_engine, dataset, call)
+    check_update_engine(a$geocode_engine, stored_engine, dataset, geocode, call)
   }
   encode_engine <- if (is.na(stored_engine)) "s2" else stored_engine
 
@@ -680,7 +680,16 @@ stage_update <- function(st, a) {
   )
 }
 
-check_update_engine <- function(given, stored, dataset, call) {
+check_update_engine <- function(given, stored, dataset, geocode, call) {
+  if (!geocode) {
+    cli::cli_abort(
+      c(
+        "{.val {dataset}} is stored with {.code geocode = FALSE}, so it has no geocoding engine.",
+        i = "Leave out {.arg geocode_engine}, or use {.code mode = \"replace\"} to geocode it."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
   if (is.na(stored)) {
     cli::cli_abort(
       c(
@@ -723,7 +732,9 @@ rebuild_keys <- function(enc, x, key) {
 }
 
 # One warning per write when any row was rebuilt or fell back to the plane:
-# counts, and the first five keys of each group.
+# counts, and the first five keys of each group. Signalled with `warn = 1`
+# (unless the caller set `warn >= 1`), so that a top-level call prints it at
+# once, before the upload lines, instead of deferring it to the end.
 warn_s2_rebuild <- function(dataset, rebuild) {
   n_rebuilt <- length(rebuild$rebuilt)
   n_fallback <- length(rebuild$fallback)
@@ -734,6 +745,9 @@ warn_s2_rebuild <- function(dataset, rebuild) {
     n <- length(keys)
     more <- if (n > 5) paste0("; and ", n - 5, " more") else ""
     paste0(paste(utils::head(keys, 5L), collapse = "; "), more, ".")
+  }
+  if (getOption("warn", 0) < 1) {
+    withr::local_options(warn = 1)
   }
   cli::cli_warn(
     c(
