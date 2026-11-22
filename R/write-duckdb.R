@@ -10,7 +10,9 @@
 # group holds exactly `rows_per_group` rows except the last of a file. The
 # files, their names, the entry and the manifest equal those of
 # `store_write()` of the same rows collected into R (`files_finish()`).
-# Landing is the ordinary path; DuckDB never uploads.
+# Landing is the ordinary path; DuckDB never uploads. A table with a column
+# `geometry` (WKB or `GEOMETRY`) is a geospatial dataset (D39): its
+# geocodes pass through R in batches (`stage_duckdb_geo()`).
 
 # Input -------------------------------------------------------------------------
 
@@ -133,7 +135,10 @@ stage_duckdb <- function(a) {
   cols <- setdiff(names_all, dropped)
   types <- described$column_type[match(cols, described$column_name)]
   check_duckdb_types(cols, types, call)
-  select <- paste(duckdb_ident(con, cols), collapse = ", ")
+  if ("geometry" %in% cols) {
+    return(stage_duckdb_geo(a, con, tmp, cols, types))
+  }
+  select <-paste(duckdb_ident(con, cols), collapse = ", ")
   proto_table <- duckdb_frame(con, paste("SELECT", select, "FROM", q_tmp, "LIMIT 0"), table = TRUE)
   proto <- duckdb_as_tibble(proto_table)
 
@@ -280,14 +285,24 @@ duckdb_check_key <- function(con, q_tmp, key, call) {
 #' @param rows_per_group Rows per row group.
 #' @param tmp_dir Folder for the files, named `part-<i>.parquet`.
 #' @param total Rows of the query (for the progress bar).
+#' @param file_meta `NULL`, or a function of the partition values of a file
+#'   (a named list, or `NULL`) called before the file is opened, returning
+#'   a list with `geo` (the `geo` JSON or `NULL`), `bbox` (the one-row
+#'   extent of the file's boxes, or `NULL`) and `h3` (the file's cells or
+#'   their range, or `NULL`): the facts a geospatial file or an index file
+#'   needs whose rows are not in R (D39).
 #' @return A list of `files_file_facts()`, one per file.
 #' @noRd
 duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
-                               rows_per_group, tmp_dir, total) {
+                               rows_per_group, tmp_dir, total, file_meta = NULL) {
+  facts_of <- function(values) {
+    if (is.null(file_meta)) list() else file_meta(values)
+  }
   if (total == 0) {
     path <- file.path(tmp_dir, "part-1.parquet")
-    files_write_parquet(proto, path, schema, rcs_json, NULL, rows_per_group)
-    return(list(files_file_facts(path, NULL, 0)))
+    fm <- facts_of(NULL)
+    files_write_parquet(proto, path, schema, rcs_json, fm$geo, rows_per_group)
+    return(list(files_file_facts(path, NULL, 0, bbox = fm$bbox, h3 = fm$h3)))
   }
   n <- rcs_option("rcs.duckdb_batch_rows")
   withr::local_options(arrow.int64_downcast = FALSE)
@@ -320,7 +335,9 @@ duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
           out[[length(out) + 1L]] <- parquet_stream_close(current)
         }
         path <- file.path(tmp_dir, paste0("part-", length(out) + 1L, ".parquet"))
-        current <- parquet_stream_open(path, values, pv, schema, rcs_json, rows_per_group)
+        current <- parquet_stream_open(path, values, pv, schema, rcs_json, rows_per_group,
+          facts = facts_of(values)
+        )
       }
       parquet_stream_add(current, part)
     }
@@ -337,9 +354,12 @@ duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
 
 # One output file being streamed: an environment with the path, the
 # partition values, the writer (opened with the first row group), the rows
-# buffered for the next row group and the rows written.
-parquet_stream_open <- function(path, values, pv, schema, rcs_json, rows_per_group) {
+# buffered for the next row group and the rows written; `facts` as
+# `file_meta()` of `duckdb_write_files()` returns them.
+parquet_stream_open <- function(path, values, pv, schema, rcs_json, rows_per_group,
+                                facts = list()) {
   f <- new.env(parent = emptyenv())
+  f$facts <- facts
   f$path <- path
   f$values <- values
   f$pv <- pv
@@ -367,6 +387,9 @@ parquet_stream_add <- function(f, data) {
 parquet_stream_group <- function(f, chunk) {
   table <- arrow::arrow_table(files_arrow_values(chunk), schema = f$schema)
   table$metadata$rcs <- f$rcs_json
+  if (!is.null(f$facts$geo)) {
+    table$metadata$geo <- f$facts$geo
+  }
   if (is.null(f$writer)) {
     dir.create(dirname(f$path), recursive = TRUE, showWarnings = FALSE)
     f$sink <- arrow::FileOutputStream$create(f$path)
@@ -388,7 +411,7 @@ parquet_stream_close <- function(f) {
   f$writer$Close()
   f$sink$close()
   f$writer <- NULL
-  files_file_facts(f$path, f$values, f$rows)
+  files_file_facts(f$path, f$values, f$rows, bbox = f$facts$bbox, h3 = f$facts$h3)
 }
 
 # After an error: close the file so that its folder can be removed.
@@ -486,6 +509,441 @@ write_progress <- function(bar = NULL, phase = NULL, total = NULL, batches = NUL
     cli::cli_progress_update(id = bar$id, set = rows, extra = list(batch = batch))
   }
   invisible(bar)
+}
+
+# Geospatial ----------------------------------------------------------------------
+
+#' Stage a lazy DuckDB table with a geometry column as a geospatial dataset
+#'
+#' D39. Pass 1 streams `.rcs_tmp` and the WKB through R in batches: per
+#' batch the boxes, the cells and the index rows (the engine of D31, as
+#' `geo_encode()` computes them) and the geometry types, staged as Parquet
+#' and loaded into the temporary table `<tmp>_geo` (with `.rcs_id`, the row
+#' number in the order of `geo_encode()`: `h3`, the key, `.rcs_tmp`) and
+#' `<tmp>_index` (index rows with `.rcs_id`). Pass 2 streams the rows,
+#' joined in DuckDB, into the data file, and the index rows into the index
+#' file. The files equal those of `store_write()` of the same `sf`.
+#'
+#' One file only: a `partition` aborts (work package DW2 adds the partition
+#' map between the passes; `duckdb_geo_file_meta()` takes the condition of
+#' one file).
+#'
+#' @param a The arguments of `store_write()`.
+#' @param con The DuckDB connection.
+#' @param tmp The name of the materialised table.
+#' @param cols,types The columns of `x` kept, and their DuckDB types.
+#' @return A staging plan as `stage_full()` returns it, with `check` (D40)
+#'   and `rebuild` (D32).
+#' @noRd
+stage_duckdb_geo <- function(a, con, tmp, cols, types) {
+  call <- a$call
+  q_tmp <- duckdb_ident(con, tmp)
+  geom_type <- types[[match("geometry", cols)]]
+  if (!grepl("^(BLOB|GEOMETRY)", geom_type)) {
+    cli::cli_abort(
+      c(
+        "Column {.field geometry} of {.arg x} must hold WKB ({.code BLOB}) or be a {.code GEOMETRY}, not {.code {geom_type}}.",
+        i = "Convert it in the query, for example with {.code ST_AsWKB()} of the spatial extension."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  if (is.null(a$crs)) {
+    cli::cli_abort(
+      c(
+        "{.arg crs} is required to write a DuckDB table with a {.field geometry} column.",
+        i = "Give the coordinate reference system of the geometries, for example {.code crs = 4326}."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  crs <- tryCatch(sf::st_crs(a$crs), error = function(e) sf::NA_crs_)
+  if (is.na(crs)) {
+    cli::cli_abort(
+      "{.arg crs} must be a coordinate reference system that {.fn sf::st_crs} reads.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  partition <- as.character(a$partition %||% character())
+  if (length(partition) > 0) {
+    cli::cli_abort(
+      c(
+        "{.arg partition} is not implemented yet for a geospatial DuckDB table.",
+        i = "Write it as one file, or collect it into an {.cls sf} first."
+      ),
+      class = "rcs_error_not_implemented", call = call
+    )
+  }
+  crs_json <- geo_crs_json(crs)
+  geocode <- isTRUE(a$geocode)
+  h3_res <- check_h3_res(a$h3_res, call = call)
+  if (geocode) {
+    check_h3o()
+  }
+  key <- as.character(a$key %||% character())
+  attrs <- setdiff(cols, "geometry")
+  geom_sql <- if (grepl("^GEOMETRY", geom_type)) "ST_AsWKB(t.\"geometry\")" else "t.\"geometry\""
+
+  # the columns of the files, in the order of `geo_encode()$data`
+  select_attrs <- if (length(attrs) > 0) paste0("t.", duckdb_ident(con, attrs), collapse = ", ")
+  proto_attrs <- duckdb_frame(con, paste(
+    "SELECT", paste(c(select_attrs, "1 AS \".rcs_one\""), collapse = ", "), "FROM", q_tmp, "AS t LIMIT 0"
+  ))
+  proto_attrs$.rcs_one <- NULL
+  check_key(proto_attrs, key, call = call)
+  duckdb_check_key(con, q_tmp, key, call)
+  proto <- proto_attrs
+  proto$.rcs_id <- bit64::integer64()
+  if (geocode) {
+    proto$h3 <- bit64::integer64()
+  }
+  proto$bbox <- bbox_na(0L)
+  proto$geometry <- list()
+
+  # pass 1: geocodes in R, staged and loaded into DuckDB
+  pass1 <- duckdb_geo_pass1(con, q_tmp, geom_sql, crs, geocode, h3_res, a$geocode_engine, file.path(a$dir, "pass1"))
+  q_geo <- duckdb_ident(con, paste0(tmp, "_geo"))
+  q_index <- duckdb_ident(con, paste0(tmp, "_index"))
+  withr::defer(duckdb_drop(con, q_geo), envir = call)
+  withr::defer(duckdb_drop(con, q_index), envir = call)
+  key_select <- if (length(key) > 0) paste0(", ", paste(duckdb_ident(con, key), collapse = ", "))
+  duckdb_exec(con, paste0(
+    "CREATE TEMPORARY TABLE ", q_geo, " AS SELECT p.*, row_number() OVER (ORDER BY ",
+    duckdb_order_by(con, c(if (geocode) "h3", key)), ") AS \".rcs_id\" FROM ",
+    duckdb_parquet_list(con, pass1$data), " AS p JOIN (SELECT \".rcs_tmp\"", key_select,
+    " FROM ", q_tmp, ") AS k USING (\".rcs_tmp\")"
+  ))
+  if (geocode) {
+    duckdb_exec(con, paste0(
+      "CREATE TEMPORARY TABLE ", q_index, " AS SELECT g.\".rcs_id\", i.h3, i.h3_main, i.share FROM ",
+      duckdb_parquet_list(con, pass1$index), " AS i JOIN ", q_geo, " AS g USING (\".rcs_tmp\")"
+    ))
+  }
+  rebuild <- list(
+    rebuilt = duckdb_geo_keys(con, q_tmp, q_geo, key, pass1$rebuilt),
+    fallback = duckdb_geo_keys(con, q_tmp, q_geo, key, pass1$fallback)
+  )
+
+  # pass 2: the data file
+  descriptions <- a$columns %||% stored_descriptions(a$existing, names(proto))
+  schema <- files_arrow_schema(proto)
+  spec <- files_columns_spec(proto, schema, descriptions, call = call, cells_by_name = TRUE)
+  meta <- files_meta(
+    dataset = a$dataset, kind = "geospatial", title = a$title,
+    description = a$description, spec = spec, key = key,
+    sorted_by = c(if (geocode) "h3", if (length(key) > 0) key else ".rcs_id"),
+    partition = character(), source = a$source, inputs = a$inputs,
+    crs = crs_json, h3_res = if (geocode) h3_res else NA_integer_,
+    geocode_engine = if (geocode) a$geocode_engine else NA_character_,
+    index_of = NA_character_, history = a$history
+  )
+  data_dir <- file.path(a$dir, "data")
+  tmp_dir <- files_tmp_dir(data_dir, a$dataset)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+  bbox_sql <- paste0(
+    "struct_pack(", paste0(bbox_names, " := g.", duckdb_ident(con, paste0(".rcs_", bbox_names)), collapse = ", "), ")"
+  )
+  data_sql <- function(where = "") {
+    paste0(
+      "SELECT ", paste(c(select_attrs, "g.\".rcs_id\"", if (geocode) "g.h3", paste(bbox_sql, "AS bbox"),
+        paste(geom_sql, "AS geometry")), collapse = ", "),
+      " FROM ", q_tmp, " AS t JOIN ", q_geo, " AS g USING (\".rcs_tmp\")", where,
+      " ORDER BY g.\".rcs_id\""
+    )
+  }
+  new <- duckdb_write_files(
+    con, sql = data_sql(), partition = character(), proto = proto, schema = schema,
+    rcs_json = files_rcs_json(meta), rows_per_group = a$rows_per_group,
+    tmp_dir = tmp_dir, total = pass1$total,
+    file_meta = function(values) duckdb_geo_file_meta(con, q_geo, crs_json, geocode)
+  )
+  staged <- files_finish(meta, new, NULL, created_of(a$existing, a$now), TRUE, geocode, data_dir)
+
+  # the index file
+  index <- NULL
+  if (geocode) {
+    index <- duckdb_stage_index(con, q_index, a, h3_res)
+  }
+
+  check <- function(be, files, entry) {
+    duckdb_check_geo_files(con, data_sql, be, files, entry)
+  }
+  list(
+    data = staged_src(staged), index = index, reference = NULL, data_dir = data_dir,
+    check = check, rebuild = rebuild
+  )
+}
+
+#' Pass 1 of a geospatial DuckDB write: geocodes of every row, in batches
+#'
+#' @param con The DuckDB connection.
+#' @param q_tmp The quoted materialised table.
+#' @param geom_sql The SQL of the WKB of a row of `t` (the materialised
+#'   table).
+#' @param crs The CRS of the geometries (`sf::st_crs()`).
+#' @param geocode,h3_res,geocode_engine As `store_write()`.
+#' @param dir Staging folder for the Parquet files of the pass.
+#' @return A list: `data` and `index` (the staged files; per row
+#'   `.rcs_tmp`, `h3`, `.rcs_xmin` ... `.rcs_ymax`, `.rcs_gtype`; per index
+#'   row `.rcs_tmp`, `h3`, `h3_main`, `share`), `rebuilt` and `fallback`
+#'   (`.rcs_tmp` of the rows rebuilt on the sphere and of the planar
+#'   fallbacks, D32), `total` (rows).
+#' @noRd
+duckdb_geo_pass1 <- function(con, q_tmp, geom_sql, crs, geocode, h3_res, geocode_engine, dir) {
+  dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+  withr::local_options(arrow.int64_downcast = FALSE)
+  total <- as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_tmp))$n)
+  n <- rcs_option("rcs.duckdb_batch_rows")
+  write_part <- function(data, kind, k) {
+    path <- file.path(dir, paste0(kind, "-", k, ".parquet"))
+    arrow::write_parquet(data, path)
+    path
+  }
+  # zero-row files fix the schema of the pass, also for an empty table
+  empty <- duckdb_geo_batch(list(), bit64::integer64(), crs, geocode, h3_res, geocode_engine)
+  data_files <- write_part(empty$data, "data", 0L)
+  index_files <- write_part(empty$index, "index", 0L)
+  rebuilt <- list()
+  fallback <- list()
+  if (total > 0) {
+    batches <- duckdb_batches(con, paste0(
+      "SELECT t.\".rcs_tmp\", ", geom_sql, " AS geometry FROM ", q_tmp, " AS t ORDER BY t.\".rcs_tmp\""
+    ), n)
+    on.exit(batches$close(), add = TRUE)
+    bar <- NULL
+    if (!isTRUE(rcs_option("rcs.quiet"))) {
+      bar <- write_progress(phase = "Geocoding", total = total, batches = ceiling(total / n))
+    }
+    done <- 0
+    k <- 0L
+    while (!is.null(batch <- batches$next_batch())) {
+      k <- k + 1L
+      data <- as.data.frame(batch)
+      wkb <- data$geometry
+      attributes(wkb) <- NULL
+      enc <- duckdb_geo_batch(wkb, data$.rcs_tmp, crs, geocode, h3_res, geocode_engine)
+      data_files <- c(data_files, write_part(enc$data, "data", k))
+      index_files <- c(index_files, write_part(enc$index, "index", k))
+      rebuilt[[k]] <- enc$rebuilt
+      fallback[[k]] <- enc$fallback
+      done <- done + nrow(data)
+      if (!is.null(bar)) write_progress(bar, rows = done, batch = k)
+    }
+    if (!is.null(bar)) write_progress(bar, done = TRUE)
+  }
+  list(
+    data = data_files, index = index_files,
+    rebuilt = do.call(c, c(list(bit64::integer64()), rebuilt)),
+    fallback = do.call(c, c(list(bit64::integer64()), fallback)),
+    total = total
+  )
+}
+
+# The geocodes of one batch, computed as `geo_encode()` computes them: the
+# boxes in the data's CRS, the cells of the geometries in EPSG:4326. A
+# missing geometry (`NULL`) is geocoded as an empty one.
+duckdb_geo_batch <- function(wkb, ids, crs, geocode, h3_res, geocode_engine) {
+  present <- wkb
+  missing <- vapply(present, is.null, logical(1))
+  if (any(missing)) {
+    present[missing] <- list(geo_empty_wkb)
+  }
+  geometry <- if (length(present) > 0) geo_wkb_to_sfc(present, crs) else sf::st_sfc(crs = crs)
+  bbox <- geo_bbox_df(geometry)
+  data <- tibble::tibble(.rcs_tmp = ids)
+  index <- tibble::tibble(
+    .rcs_tmp = bit64::integer64(), h3 = bit64::integer64(),
+    h3_main = bit64::integer64(), share = double()
+  )
+  rebuilt <- fallback <- bit64::integer64()
+  if (geocode) {
+    encoded <- geo_h3_rows(geo_to_4326(geometry), h3_res, geocode_engine)
+    data$h3 <- h3_hex_to_int64_raw(encoded$h3)
+    rows <- encoded$index
+    index <- tibble::tibble(
+      .rcs_tmp = ids[rows$row],
+      h3 = h3_hex_to_int64_raw(rows$cell),
+      h3_main = h3_hex_to_int64_raw(encoded$h3[rows$row]),
+      share = as.double(rows$share)
+    )
+    rebuilt <- ids[encoded$rebuilt]
+    fallback <- ids[encoded$fallback]
+  }
+  for (name in bbox_names) {
+    data[[paste0(".rcs_", name)]] <- bbox[[name]]
+  }
+  data$.rcs_gtype <- geo_type_strings(wkb)
+  list(data = data, index = index, rebuilt = rebuilt, fallback = fallback)
+}
+
+# `read_parquet([...])` of local files.
+duckdb_parquet_list <- function(con, paths) {
+  paths <- normalizePath(paths, winslash = "/", mustWork = TRUE)
+  paste0("read_parquet([", paste(DBI::dbQuoteString(con, paths), collapse = ", "), "])")
+}
+
+# The keys of rows given by `.rcs_tmp`, in input order, as D32 shows them:
+# the key columns, else `.rcs_id`.
+duckdb_geo_keys <- function(con, q_tmp, q_geo, key, ids) {
+  if (length(ids) == 0) {
+    return(character())
+  }
+  ids <- paste(as.character(sort(ids)), collapse = ", ")
+  values <- if (length(key) > 0) {
+    duckdb_frame(con, paste0(
+      "SELECT ", paste(duckdb_ident(con, key), collapse = ", "), " FROM ", q_tmp,
+      " WHERE \".rcs_tmp\" IN (", ids, ") ORDER BY \".rcs_tmp\""
+    ))
+  } else {
+    duckdb_frame(con, paste0(
+      "SELECT \".rcs_id\" FROM ", q_geo, " WHERE \".rcs_tmp\" IN (", ids, ") ORDER BY \".rcs_tmp\""
+    ))
+  }
+  format_key_values(values)
+}
+
+#' The facts of one geospatial file from DuckDB
+#'
+#' One aggregation over the rows of the file: the distinct geometry types,
+#' the extent of the boxes and the range of the cells, for
+#' `geo_metadata_of()` and `files_file_facts()` (D39).
+#'
+#' @param con The DuckDB connection.
+#' @param q_geo The quoted table of pass 1.
+#' @param crs_json The PROJJSON of the dataset.
+#' @param geocode Whether the rows have cells.
+#' @param where SQL condition selecting the rows of the file (`""`: all).
+#' @return A list as `file_meta()` of `duckdb_write_files()` returns it.
+#' @noRd
+duckdb_geo_file_meta <- function(con, q_geo, crs_json, geocode, where = "") {
+  withr::local_options(arrow.int64_downcast = FALSE)
+  q <- duckdb_ident(con, paste0(".rcs_", bbox_names))
+  agg <- duckdb_frame(con, paste0(
+    "SELECT list(DISTINCT \".rcs_gtype\") FILTER (WHERE \".rcs_gtype\" IS NOT NULL) AS types, ",
+    "min(", q[[1]], ") AS xmin, min(", q[[2]], ") AS ymin, max(", q[[3]], ") AS xmax, max(", q[[4]], ") AS ymax",
+    if (geocode) ", min(h3) AS h3_min, max(h3) AS h3_max",
+    " FROM ", q_geo, where
+  ))
+  types <- unlist(agg$types[[1]]) %||% character()
+  extent <- c(agg$xmin, agg$ymin, agg$xmax, agg$ymax)
+  list(
+    geo = geo_metadata_of(types, extent, crs_json),
+    bbox = bbox_df(agg$xmin, agg$ymin, agg$xmax, agg$ymax),
+    h3 = if (geocode) c(agg$h3_min, agg$h3_max)
+  )
+}
+
+#' Stage the index table of a geospatial DuckDB write
+#'
+#' The files, names, entry and manifest of `stage_index()` for the same
+#' rows: streamed from DuckDB in the order `h3`, `.rcs_id` when the index
+#' fits one file; an index above `rows_per_group * 100` rows, which
+#' `stage_index()` partitions by H3, is collected and staged by it.
+#'
+#' @return A version source (`staged_src()`), or `NULL` without index rows.
+#' @noRd
+duckdb_stage_index <- function(con, q_index, a, h3_res) {
+  rows <- as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_index))$n)
+  if (rows == 0) {
+    return(NULL)
+  }
+  sql <- paste("SELECT \".rcs_id\", h3, h3_main, share FROM", q_index, "ORDER BY h3, \".rcs_id\"")
+  if (rows > a$rows_per_group * 100) {
+    return(stage_index(duckdb_frame(con, sql), a, h3_res))
+  }
+  index_dataset <- index_name(a$dataset)
+  proto <- tibble::tibble(
+    .rcs_id = bit64::integer64(), h3 = bit64::integer64(),
+    h3_main = bit64::integer64(), share = double()
+  )
+  schema <- files_arrow_schema(proto)
+  spec <- files_columns_spec(proto, schema, NULL, call = a$call, cells_by_name = TRUE)
+  meta <- files_meta(
+    dataset = index_dataset, kind = "table",
+    title = paste("H3 index of", a$dataset),
+    description = paste0("Rows of ", a$dataset, " that cross H3 cells at resolution ", h3_res, "."),
+    spec = spec, key = character(), sorted_by = c("h3", ".rcs_id"),
+    partition = character(), source = NA_character_, inputs = NA_character_,
+    crs = NA_character_, h3_res = NA_integer_, geocode_engine = NA_character_,
+    index_of = a$dataset, history = a$history
+  )
+  dir <- file.path(a$dir, "index")
+  tmp_dir <- files_tmp_dir(dir, index_dataset)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+  range <- function(values) {
+    withr::local_options(arrow.int64_downcast = FALSE)
+    agg <- duckdb_frame(con, paste("SELECT min(h3) AS h3_min, max(h3) AS h3_max FROM", q_index))
+    list(h3 = c(agg$h3_min, agg$h3_max))
+  }
+  new <- duckdb_write_files(
+    con, sql = sql, partition = character(), proto = proto, schema = schema,
+    rcs_json = files_rcs_json(meta), rows_per_group = a$rows_per_group,
+    tmp_dir = tmp_dir, total = rows, file_meta = range
+  )
+  staged_src(files_finish(meta, new, NULL, created_of(a$existing_index, a$now), FALSE, TRUE, dir))
+}
+
+#' The serialization check of geospatial files staged from DuckDB (D40)
+#'
+#' Per file: the footer row count equals the rows streamed, and up to 20
+#' sampled rows of one row group equal the rows with the same `.rcs_id`
+#' fetched from the materialised table.
+#'
+#' @param data_sql A function of a SQL `WHERE` clause giving the query of
+#'   the rows as written.
+#' @return A tibble as `check_serialization()` returns it.
+#' @noRd
+duckdb_check_geo_files <- function(con, data_sql, be, files, entry, n = 20L) {
+  withr::local_options(arrow.int64_downcast = FALSE)
+  spec <- columns_from_json(entry$columns)
+  rows <- lapply(seq_len(nrow(files)), function(i) {
+    path <- files$path[[i]]
+    problem <- tryCatch(
+      duckdb_check_geo_file(con, data_sql, be, path, files$rows[[i]], spec, n),
+      rcs_error_backend = function(e) paste("it cannot be read:", first_line(conditionMessage(e)))
+    )
+    if (is.na(problem)) {
+      check_row(be$uri, entry$dataset, path, "ok")
+    } else {
+      check_row(be$uri, entry$dataset, path, "failed", problem)
+    }
+  })
+  vctrs::vec_rbind(check_empty(), !!!rows)
+}
+
+duckdb_check_geo_file <- function(con, data_sql, be, path, streamed, spec, n) {
+  groups <- files_row_groups(be, path)
+  footer <- sum(groups$rows)
+  if (footer != streamed) {
+    return(paste0("its footer holds ", footer, " rows, ", streamed, " were streamed"))
+  }
+  if (footer == 0) {
+    return(NA_character_)
+  }
+  pick <- withr::with_preserve_seed({
+    g <- sample.int(nrow(groups), 1L)
+    take <- sort(sample.int(groups$rows[[g]], min(n, groups$rows[[g]])))
+    list(g = g, take = take)
+  })
+  table <- files_read_row_groups(be, path, groups$row_group[[pick$g]])
+  data <- check_sample_rows(table, pick$take, spec)
+  ids <- paste(as.character(data$.rcs_id), collapse = ", ")
+  ref <- duckdb_frame(con, data_sql(paste0(" WHERE g.\".rcs_id\" IN (", ids, ")")))
+  ref <- restore_types(ref, spec)
+  if (nrow(ref) != nrow(data)) {
+    return(paste0(nrow(data) - nrow(ref), " sampled rows are not in x"))
+  }
+  shared <- intersect(names(data), names(ref))
+  differ <- shared[!vapply(shared, function(col) {
+    identical(normalise_values(data[[col]]), normalise_values(ref[[col]]))
+  }, logical(1))]
+  if (length(differ) > 0) {
+    return(paste0(
+      "column", if (length(differ) > 1) "s", " ", paste(differ, collapse = ", "),
+      " differ", if (length(differ) == 1) "s", " from x"
+    ))
+  }
+  NA_character_
 }
 
 # Check ---------------------------------------------------------------------------

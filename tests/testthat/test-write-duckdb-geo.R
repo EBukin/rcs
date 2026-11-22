@@ -193,6 +193,23 @@ test_that("the polygons of fact 18 warn with their keys, as store_write() of the
   expect_identical(conditionMessage(wc1), conditionMessage(wc2))
 })
 
+# Check (D40) ------------------------------------------------------------------------
+
+test_that("check = TRUE detects a staged geospatial file altered by the writer", {
+  skip_if_no_duckdb_geo()
+  con <- local_duckdb()
+  tbl <- dgeo_table(con, rcs_sim_points(200), "pts")
+  real <- parquet_stream_group
+  local_mocked_bindings(parquet_stream_group = function(f, chunk) {
+    if ("value" %in% names(chunk)) chunk$value <- chunk$value + 1
+    real(f, chunk)
+  })
+  s <- dgeo_store()
+  err <- expect_error(dgeo_write(s$st, tbl, key = "id", crs = 4326), class = "rcs_error_check")
+  expect_match(cli::ansi_strip(conditionMessage(err)), "column value differs from x")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+})
+
 # Temporary tables -----------------------------------------------------------------
 
 test_that("the temporary DuckDB tables are gone after a geospatial write", {

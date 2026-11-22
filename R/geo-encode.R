@@ -873,7 +873,8 @@ geo_encode <- function(x, h3_res = 5L, geocode = TRUE, key = NULL,
     keys[[paste0("key", i)]] <- attrs[[key[[i]]]]
   }
   keys$row <- seq_len(n)
-  order <- vctrs::vec_order(tibble::new_tibble(keys, nrow = n), na_value = "largest")
+  # byte order whatever the locale, as tables and DuckDB `ORDER BY` (plan 0002)
+  order <- order_radix(tibble::new_tibble(keys, nrow = n))
   position <- integer(n)
   position[order] <- seq_len(n)
   ids <- id_start + bit64::as.integer64(seq_len(n) - 1L)
@@ -1005,23 +1006,35 @@ geo_metadata <- function(data, crs) {
     geo_abort("{.arg data} needs the columns {.field bbox} and {.field geometry}.")
   }
   check_string(crs)
-  wkb <- data[["geometry"]]
-  attributes(wkb) <- NULL
-  wkb <- wkb[!vapply(wkb, is.null, logical(1))]
-  types <- character()
-  if (length(wkb) > 0) {
-    meta <- wk::wk_meta(wk::new_wk_wkb(wkb))
-    suffix <- ifelse(meta$has_z & meta$has_m, " ZM", ifelse(meta$has_z, " Z", ifelse(meta$has_m, " M", "")))
-    types <- unique(paste0(geo_type_names[meta$geometry_type], suffix))
-    types <- sort(types, method = "radix")
-  }
+  types <- geo_type_strings(data[["geometry"]])
+  box <- data[["bbox"]]
+  extent <- c(geo_min(box$xmin), geo_min(box$ymin), geo_max(box$xmax), geo_max(box$ymax))
+  geo_metadata_of(types, extent, crs)
+}
+
+#' GeoParquet `geo` metadata from geometry types and extent
+#'
+#' The variant of `geo_metadata()` for files whose rows are not in R (the
+#' writer of DuckDB tables, plan 0002, D39): the same string for the same
+#' types and extent.
+#'
+#' @param types Character: the geometry types of the rows, as
+#'   `geo_type_strings()` gives them (any order; repeats and `NA` allowed).
+#' @param extent Double `c(xmin, ymin, xmax, ymax)` of the rows; any `NA`
+#'   leaves the `bbox` key out.
+#' @param crs One PROJJSON string.
+#' @return One JSON string, as `geo_metadata()`.
+#' @noRd
+geo_metadata_of <- function(types, extent, crs) {
+  check_string(crs)
+  types <- as.character(types)
+  types <- sort(unique(types[!is.na(types)]), method = "radix")
   column <- list(
     encoding = "WKB",
     geometry_types = I(types),
     crs = jsonlite::fromJSON(crs, simplifyVector = FALSE)
   )
-  box <- data[["bbox"]]
-  extent <- c(geo_min(box$xmin), geo_min(box$ymin), geo_max(box$xmax), geo_max(box$ymax))
+  extent <- unname(as.double(extent))
   if (!anyNA(extent)) {
     column$bbox <- extent
   }
@@ -1034,6 +1047,20 @@ geo_metadata <- function(data, crs) {
     json_exact_doubles(geo),
     auto_unbox = TRUE, digits = NA, null = "null", json_verbatim = TRUE
   ))
+}
+
+# The GeoParquet geometry type of each WKB geometry ("Polygon", "Point Z",
+# ...); `NA` for a missing one (`NULL`).
+geo_type_strings <- function(wkb) {
+  attributes(wkb) <- NULL
+  present <- !vapply(wkb, is.null, logical(1))
+  out <- rep(NA_character_, length(wkb))
+  if (any(present)) {
+    meta <- wk::wk_meta(wk::new_wk_wkb(wkb[present]))
+    suffix <- ifelse(meta$has_z & meta$has_m, " ZM", ifelse(meta$has_z, " Z", ifelse(meta$has_m, " M", "")))
+    out[present] <- paste0(geo_type_names[meta$geometry_type], suffix)
+  }
+  out
 }
 
 # Covering --------------------------------------------------------------------
