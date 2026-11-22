@@ -44,8 +44,8 @@ test_that("a filtered or shortened query prints ?? rows, the filter and the prun
   q <- store_open(fx$st, "sales/daily")
   filtered <- q |>
     dplyr::filter(year == 2024, qty > 20) |>
-    dplyr::select(shop_id, date, product, qty) |>
-    dplyr::arrange(shop_id, date, product)
+    dplyr::select(shop_id, date, qty, price) |>
+    dplyr::arrange(shop_id, date, qty, price)
   expect_snapshot(filtered, transform = scrub_version)
   short <- utils::head(store_open(fx$st, "summary"), 5)
   expect_snapshot(short, transform = scrub_version)

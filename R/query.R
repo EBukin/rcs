@@ -540,28 +540,132 @@ glimpse.rcs_query <- function(x, width = NULL, ...) {
 
 # Printing --------------------------------------------------------------------
 
+#' Print a lazy query
+#'
+#' Reads the first rows of the query (`head(n + 1)`, so that it can tell
+#' whether more rows exist without counting them; the exact test of a
+#' spatial filter included) and prints `n` of them with pillar, under a
+#' header that names the dataset, the location, the version, the files kept
+#' and the filters. The number of rows is known only when the query is the
+#' dataset itself, with columns selected, renamed or computed; otherwise it
+#' is shown as `??`. Printing opens the data files it needs.
+#'
+#' @param x A query made by [store_open()].
+#' @param ... Passed to the tibble print method (for example `width`).
+#' @param n Number of rows to show; `NULL` uses the option `rcs.print_rows`
+#'   (10).
+#' @return `x`, invisibly.
+#' @noRd
 #' @export
-print.rcs_query <- function(x, ...) {
+print.rcs_query <- function(x, ..., n = NULL) {
+  local_trace("print")
+  n <- n %||% rcs_option("rcs.print_rows")
+  if (!rlang::is_scalar_integerish(n, finite = TRUE) || n < 1) {
+    cli::cli_abort(
+      "{.arg n} must be a whole number of at least 1.",
+      class = "rcs_error_argument"
+    )
+  }
+  n <- as.integer(n)
+  data <- query_collect(head.rcs_query(x, n + 1L))
+  more <- nrow(data) > n
+  data <- utils::head(data, n)
+  width <- list(...)$width %||% getOption("width")
+  preview <- new_rcs_preview(
+    data,
+    header = query_header(x, ncol(data), width),
+    footer = query_footer(x, nrow(data), more)
+  )
+  print(preview, n = n, ...)
+  invisible(x)
+}
+
+# Header lines of a printed query (named; pillar aligns the names).
+query_header <- function(x, ncol, width) {
   entry <- x$entry
-  role <- query_location_role(x)
+  rows <- if (query_rows_known(x)) format_count(as.numeric(entry$rows)) else "??"
   total <- as.numeric(entry$n_files)
   current <- x$location$catalog$version[x$location$catalog$dataset == entry$dataset]
-  version <- if (length(current) == 1 && identical(current, entry$version)) "current" else "earlier version"
-  lines <- c(
-    paste0("<rcs_query> ", entry$dataset, " (", entry$kind, ", ", version, ")"),
-    paste0("Location: ", role),
-    paste0("Files:    ", nrow(x$files), " of ", format_count(total))
+  version <- if (length(current) == 1 && identical(current, entry$version)) "current" else "earlier"
+  files <- paste0(nrow(x$files), " of ", format_count(total))
+  if (nrow(x$files) < total) {
+    files <- paste0(files, " (pruned)")
+  }
+  out <- c(
+    Dataset = paste0(entry$dataset, " [", rows, " x ", ncol, "] (", entry$kind, ")"),
+    Location = paste0(query_location_role(x), " (", x$location$backend$type, ")"),
+    Version = paste0(substr(entry$version, 1, 8), " (", version, ")"),
+    Files = files
   )
   if (!is.null(x$spatial)) {
-    lines <- c(lines, paste0("Spatial:  ", spatial_describe(x$spatial)))
+    out[["Spatial"]] <- spatial_describe(x$spatial)
+    out[["Filter"]] <- "(with spatial predicate)"
+  } else {
+    filter <- query_filter_text(x$query)
+    if (!is.null(filter)) {
+      # "# " and the aligned name "Filter:   " come before the text
+      out[["Filter"]] <- truncate_text(filter, width - 12L)
+    }
   }
-  if (!x$geometry) {
-    lines <- c(lines, "Geometry: dropped before collecting")
+  out
+}
+
+# Footer lines of a printed query, after pillar's own.
+query_footer <- function(x, shown, more) {
+  hint <- "Use `collect()` to read the rows into R."
+  if (spatial_needs_geometry(x)) {
+    return(c("more rows may exist", hint))
   }
-  columns <- setdiff(names(x$query), ".rcs_id")
-  lines <- c(lines, paste0("Columns:  ", paste(columns, collapse = ", ")))
-  cli::cat_line(lines)
-  invisible(x)
+  if (shown == 0) {
+    return("0 rows")
+  }
+  left <- if (query_rows_known(x)) as.numeric(x$entry$rows) - shown else NA
+  rows <- if (!is.na(left)) {
+    if (left > 0) paste0(format_count(left), if (left == 1) " more row" else " more rows")
+  } else if (more) {
+    "more rows"
+  }
+  c(rows, hint)
+}
+
+# Whether the query returns every row of the dataset: one Arrow step over
+# the files (columns selected, renamed or computed), no filter, no order,
+# no aggregation, no head, no spatial filter, every file kept.
+query_rows_known <- function(x) {
+  query <- x$query
+  inherits(query, "arrow_dplyr_query") &&
+    inherits(query$.data, "FileSystemDataset") &&
+    isTRUE(query$filtered_rows) &&
+    length(query$arrange_vars) == 0 &&
+    length(query$group_by_vars) == 0 &&
+    is.null(query$aggregations) &&
+    is.null(query$head) && is.null(query$tail) && is.null(query$join) &&
+    is.null(x$spatial) &&
+    nrow(x$files) == as.numeric(x$entry$n_files)
+}
+
+# The rows filters of an Arrow query as text (bottom step first), or NULL.
+query_filter_text <- function(query) {
+  parts <- character()
+  while (inherits(query, "arrow_dplyr_query")) {
+    if (!isTRUE(query$filtered_rows)) {
+      parts <- c(query$filtered_rows$ToString(), parts)
+    }
+    query <- query$.data
+  }
+  if (length(parts) == 0) {
+    return(NULL)
+  }
+  paste(parts, collapse = " & ")
+}
+
+# Cut `text` to at most `width` characters, ending with "...".
+truncate_text <- function(text, width) {
+  width <- max(width, 4L)
+  if (nchar(text) <= width) {
+    return(text)
+  }
+  paste0(substr(text, 1, width - 3L), "...")
 }
 
 query_location_role <- function(q) {
