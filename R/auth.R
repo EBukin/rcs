@@ -30,17 +30,20 @@ auth_adc_name <- "application_default_credentials.json"
 #' `rcs_auth_gcs()`, the default lookup.
 #'
 #' Give at most one of `key`, `token` and `fun`. With none, the default lookup
-#' takes the first of:
+#' is a chain in which the first variable that is set decides:
 #'
-#' 1. the file named by the environment variable
-#'    `GOOGLE_APPLICATION_CREDENTIALS`;
-#' 2. `application_default_credentials.json` in the folder named by
-#'    `CLOUDSDK_CONFIG`, when that variable is set;
-#' 3. the same file in gcloud's folder (`%APPDATA%/gcloud` on Windows,
+#' 1. when the environment variable `GOOGLE_APPLICATION_CREDENTIALS` is set,
+#'    the file it names and only that file (a missing file aborts with
+#'    class `rcs_error_backend`);
+#' 2. else, when `CLOUDSDK_CONFIG` is set,
+#'    `application_default_credentials.json` in that folder only (gcloud's
+#'    folder is not tried);
+#' 3. else the same file in gcloud's folder (`%APPDATA%/gcloud` on Windows,
 #'    `~/.config/gcloud` elsewhere), written once by
 #'    `gcloud auth application-default login`;
-#' 4. ambient credentials, when no file exists: Arrow and the JSON API then
-#'    use Google's own defaults (on Google Cloud, the metadata server).
+#' 4. ambient credentials, when the file of step 2 or 3 does not exist:
+#'    Arrow and the JSON API then use Google's own defaults (on Google
+#'    Cloud, the metadata server).
 #'
 #' Access tokens of a key file or a function are renewed five minutes before
 #' they expire, so a long session never signs in again. A token given with

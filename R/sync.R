@@ -35,9 +35,10 @@
 #' @section Conflicts:
 #' When a target holds another version of a dataset and its entry was
 #' updated later than the source's (the times recorded in the catalogs),
-#' the dataset is not copied there: it is a conflict. Every other copy and deletion goes ahead; after the last
-#' target the call aborts with class `rcs_error_sync_conflict`, listing the
-#' conflicts, and the condition's field `result` holds the result tibble.
+#' the dataset is not copied there: it is a conflict. Every other copy and
+#' deletion goes ahead; after the last target the call aborts with class
+#' `rcs_error_sync_conflict`, listing the conflicts, and the condition's
+#' field `result` holds the result tibble.
 #' `force = TRUE` copies the source over the newer version instead. Every
 #' version of a target that is replaced by another one is listed in one
 #' warning (class `rcs_warning_sync_overwrite`). The times compared are

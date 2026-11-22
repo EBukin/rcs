@@ -421,18 +421,21 @@ of `store_connect()` or `store_create()`, and every client uses them. No
 environment variable is needed or changed.
 
 Without `auth`, every bucket location uses `rcs_auth_gcs()`, the default
-lookup, which takes the first of:
+lookup. It is a chain in which the first variable that is set decides;
+it does not fall through to the next step:
 
-1. the key file named by the environment variable
-   `GOOGLE_APPLICATION_CREDENTIALS`;
-2. `application_default_credentials.json` in the folder named by
-   `CLOUDSDK_CONFIG`, when that variable is set;
-3. the same file in gcloud's own folder (`%APPDATA%/gcloud` on Windows,
-   `~/.config/gcloud` elsewhere), written once by
+1. when the environment variable `GOOGLE_APPLICATION_CREDENTIALS` is set,
+   the key file it names, and only that file: a missing file is an error
+   (class `rcs_error_backend`);
+2. else, when `CLOUDSDK_CONFIG` is set,
+   `application_default_credentials.json` in that folder only; gcloud's
+   own folder is not tried;
+3. else the same file in gcloud's own folder (`%APPDATA%/gcloud` on
+   Windows, `~/.config/gcloud` elsewhere), written once by
    `gcloud auth application-default login`;
-4. otherwise *ambient* credentials: Arrow and the JSON API use Google's own
-   defaults, such as the machine's account on Google Cloud. GDAL and
-   DuckDB cannot use these.
+4. when the file of step 2 or 3 does not exist, *ambient* credentials:
+   Arrow and the JSON API use Google's own defaults, such as the machine's
+   account on Google Cloud. GDAL and DuckDB cannot use these.
 
 For a personal account, the usual setup is therefore one command in a
 terminal, once per machine, and nothing in R:
@@ -498,9 +501,9 @@ location's token. A secret holds a token, not a key: after about an hour
 of DuckDB work on a bucket, call `store_duckdb()` again to refresh it.
 
 `store_auth_check()` tries each client on each location with a small probe
-and reports, without stopping, which work. A local folder needs no
-credentials and gives one row (the column `location`, the address, is
-left out here):
+and reports, without stopping, which work. Local folders need no
+credentials; each local location gives one row (the column
+`location`, the address, is left out here):
 
 ```{r}
 store_auth_check(st)[c("client", "ok", "note")]

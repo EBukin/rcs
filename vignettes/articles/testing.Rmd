@@ -214,10 +214,13 @@ tests themselves):
   `rcs_auth_gcs()`, both key types, renewal five minutes before expiry, a
   token that is never renewed, the GDAL options set for each credential
   type and the warning on a switch, the temporary DuckDB secret, and
-  `store_auth_check()` with each client failing in turn. Every test
-  asserts that no environment variable changed and that neither `print()`
-  nor `str()` shows a token, a refresh token or a client secret, nor
-  contacts the network.
+  `store_auth_check()` with each client failing in turn. Most tests
+  (those of the lookup, the key types, renewal, `print()`, `str()`, GDAL's
+  options, the DuckDB secret and `store_auth_check()` with failing
+  clients) assert that no environment variable changed. The
+  tests of the default lookup, of key types, of the same source and of
+  `print()` fail on any network call; the `print()` and `str()` tests
+  assert that no token, refresh token or client secret is shown.
 - **H3 cells** (`test-h3-type.R`): the class `rcs_h3` prints hex in
   vectors, tibbles and `sf`; never fails on any 64-bit value; keeps its
   class through subsetting, `c()`, `unique()`, `sort()` and the dplyr and
@@ -267,8 +270,6 @@ download on first use).
   files, catalog rows, manifest and version as a write of the same data
   collected into R (byte for byte), checks keys and partitions inside
   DuckDB, and drops its temporary table also after an error.
-  `test-write-duckdb-geo.R` does the same for geospatial data written
-  from DuckDB, against `store_write()` of the same `sf`.
 
 ## The cloud tests
 
@@ -276,13 +277,17 @@ At level `full`, the Google Cloud Storage backend is tested against a real
 bucket when the environment variable `RCS_TEST_GCS` names one
 (`tests/testthat/test-backend-gcs.R`): uploads, downloads, MD5 checksums
 read without a download, listing and deletion, a Parquet file streamed
-through Arrow and a file read through GDAL's `/vsigs/` path; a raster is
-opened through `/vsigs/` (`test-raster.R`); a store on the bucket passes
-`store_auth_check()` for every client and an expired token is renewed
+through Arrow, a file read through GDAL's `/vsigs/` path, and a store on
+the bucket that renews an expired token; a raster is opened through
+`/vsigs/` (`test-raster.R`); a store on the bucket passes
+`store_auth_check()` for every client and reads a raster through GDAL
 (`test-auth.R`); DuckDB views read the bucket's files with a secret
 (`test-duckdb.R`); and syncs run with the bucket as a secondary
 (`test-sync.R`). All of them use the credentials of the default lookup
-of `rcs_auth_gcs()`, GDAL included. The integration suite itself runs on
+of `rcs_auth_gcs()`, GDAL included, with one exception: the GDAL test of
+`test-backend-gcs.R` sets `GOOGLE_APPLICATION_CREDENTIALS` to gcloud's
+application-default login for its own duration when the variable is
+unset. The integration suite itself runs on
 local folders only. Each run works under a random prefix in the bucket and
 removes it at the end. Use a dedicated, empty bucket, and set up
 credentials as described in `vignette("locations")`:

@@ -158,7 +158,9 @@ rcs_h3_hex(600496630537388031)
 
 Inside a DuckDB connection prepared by the package, a SQL macro of the same
 name gives the same strings, so `dplyr::mutate(cell = rcs_h3_hex(h3))`
-reads the same with both engines (see `vignette("duckdb")`).
+runs lazily in DuckDB (see `vignette("duckdb")`). The Arrow engine cannot
+translate it (`Expression not supported in Arrow`): there, call
+`rcs_h3_hex()` after `collect()`.
 
 Data that reach R by another route (`arrow::read_parquet()` on a stored
 file, a DuckDB query of your own) carry only the storage types: plain
@@ -303,9 +305,9 @@ test alone selects the rows, and the index table is not read.
 ## Without H3: `geocode = FALSE`
 
 `geocode = FALSE` writes the geometries with their `bbox` only: no `h3`
-column and no index table, so writing skips the geocoding. A spatial read then filters by bounding boxes alone:
-as fast for compact queries, slower for queries much smaller than their box,
-and always complete. `partition = "h3"` cannot be combined with it.
+column and no index table, so writing skips the geocoding. A spatial read
+then filters by bounding boxes alone: as fast for compact queries, slower
+for queries much smaller than their box, and always complete. `partition = "h3"` cannot be combined with it.
 
 ```{r, eval = has_h3o}
 store_write(st, polys, "shapes/polygons_boxes",
@@ -451,9 +453,10 @@ version every time.
 exact test runs. By default (`NULL`) it follows the dataset's engine:
 `"s2"` on the sphere, `"planar"` in the plane, and `"auto"` on the sphere
 for candidate rows valid there and in the plane for the others, so that an
-invalid row never makes s2 fail. Datasets written before engines were
-recorded follow the session's `sf::sf_use_s2()`. `"s2"`, `"planar"` and
-`"session"` override it. Data in a projected CRS are always tested in the
+invalid row never makes s2 fail. Datasets without a recorded engine
+(written before engines were recorded, or with `geocode = FALSE`) follow
+the session's `sf::sf_use_s2()`. `"s2"`, `"planar"` and `"session"`
+override it. Data in a projected CRS are always tested in the
 plane of their CRS.
 
 ```{r, eval = has_h3o}
@@ -509,8 +512,9 @@ bounding box, which may span all longitudes, says little about where they
 lie. Query shapes of this kind are handled the same way. These rows are
 defined on the sphere and are geocoded there by every engine: a read whose
 exact test runs in the plane (`exact_engine = "planar"`, or the session
-rule with `sf::sf_use_s2(FALSE)`) is not guaranteed to find them. `rcs_sim_polygons(special = TRUE)` adds one such
-polygon of each kind, for trying this out.
+rule with `sf::sf_use_s2(FALSE)`) is not guaranteed to find them.
+`rcs_sim_polygons(special = TRUE)` adds one such polygon of each kind,
+for trying this out.
 
 ```{r, include = FALSE}
 unlink(file.path(tempdir(), "geo-store"), recursive = TRUE)

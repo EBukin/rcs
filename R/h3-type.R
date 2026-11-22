@@ -23,8 +23,11 @@
 #'   drops the class.
 #' * Inside DuckDB cells stay 64-bit integers (`BIGINT`); the SQL macro
 #'   `rcs_h3_hex()` of connections prepared by [store_duckdb()] gives their
-#'   hex strings, and `collect()` gives `rcs_h3` again. Data read by other
-#'   tools get the class back with [store_restore_types()].
+#'   hex strings. `collect()` of a table opened with
+#'   `store_open(engine = "duckdb")` gives `rcs_h3` again; a
+#'   `dplyr::tbl()` on a view of [store_duckdb()] is collected by dbplyr and
+#'   does not. Data read by other tools, or by such a `tbl()`, get the class
+#'   back with [store_restore_types()].
 #'
 #' @name rcs_h3
 #' @seealso [rcs_h3_hex()], [store_h3_hex()], [store_restore_types()];
