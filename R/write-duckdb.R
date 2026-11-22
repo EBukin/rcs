@@ -61,6 +61,50 @@ duckdb_package_columns <- c(".rcs_id", "h3", "bbox", "geom")
 # DuckDB types Arrow cannot write (D38).
 duckdb_unsupported_type <- "^(HUGEINT|UHUGEINT|INTERVAL|UNION|MAP)\\b"
 
+# D38: the columns of types Arrow cannot write abort, one line per column.
+check_duckdb_types <- function(cols, types, call) {
+  bad <- grepl(duckdb_unsupported_type, types)
+  if (!any(bad)) {
+    return(invisible())
+  }
+  esc <- function(v) gsub("([{}])", "\\1\\1", v)
+  lines <- paste0("{.field ", esc(cols[bad]), "}: ", esc(types[bad]))
+  cli::cli_abort(
+    c(
+      "{sum(bad)} column{?s} of {.arg x} {?has/have} a DuckDB type that cannot be stored:",
+      rlang::set_names(lines, rep("x", length(lines))),
+      i = "Cast {cli::qty(sum(bad))}{?it/them} to a supported type in the query, for example with {.code CAST(... AS VARCHAR)}."
+    ),
+    class = "rcs_error_argument", call = call
+  )
+}
+
+#' The Arrow schema of the files written from DuckDB
+#'
+#' The schema inferred from the R prototype, except the timestamp columns
+#' (D38): a DuckDB `TIMESTAMP` is stored without time zone (its wall clock)
+#' and a `TIMESTAMP WITH TIME ZONE` as UTC, in the unit DuckDB gives, so
+#' that the files do not depend on the time zone of the R session.
+#'
+#' @param schema The schema `files_arrow_schema()` infers.
+#' @param duck The Arrow schema of the same columns as DuckDB exports them.
+#' @param types The DuckDB types of the columns.
+#' @return An Arrow schema.
+#' @noRd
+duckdb_arrow_schema <- function(schema, duck, types) {
+  stamp <- which(grepl("^TIMESTAMP", types))
+  if (length(stamp) == 0) {
+    return(schema)
+  }
+  fields <- schema$fields
+  for (i in stamp) {
+    unit <- c("s", "ms", "us", "ns")[duck$fields[[i]]$type$unit() + 1L]
+    zone <- if (grepl("WITH TIME ZONE", types[[i]], fixed = TRUE)) "UTC" else ""
+    fields[[i]] <- arrow::field(fields[[i]]$name, arrow::timestamp(unit, timezone = zone))
+  }
+  arrow::schema(!!!fields)
+}
+
 # Staging -------------------------------------------------------------------------
 
 #' Stage a lazy DuckDB table as a table dataset
@@ -88,18 +132,10 @@ stage_duckdb <- function(a) {
   }
   cols <- setdiff(names_all, dropped)
   types <- described$column_type[match(cols, described$column_name)]
-  bad <- cols[grepl(duckdb_unsupported_type, types)]
-  if (length(bad) > 0) {
-    cli::cli_abort(
-      c(
-        "Column{?s} {.field {bad}} of {.arg x} {?has/have} a DuckDB type that cannot be stored: {.val {types[cols %in% bad]}}.",
-        i = "Cast {?it/them} to a supported type in the query, for example with {.code CAST(... AS VARCHAR)}."
-      ),
-      class = "rcs_error_argument", call = call
-    )
-  }
+  check_duckdb_types(cols, types, call)
   select <- paste(duckdb_ident(con, cols), collapse = ", ")
-  proto <- duckdb_frame(con, paste("SELECT", select, "FROM", q_tmp, "LIMIT 0"))
+  proto_table <- duckdb_frame(con, paste("SELECT", select, "FROM", q_tmp, "LIMIT 0"), table = TRUE)
+  proto <- duckdb_as_tibble(proto_table)
 
   key <- as.character(a$key %||% character())
   check_key(proto, key, call = call)
@@ -123,7 +159,7 @@ stage_duckdb <- function(a) {
   }
 
   descriptions <- a$columns %||% stored_descriptions(a$existing, cols)
-  schema <- files_arrow_schema(proto)
+  schema <- duckdb_arrow_schema(files_arrow_schema(proto), proto_table$schema, types)
   spec <- files_columns_spec(proto, schema, descriptions, call = call, cells_by_name = FALSE)
   meta <- files_meta(
     dataset = a$dataset, kind = "table", title = a$title,
@@ -190,13 +226,23 @@ duckdb_order_by <- function(con, columns) {
   paste(c(by, "\".rcs_tmp\""), collapse = ", ")
 }
 
-# A small result as a tibble, through Arrow (the types the stream gets).
-duckdb_frame <- function(con, sql) {
+# A small result as a tibble, through Arrow (the types the stream gets),
+# or as the Arrow table with `table = TRUE`.
+duckdb_frame <- function(con, sql, table = FALSE) {
   withr::local_options(arrow.int64_downcast = FALSE)
   res <- DBI::dbSendQuery(con, sql, arrow = TRUE)
   on.exit(DBI::dbClearResult(res), add = TRUE)
-  table <- duckdb::duckdb_fetch_record_batch(res)$read_table()
-  tibble::as_tibble(as.data.frame(table))
+  out <- duckdb::duckdb_fetch_record_batch(res)$read_table()
+  if (table) {
+    return(out)
+  }
+  duckdb_as_tibble(out)
+}
+
+# An Arrow table or record batch as a tibble; BIGINT stays `integer64`.
+duckdb_as_tibble <- function(x) {
+  withr::local_options(arrow.int64_downcast = FALSE)
+  tibble::as_tibble(as.data.frame(x))
 }
 
 # D38: key uniqueness in DuckDB; the first five repeated values in the

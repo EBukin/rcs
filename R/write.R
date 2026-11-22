@@ -52,6 +52,30 @@
 #'   prepared data give the same version.
 #' * A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 #'   partitioned or updated.
+#' * A lazy table on a DuckDB connection is written as a `table` (see
+#'   "DuckDB input").
+#'
+#' @section DuckDB input:
+#' `x` may be a lazy table on a DuckDB connection (from [dplyr::tbl()] or
+#' `store_open(engine = "duckdb")`). Its query runs once inside DuckDB into a
+#' temporary copy, the table `rcs_write_<random>` on the same connection,
+#' which every later step reads and which is dropped when the call ends,
+#' also after an error; the copy needs room in DuckDB's memory or its
+#' temporary folder. The key and the partitions are checked in DuckDB, and
+#' the rows are fetched in batches of `getOption("rcs.duckdb_batch_rows")`
+#' rows (default `5e5`), so that R holds about one batch at a time; a
+#' progress bar shows the batches unless `options(rcs.quiet = TRUE)`. The
+#' files equal those written from the same rows collected into R.
+#'
+#' * Modes `"create"` and `"replace"` only; `"update"` aborts.
+#' * Columns `.rcs_id`, `h3`, `bbox` and `geom` are the package's own and
+#'   are dropped with a message.
+#' * Types: integer, double, `VARCHAR`, `DATE` and `BOOLEAN` are stored as
+#'   they are; `BIGINT` is stored as 64-bit integers read back as
+#'   `bit64::integer64`; `TIMESTAMP` is stored without time zone (its wall
+#'   clock) and `TIMESTAMP WITH TIME ZONE` in UTC. `HUGEINT`, `UHUGEINT`,
+#'   `INTERVAL`, `UNION` and `MAP` columns abort; cast them in the query.
+#' * Lazy tables on other databases abort: collect them first.
 #'
 #' @section Modes:
 #' * `"create"`: the dataset must not exist yet.
@@ -93,7 +117,8 @@
 #'
 #' @param st A store connection made by [store_connect()]. It is updated in
 #'   place, so that it can be used for further writes without refreshing.
-#' @param x The data: a data frame, an `sf` object or a `terra::SpatRaster`.
+#' @param x The data: a data frame, an `sf` object, a `terra::SpatRaster`,
+#'   or a lazy table on a DuckDB connection (see "DuckDB input").
 #' @param dataset The dataset's full name: lower-case letters, digits and
 #'   `_`, with `/` between folders, e.g. `"sales/daily"`.
 #' @param title,description Short title and description, required.

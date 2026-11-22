@@ -21,3 +21,39 @@
       x shop_id = 10, date = 2024-02-24, product = p07
       i And 2 more.
 
+# DuckDB types Arrow cannot write abort naming the columns
+
+    Code
+      duck_write(s$st, dplyr::tbl(con, "odd"), key = "id")
+    Condition
+      Error in `store_write()`:
+      ! 2 columns of `x` have a DuckDB type that cannot be stored:
+      x huge: HUGEINT
+      x span: INTERVAL
+      i Cast them to a supported type in the query, for example with `CAST(... AS VARCHAR)`.
+
+# mode update and lazy tables on other databases abort
+
+    Code
+      duck_write(s$st, tbl, mode = "update", key = duck_key)
+    Condition
+      Error in `store_write()`:
+      ! A lazy DuckDB table cannot be written with `mode = "update"`.
+      i Collect the rows with `dplyr::collect()` and update from R, or write the whole dataset with `mode = "replace"`.
+
+---
+
+    Code
+      duck_write(s$st, other)
+    Condition
+      Error in `store_write()`:
+      ! `x` is a lazy table on a database other than DuckDB.
+      i Collect it with `dplyr::collect()` first, or write it from a DuckDB connection.
+
+# package columns in x are dropped with one message
+
+    Code
+      cat(dropped)
+    Output
+      i Columns h3 and .rcs_id of `x` are the package's own and are dropped.
+
