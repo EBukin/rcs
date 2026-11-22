@@ -446,3 +446,112 @@ test_that("tables, geospatial data and rasters go through the public functions e
   expect_true(all(suppressMessages(store_check(st, "grids/small", x = r))$status == "ok"))
   expect_store_valid(st)
 })
+
+# H3 cell class on read (plan 0002, D8) ----------------------------------------
+
+test_that("cells of geospatial data and index tables come back as rcs_h3 from every read", {
+  skip_if_no_h3()
+  # a fixture written as before this plan: cells recorded as integer64
+  fx <- local_test_store(tables = FALSE, geospatial = c("polygons", "lines"), secondaries = 0L)
+  st <- fx$st
+  spec <- columns_from_json(st$primary$catalog$columns[st$primary$catalog$dataset == "shapes/polygons"])
+  expect_identical(spec$r_type[[match("h3", spec$name)]], list(class = "integer64"))
+
+  got <- store_read(st, "shapes/polygons")
+  partition <- grep("^h3_p[0-9]+$", names(got), value = TRUE)
+  expect_length(partition, 1)
+  expect_s3_class(got$h3, "rcs_h3")
+  expect_s3_class(got[[partition]], "rcs_h3")
+  expect_false(inherits(got$id, "rcs_h3"))
+  expected <- fx$data[["shapes/polygons"]]
+  expect_identical(
+    bit64::as.integer64(got$h3[order(got$id)]),
+    bit64::as.integer64(store_read(st, "shapes/polygons", geometry = FALSE)$h3[order(got$id)])
+  )
+
+  collected <- dplyr::collect(store_open(st, "shapes/polygons"))
+  expect_s3_class(collected$h3, "rcs_h3")
+  expect_s3_class(collected[[partition]], "rcs_h3")
+  expect_s3_class(dplyr::pull(store_open(st, "shapes/polygons"), h3), "rcs_h3")
+  expect_s3_class(store_sample(st, "shapes/polygons", n = 5, seed = 1)$h3, "rcs_h3")
+  expect_s3_class(store_read(st, "shapes/lines")$h3, "rcs_h3")
+
+  for (dataset in c("shapes/polygons__h3", "shapes/lines__h3")) {
+    index <- store_read(st, dataset)
+    expect_s3_class(index$h3, "rcs_h3")
+    expect_s3_class(index$h3_main, "rcs_h3")
+    expect_false(inherits(index$share, "rcs_h3"))
+  }
+  # a computed column that reuses a cell name stays as computed
+  renamed <- dplyr::collect(dplyr::mutate(store_open(st, "shapes/polygons"), h3 = as.character(h3)))
+  expect_type(renamed$h3, "character")
+})
+
+test_that("a plain table keeps an integer64 column named h3 as integer64", {
+  fx <- local_test_store(secondaries = 0L)
+  x <- tibble::tibble(id = 1:4, h3 = h3_hex_to_int64_raw(c("85283473fffffff", "85283447fffffff", NA, "8428347ffffffff")))
+  fixture_write(fx$st, x, "cells/plain", title = "Plain", description = "An integer64 column named h3.")
+  got <- store_read(fx$st, "cells/plain")
+  expect_false(inherits(got$h3, "rcs_h3"))
+  expect_identical(got, x)
+  expect_false(inherits(dplyr::collect(store_open(fx$st, "cells/plain"))$h3, "rcs_h3"))
+})
+
+test_that("a user column written as rcs_h3 or integer64 reads back as written, and checks", {
+  skip_if_no_h3()
+  root <- withr::local_tempdir()
+  hex <- c("85283473fffffff", "85283447fffffff", "8528340bfffffff", "8428347ffffffff")
+  x <- tibble::tibble(id = 1:12, cell = new_rcs_h3(h3_hex_to_int64_raw(rep_len(hex, 12))), qty = 1:12 * 3L)
+  x$cell[5] <- NA
+  y <- x
+  y$cell <- bit64::as.integer64(y$cell)
+  stores <- list()
+  for (form in c("h3", "int64")) {
+    st <- suppressMessages(store_connect(file.path(root, form), create = TRUE))
+    data <- if (form == "h3") x else y
+    suppressMessages(store_write(st, data, "cells/one", title = "Cells", description = "User cells.", key = "id"))
+    # a partition column may not hold missing values
+    split <- data[!is.na(data$cell), ]
+    suppressMessages(store_write(st, split, "cells/split", title = "Cells", description = "User cells.",
+      key = "id", partition = "cell"))
+    stores[[form]] <- st
+    for (dataset in c("cells/one", "cells/split")) {
+      if (dataset == "cells/split") data <- split
+      got <- store_read(st, dataset)
+      got <- got[order(got$id), names(data)]
+      if (form == "h3") {
+        expect_s3_class(got$cell, "rcs_h3")
+      } else {
+        expect_false(inherits(got$cell, "rcs_h3"))
+        expect_s3_class(got$cell, "integer64")
+      }
+      expect_identical(got$cell, data$cell, info = paste(form, dataset))
+      expect_identical(dplyr::collect(store_open(st, dataset))$cell[0], data$cell[0], info = paste(form, dataset))
+      out <- suppressMessages(store_check(st, dataset, x = data))
+      expect_true(all(out$status == "ok"), info = paste(form, dataset))
+    }
+    expect_store_valid(st)
+  }
+  for (dataset in c("cells/one", "cells/split")) {
+    a <- stores$h3$primary$files[stores$h3$primary$files$dataset == dataset, ]
+    b <- stores$int64$primary$files[stores$int64$primary$files$dataset == dataset, ]
+    expect_identical(a$path, b$path, info = dataset)
+    expect_identical(a$md5, b$md5, info = dataset)
+    expect_identical(
+      stores$h3$primary$catalog$version[stores$h3$primary$catalog$dataset == dataset],
+      stores$int64$primary$catalog$version[stores$int64$primary$catalog$dataset == dataset],
+      info = dataset
+    )
+  }
+})
+
+test_that("store_h3_hex() accepts rcs_h3 columns and vectors", {
+  hex <- c("85283473fffffff", NA, "8428347ffffffff")
+  cells <- new_rcs_h3(h3_hex_to_int64_raw(hex))
+  expect_identical(store_h3_hex(cells), hex)
+  x <- tibble::tibble(id = 1:3, h3 = cells, cell = cells)
+  out <- store_h3_hex(x)
+  expect_identical(out$h3, hex)
+  expect_s3_class(out$cell, "rcs_h3")
+  expect_identical(store_h3_hex(x, columns = c(h3, cell))$cell, hex)
+})
