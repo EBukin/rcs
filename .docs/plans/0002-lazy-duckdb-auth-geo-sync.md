@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-5 done, T2, T3 and U merged (2026-11-22)
+- **Status:** in execution; waves 0-6 done, U merged (2026-11-22)
 
 ## Goal
 
@@ -449,7 +449,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
   - Tests first (skip without `duckdb`, `DBI`, `dbplyr`): b, c, g below.
   - Acceptance: b, c, g pass; whole suite at default passes.
 
-- [ ] **V2. Writing from DuckDB, tables: limits, types, check.** D36–D38, D40 (wave 6, after V1).
+- [x] **V2. Writing from DuckDB, tables: limits, types, check.** D36–D38, D40 (wave 6, after V1).
   - Owns: `R/write-duckdb.R`, `R/write.R` (the DuckDB branch only), `tests/testthat/test-write-duckdb.R`, `_snaps/write-duckdb.md`.
   - Tests first (level `default` for the large table): a, d, e, f below.
   - Acceptance: a, d, e, f pass; whole suite at default passes.
@@ -489,6 +489,13 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
   - Owns: new `R/duckdb-tbl.R`, `R/query.R` (`store_open()` signature and dispatch only), new `tests/testthat/test-duckdb-tbl.R`.
   - Tests first: lazy result; dbplyr verbs keep the `rcs` field; `collect()` restores factor, ordered, difftime, `integer64`, `rcs_h3` and gives `sf` with the catalog CRS from both `BLOB` and `GEOMETRY` columns; `.rcs_id` and `geom` dropped; equals `store_open() |> collect()` for the same dataset (ordered by key); `version =` aborts; the package-level connection is reused per store and closed by `store_duckdb_close()`; a user `con` without `bigint = "integer64"` aborts.
   - Acceptance: all pass; whole suite at default passes.
+
+#### Results of wave 6
+
+- T2 and T3 are recorded under wave 5 (started early). V2 passed at the first verification; no decision contradicted.
+- V2 (`R/write-duckdb.R`): V1 stored a DuckDB `TIMESTAMP` with the session time zone, so the version depended on the machine; now `TIMESTAMP` is stored without time zone and `TIMESTAMPTZ` as UTC, with DuckDB's unit (version identical under UTC, Tokyo and New York). Unsupported types abort with one line per column. A table write makes one streaming pass. The roxygen of `store_write()` gained a "DuckDB input" section (X1 reworks the whole help).
+- Known gap, assigned to DW2: unsupported types are detected at top level only; `STRUCT(a HUGEINT)` is written as `struct<a: double>` (precision lost).
+- Gate (whole suite, main at d7e50d4): `document()` updated `store_write.Rd`. No non-ASCII in `R/`. Whole suite at default: 39 files, 13,350 expectations, 0 failed, 0 errors, 16 skipped. `devtools::check(cran = TRUE)` with tests: 0/0/0.
 
 ### Wave 7: DW1, U
 

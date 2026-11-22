@@ -29,7 +29,8 @@ store_write(
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}. It is updated in
 place, so that it can be used for further writes without refreshing.}
 
-\item{x}{The data: a data frame, an \code{sf} object or a \code{terra::SpatRaster}.}
+\item{x}{The data: a data frame, an \code{sf} object, a \code{terra::SpatRaster},
+or a lazy table on a DuckDB connection (see "DuckDB input").}
 
 \item{dataset}{The dataset's full name: lower-case letters, digits and
 \verb{_}, with \code{/} between folders, e.g. \code{"sales/daily"}.}
@@ -120,6 +121,33 @@ column must hold the same cells, and then serves as it. Raw and
 prepared data give the same version.
 \item A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 partitioned or updated.
+\item A lazy table on a DuckDB connection is written as a \code{table} (see
+"DuckDB input").
+}
+}
+
+\section{DuckDB input}{
+
+\code{x} may be a lazy table on a DuckDB connection (from \code{\link[dplyr:tbl]{dplyr::tbl()}} or
+\code{store_open(engine = "duckdb")}). Its query runs once inside DuckDB into a
+temporary copy, the table \verb{rcs_write_<random>} on the same connection,
+which every later step reads and which is dropped when the call ends,
+also after an error; the copy needs room in DuckDB's memory or its
+temporary folder. The key and the partitions are checked in DuckDB, and
+the rows are fetched in batches of \code{getOption("rcs.duckdb_batch_rows")}
+rows (default \code{5e5}), so that R holds about one batch at a time; a
+progress bar shows the batches unless \code{options(rcs.quiet = TRUE)}. The
+files equal those written from the same rows collected into R.
+\itemize{
+\item Modes \code{"create"} and \code{"replace"} only; \code{"update"} aborts.
+\item Columns \code{.rcs_id}, \code{h3}, \code{bbox} and \code{geom} are the package's own and
+are dropped with a message.
+\item Types: integer, double, \code{VARCHAR}, \code{DATE} and \code{BOOLEAN} are stored as
+they are; \code{BIGINT} is stored as 64-bit integers read back as
+\code{bit64::integer64}; \code{TIMESTAMP} is stored without time zone (its wall
+clock) and \verb{TIMESTAMP WITH TIME ZONE} in UTC. \code{HUGEINT}, \code{UHUGEINT},
+\code{INTERVAL}, \code{UNION} and \code{MAP} columns abort; cast them in the query.
+\item Lazy tables on other databases abort: collect them first.
 }
 }
 
