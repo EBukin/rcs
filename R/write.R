@@ -55,8 +55,9 @@
 #'   types must equal the stored ones, and the key must stay unique across
 #'   the whole dataset. A message lists every replaced partition with its old
 #'   and new number of rows: rows of a replaced partition that are missing
-#'   from `x` disappear. In this mode `key`, `partition`, `h3_res` and
-#'   `geocode` come from the stored dataset; arguments that disagree abort.
+#'   from `x` disappear. In this mode `key`, `partition`, `h3_res`,
+#'   `geocode` and `geocode_engine` come from the stored dataset; arguments
+#'   that disagree abort.
 #'   With `partition = "h3"`, an update that would need more than
 #'   `max_files` files re-partitions the whole dataset at a coarser H3
 #'   resolution.
@@ -97,6 +98,19 @@
 #' @param h3_res H3 resolution of the geocodes, 0 to 15.
 #' @param geocode `FALSE` writes geospatial data without H3 cells and
 #'   without index table; spatial reads then use bounding boxes only.
+#' @param geocode_engine How the H3 cells of geometries that cross cell
+#'   edges are computed, recorded with the dataset:
+#'   * `"auto"` (default): each such geometry is checked on the sphere; an
+#'     invalid one (for example valid in the plane but with a duplicated
+#'     vertex) is rebuilt by s2, and when the rebuilt copy does not keep its
+#'     area (length for lines) it is geocoded in the plane instead.
+#'   * `"s2"`: on the sphere; invalid geometries are rebuilt by s2.
+#'   * `"planar"`: in the plane (slower).
+#'
+#'   Rebuilt geometries are used only for the cells; the stored geometry is
+#'   unchanged. One warning names the rows rebuilt or geocoded in the plane.
+#'   An update uses the stored engine (a different one aborts); a dataset
+#'   written without one geocodes new rows with `"s2"`.
 #' @param max_files Most partition files.
 #' @param history `TRUE` or `FALSE` sets the dataset's history setting;
 #'   `NULL` leaves it as it is.
@@ -150,8 +164,9 @@
 store_write <- function(st, x, dataset, title, description, key = NULL,
                         partition = NULL,
                         mode = c("create", "replace", "update"),
-                        h3_res = 5L, geocode = TRUE, max_files = 50L,
-                        history = NULL, source = NULL, inputs = NULL,
+                        h3_res = 5L, geocode = TRUE,
+                        geocode_engine = c("auto", "s2", "planar"),
+                        max_files = 50L, history = NULL, source = NULL, inputs = NULL,
                         columns = NULL, check = TRUE, rows_per_group = 50000L) {
   validate_store(st)
   local_trace("store_write")
@@ -164,6 +179,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   check_string(inputs, allow_null = TRUE, call = call)
   check_flag(history, allow_null = TRUE, call = call)
   check_flag(geocode, call = call)
+  engine_given <- !missing(geocode_engine)
+  geocode_engine <- if (engine_given) check_geocode_engine(geocode_engine, call = call) else "auto"
   check_flag(check, call = call)
   max_files <- check_count(max_files, call = call)
   rows_per_group <- check_count(rows_per_group, call = call)
@@ -195,7 +212,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   args <- list(
     x = x, kind = kind, dataset = dataset, title = title,
     description = description, key = key, partition = partition,
-    h3_res = h3_res, geocode = geocode, max_files = max_files,
+    h3_res = h3_res, geocode = geocode, geocode_engine = geocode_engine,
+    engine_given = engine_given, max_files = max_files,
     history = dataset_history, source = source %||% NA_character_,
     inputs = inputs %||% NA_character_, columns = columns,
     rows_per_group = rows_per_group, existing = existing,
@@ -210,6 +228,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   } else {
     stage_full(args)
   }
+  warn_s2_rebuild(dataset, plan$rebuild)
 
   primary_files <- st$primary$files
   data_src <- resolve_target(plan$data, existing, primary_files, dir, now)
@@ -390,12 +409,16 @@ stage_full <- function(a) {
     )
     return(list(data = staged_src(staged), index = NULL, reference = data, data_dir = data_dir))
   }
-  enc <- geo_encode(a$x, h3_res = a$h3_res, geocode = a$geocode, key = a$key)
+  enc <- geo_encode(
+    a$x, h3_res = a$h3_res, geocode = a$geocode, key = a$key,
+    geocode_engine = a$geocode_engine
+  )
   descriptions <- a$columns %||% stored_descriptions(a$existing, names(enc$data))
   staged <- files_stage(
     enc$data, a$dataset, a$title, a$description,
     kind = "geospatial", key = a$key, partition = a$partition,
     crs = enc$crs, h3_res = if (a$geocode) as.integer(a$h3_res) else NA_integer_,
+    geocode_engine = if (a$geocode) a$geocode_engine else NA_character_,
     source = a$source, inputs = a$inputs, columns = descriptions,
     history = a$history, max_files = a$max_files,
     rows_per_group = a$rows_per_group, created = created_of(a$existing, a$now),
@@ -405,7 +428,10 @@ stage_full <- function(a) {
   if (a$geocode && nrow(enc$index) > 0) {
     index <- stage_index(enc$index, a, as.integer(a$h3_res))
   }
-  list(data = staged_src(staged), index = index, reference = enc$data, data_dir = data_dir)
+  list(
+    data = staged_src(staged), index = index, reference = enc$data,
+    data_dir = data_dir, rebuild = rebuild_keys(enc, a$x, a$key)
+  )
 }
 
 # The index table of a geospatial dataset: one file, or partitioned by H3
@@ -526,6 +552,13 @@ stage_update <- function(st, a) {
       class = "rcs_error_argument", call = call
     )
   }
+  # D30: the stored engine; a dataset without one geocodes new rows per row
+  # on the sphere ("s2") and keeps no engine.
+  stored_engine <- existing$geocode_engine
+  if (a$kind == "geospatial" && isTRUE(a$engine_given)) {
+    check_update_engine(a$geocode_engine, stored_engine, dataset, call)
+  }
+  encode_engine <- if (is.na(stored_engine)) "s2" else stored_engine
 
   withr::local_options(arrow.int64_downcast = FALSE)
   be <- st$primary$backend
@@ -539,7 +572,10 @@ stage_update <- function(st, a) {
     names(ids) <- old_files$path
     all_ids <- do.call(c, c(list(bit64::integer64()), unname(ids)))
     id_start <- if (length(all_ids) > 0) max(all_ids) + bit64::as.integer64(1) else bit64::as.integer64(1)
-    enc <- geo_encode(a$x, h3_res = if (geocode) h3_res else 5L, geocode = geocode, key = if (length(key)) key, id_start = id_start)
+    enc <- geo_encode(
+      a$x, h3_res = if (geocode) h3_res else 5L, geocode = geocode,
+      key = if (length(key)) key, id_start = id_start, geocode_engine = encode_engine
+    )
     data <- enc$data
   } else {
     data <- tibble::as_tibble(a$x)
@@ -591,6 +627,7 @@ stage_update <- function(st, a) {
       kind = a$kind, key = key, partition = given_partition,
       crs = if (a$kind == "geospatial") enc$crs else NA_character_,
       h3_res = if (geocode) h3_res else NA_integer_, h3_max_res = h3_max_res,
+      geocode_engine = if (geocode) stored_engine else NA_character_,
       source = a$source, inputs = a$inputs, columns = descriptions,
       history = a$history, max_files = a$max_files,
       rows_per_group = a$rows_per_group, keep = keep,
@@ -638,8 +675,76 @@ stage_update <- function(st, a) {
   }
   list(
     data = staged_src(staged), index = index, reference = reference,
-    data_dir = data_dir, check_paths = staged$staged$path
+    data_dir = data_dir, check_paths = staged$staged$path,
+    rebuild = if (!is.null(enc)) rebuild_keys(enc, a$x, if (length(key)) key)
   )
+}
+
+check_update_engine <- function(given, stored, dataset, call) {
+  if (is.na(stored)) {
+    cli::cli_abort(
+      c(
+        "{.val {dataset}} has no geocoding engine recorded; an update geocodes its new rows with {.val s2}.",
+        i = "Leave out {.arg geocode_engine}, or use {.code mode = \"replace\"} to set one."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  if (!identical(given, stored)) {
+    cli::cli_abort(
+      c(
+        "An update keeps the geocoding engine of {.val {dataset}}.",
+        i = "Stored: {.val {stored}}; given: {.val {given}}. Use {.code mode = \"replace\"} to change it."
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  invisible()
+}
+
+# Geocoding repairs (D32) ----------------------------------------------------------
+
+# Keys of the rows of `x` that `geo_encode()` rebuilt on the sphere or
+# geocoded in the plane after a failed rebuild: the key columns, else
+# `.rcs_id`. A list of two character vectors, in input row order.
+rebuild_keys <- function(enc, x, key) {
+  keys_of <- function(rows) {
+    if (length(rows) == 0) {
+      return(character())
+    }
+    if (length(key) > 0) {
+      values <- tibble::as_tibble(sf::st_drop_geometry(x))[rows, key, drop = FALSE]
+    } else {
+      values <- tibble::tibble(.rcs_id = enc$data$.rcs_id[match(rows, enc$order)])
+    }
+    format_key_values(values)
+  }
+  list(rebuilt = keys_of(enc$rebuilt), fallback = keys_of(enc$fallback))
+}
+
+# One warning per write when any row was rebuilt or fell back to the plane:
+# counts, and the first five keys of each group.
+warn_s2_rebuild <- function(dataset, rebuild) {
+  n_rebuilt <- length(rebuild$rebuilt)
+  n_fallback <- length(rebuild$fallback)
+  if (n_rebuilt + n_fallback == 0) {
+    return(invisible())
+  }
+  shown <- function(keys) {
+    n <- length(keys)
+    more <- if (n > 5) paste0("; and ", n - 5, " more") else ""
+    paste0(paste(utils::head(keys, 5L), collapse = "; "), more, ".")
+  }
+  cli::cli_warn(
+    c(
+      "Geocoding {.val {dataset}}: {n_rebuilt + n_fallback} row{?s} {?is/are} invalid on the sphere.",
+      i = "{n_rebuilt} rebuilt by s2, {n_fallback} geocoded in the plane after a failed rebuild check.",
+      "*" = if (n_rebuilt > 0) paste("Rebuilt:", shown(rebuild$rebuilt)),
+      "*" = if (n_fallback > 0) paste("In the plane:", shown(rebuild$fallback))
+    ),
+    class = "rcs_warning_s2_rebuild"
+  )
+  invisible()
 }
 
 # Read stored rows (all row groups) of one Parquet file, as a tibble.

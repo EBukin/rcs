@@ -363,7 +363,13 @@ serialization_reference <- function(x, entry) {
   key <- entry$key[[1]]
   if (length(key) == 0 && !".rcs_id" %in% names(x)) {
     geocode <- !is.na(entry$h3_res)
-    enc <- geo_encode(x, h3_res = if (geocode) entry$h3_res else 5L, geocode = geocode)
+    # Datasets written without an engine geocode with "s2" (plan 0002, D30).
+    engine <- entry$geocode_engine
+    engine <- if (is.null(engine) || is.na(engine)) "s2" else engine
+    enc <- geo_encode(
+      x, h3_res = if (geocode) entry$h3_res else 5L, geocode = geocode,
+      geocode_engine = engine
+    )
     return(enc$data)
   }
   wkb <- unclass(sf::st_as_binary(sf::st_geometry(x), EWKB = FALSE))

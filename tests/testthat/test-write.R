@@ -453,7 +453,7 @@ test_that("store_check() passes for keyless sf datasets written with each engine
     }
     log <- new.env()
     local_engine_log(log)
-    checked <- store_check(s$st, "shapes/polygons", x)
+    checked <- suppressMessages(store_check(s$st, "shapes/polygons", x))
     expect_identical(log$engines, engine)
     expect_true(all(checked$status == "ok"), label = engine)
     expect_store_valid(s$st)
@@ -494,7 +494,7 @@ test_that("10,000 rows with 50 sphere-invalid polygons: one partition each, shar
   invalid_rcs_ids <- as.character(rows$.rcs_id[rows$id %in% invalid_ids])
   expect_true(all(invalid_rcs_ids %in% names(sums)))
 
-  checked <- store_check(s$st, "shapes/polygons", x)
+  checked <- suppressMessages(store_check(s$st, "shapes/polygons", x))
   expect_true(all(checked$status == "ok"))
   expect_store_valid(s$st)
 })

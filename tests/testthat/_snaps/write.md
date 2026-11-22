@@ -140,6 +140,63 @@
       v primary  <root>/primary  4/4 files sent  <bytes>  <time>
       v MD5 identical for 4 files in 1 location. Catalogs updated.
 
+# geocode_engine is checked and stored; NA for tables and geocode = FALSE
+
+    Code
+      store_write(s$st, x, "shapes/polygons", title = "t", description = "d",
+      geocode_engine = "sphere")
+    Condition
+      Error in `store_write()`:
+      ! `geocode_engine` must be one of "auto", "s2", or "planar", not "sphere".
+
+# update geocodes with the stored engine; another explicit engine aborts
+
+    Code
+      store_write(s$st, x[16:22, ], "shapes/polygons", title = "Polygons",
+      description = "Simulated polygons.", mode = "update", geocode_engine = "auto")
+    Condition
+      Error in `store_write()`:
+      ! An update keeps the geocoding engine of "shapes/polygons".
+      i Stored: "s2"; given: "auto". Use `mode = "replace"` to change it.
+
+# update of a dataset without engine geocodes new rows with s2; an explicit engine aborts
+
+    Code
+      store_write(st, x[16:22, ], "shapes/polygons", title = "Polygons", description = "Simulated polygons.",
+      mode = "update", geocode_engine = "s2")
+    Condition
+      Error in `store_write()`:
+      ! "shapes/polygons" has no geocoding engine recorded; an update geocodes its new rows with "s2".
+      i Leave out `geocode_engine`, or use `mode = "replace"` to set one.
+
+# the rebuild warning names rebuilt rows and fallbacks, before the upload lines
+
+    Code
+      store_write(s$st, x, "shapes/polygons", title = "Polygons", description = "Simulated polygons.", key = "id")
+    Condition
+      Warning:
+      Geocoding "shapes/polygons": 2 rows are invalid on the sphere.
+      i 2 rebuilt by s2, 0 geocoded in the plane after a failed rebuild check.
+      * Rebuilt: id = 21; id = 22.
+    Message
+      i Writing "shapes/polygons": 22 rows in 1 file, and its index table in 1 file.
+      v primary  <root>/primary  2/2 files sent  <bytes>  <time>
+      v MD5 identical for 2 files in 1 location. Catalogs updated.
+
+---
+
+    Code
+      store_write(s$st, x, "shapes/keyless", title = "Polygons", description = "Simulated polygons.")
+    Condition
+      Warning:
+      Geocoding "shapes/keyless": 2 rows are invalid on the sphere.
+      i 0 rebuilt by s2, 2 geocoded in the plane after a failed rebuild check.
+      * In the plane: .rcs_id = 17; .rcs_id = 18.
+    Message
+      i Writing "shapes/keyless": 22 rows in 1 file, and its index table in 1 file.
+      v primary  <root>/primary  2/2 files sent  <bytes>  <time>
+      v MD5 identical for 2 files in 1 location. Catalogs updated.
+
 # a raster is written, replaced, and cannot be updated
 
     Code
