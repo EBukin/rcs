@@ -126,6 +126,25 @@ test_that("a long filter is cut to the console width", {
   expect_lte(nchar(filter_line), 60)
 })
 
+test_that("a long chain of comparisons stays on one Filter line at any width", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- dplyr::filter(
+    store_open(fx$st, "summary"),
+    qty > 0, price > 1, shop_id > 2, year > 2000, promo == FALSE | qty > 100000,
+    qty < 1000000, price < 1000000
+  )
+  for (width in c(60, 100)) {
+    withr::local_options(width = width, cli.width = width)
+    out <- print_lines(q)
+    filter_at <- grep("^# Filter:", out)
+    expect_length(filter_at, 1)
+    expect_match(out[[filter_at]], "\\.\\.\\.$")
+    expect_lt(nchar(out[[filter_at]]), width)
+    # the next line is the column header, not a wrapped piece of the filter
+    expect_false(grepl("^#", out[[filter_at + 1L]]))
+  }
+})
+
 test_that("printing a filtered query opens only the kept files and returns the query", {
   fx <- local_test_store(secondaries = 0L)
   files <- fx$st$primary$files[fx$st$primary$files$dataset == "sales/daily", ]

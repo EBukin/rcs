@@ -572,7 +572,7 @@ print.rcs_query <- function(x, ..., n = NULL) {
   data <- query_collect(head.rcs_query(x, n + 1L))
   more <- nrow(data) > n
   data <- utils::head(data, n)
-  width <- list(...)$width %||% getOption("width")
+  width <- list(...)$width
   preview <- new_rcs_preview(
     data,
     header = query_header(x, ncol(data), width),
@@ -605,11 +605,24 @@ query_header <- function(x, ncol, width) {
   } else {
     filter <- query_filter_text(x$query)
     if (!is.null(filter)) {
-      # "# " and the aligned name "Filter:   " come before the text
-      out[["Filter"]] <- truncate_text(filter, width - 12L)
+      # pillar wraps each header line "# <name>: <text>" (names aligned,
+      # padded to the longest) at header_width(); only a line shorter than
+      # that stays on one line. Arrow's text holds newlines and indents,
+      # which pillar squashes to one space: squash before counting.
+      filter <- gsub("\\s+", " ", filter)
+      prefix <- nchar("# ") + max(nchar(c(names(out), "Filter"))) + nchar(": ")
+      out[["Filter"]] <- truncate_text(filter, header_width(width) - prefix - 1L)
     }
   }
   out
+}
+
+# The width at which pillar wraps the header lines of a printed tibble:
+# format_comment() wraps at min(setup$width, cli::console_width()), where
+# setup$width is the `width` argument of print() or pillar's width option.
+header_width <- function(width = NULL) {
+  width <- width %||% getOption("pillar.width", getOption("width"))
+  min(width, cli::console_width())
 }
 
 # Footer lines of a printed query, after pillar's own.

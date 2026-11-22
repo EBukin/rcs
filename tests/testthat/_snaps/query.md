@@ -172,7 +172,7 @@
       # Location: primary (local)
       # Version:  <version> (current)
       # Files:    1 of 1
-      # Filter:   (is_in(shop_id, {value_set=int32:[ 1, 2, 3, 4, 5, 6, ...
+      # Filter:   (is_in(shop_id, {value_set=int32:[ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10...
          shop_id date        year product   qty  price promo grade delivered      big
            <int> <date>     <int> <fct>   <int>  <dbl> <lgl> <ord> <date>     <int64>
        1       1 2023-05-24  2023 p15         3 150.   FALSE low   2023-05-26    8e 2
