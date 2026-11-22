@@ -96,3 +96,32 @@
       Identity: known after the first token
       Token:    none yet
 
+# a switch to another credential warns once per session
+
+    Code
+      be_gdal_path(b, "x.tif")
+    Condition
+      Warning:
+      GDAL now uses another credential for Google Cloud Storage: an access token given to rcs_auth_gcs(token = ), not renewed.
+      i GDAL's options are process-wide: rasters opened earlier with the previous credential may fail to read further tiles.
+      i This warning is shown once per session.
+    Output
+      [1] "/vsigs/bucket-b/x.tif"
+
+# a failing secret aborts rcs_error_duckdb without echoing the token
+
+    Code
+      auth_duckdb_secret(auth, "con", "gs://bucket")
+    Condition
+      Error:
+      ! DuckDB refused the secret for "gs://bucket".
+      x Parser Error near <hidden>
+
+---
+
+    Code
+      auth_duckdb_secret(auth, "con", "bucket/prefix")
+    Condition
+      Error:
+      ! `scope` must be one address `gs://bucket[/prefix]`, not "bucket/prefix".
+

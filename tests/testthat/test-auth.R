@@ -593,9 +593,9 @@ test_that("gdal_config() sets and clears a GDAL option through terra", {
   skip_if_not_installed("terra")
   withr::defer(terra::setGDALconfig("RCS_TEST_OPTION", ""))
   gdal_config("RCS_TEST_OPTION", "some value")
-  expect_identical(terra::getGDALconfig("RCS_TEST_OPTION"), "some value")
+  expect_identical(unname(terra::getGDALconfig("RCS_TEST_OPTION")), "some value")
   gdal_config("RCS_TEST_OPTION", "")
-  expect_identical(terra::getGDALconfig("RCS_TEST_OPTION"), "")
+  expect_identical(unname(terra::getGDALconfig("RCS_TEST_OPTION")), "")
 })
 
 # DuckDB secret -----------------------------------------------------------------
@@ -669,10 +669,14 @@ test_that("store_auth_check() gives one row per local location", {
   ))
 })
 
-# A store object with one GCS location, built offline.
-gcs_store <- function(auth, catalog = catalog_empty(), files = files_empty()) {
+# A store object with one GCS location, built offline (catalogs set without
+# validation, so that only the columns used here need values).
+gcs_store <- function(auth, catalog = NULL, files = NULL) {
   be <- be_new("gs://bucket/store", auth = auth)
-  new_store(primary = new_location(backend = be, catalog = catalog, files = files))
+  st <- new_store(primary = new_location(backend = be))
+  if (!is.null(catalog)) st$primary$catalog <- catalog
+  if (!is.null(files)) st$primary$files <- files
+  st
 }
 
 test_that("store_auth_check() reports each failing client without aborting", {
@@ -708,14 +712,15 @@ test_that("store_auth_check() probes the first raster and passes when every clie
     auth_check_arrow = function(be, auth) invisible(),
     auth_check_json_api = function(be, auth) invisible(),
     auth_check_gdal = function(be, auth, path) probed <<- path,
-    auth_check_duckdb = function(be, auth) invisible()
+    auth_check_duckdb = function(be, auth) invisible(),
+    # The catalogs below hold only the columns store_auth_check() reads.
+    validate_store = function(x, ...) invisible(x)
   )
-  catalog <- catalog_empty()[rep(NA_integer_, 3), ]
-  catalog$dataset <- c("t", "grid", "grid2")
-  catalog$kind <- c("table", "raster", "raster")
-  files <- files_empty()[rep(NA_integer_, 3), ]
-  files$dataset <- c("t", "grid", "grid2")
-  files$path <- c("t/part-a.parquet", "grid/part-a.tif", "grid2/part-a.tif")
+  catalog <- tibble::tibble(dataset = c("t", "grid", "grid2"), kind = c("table", "raster", "raster"))
+  files <- tibble::tibble(
+    dataset = c("t", "grid", "grid2"),
+    path = c("t/part-a.parquet", "grid/part-a.tif", "grid2/part-a.tif")
+  )
   st <- gcs_store(rcs_auth_gcs(token = "ya29-fake-access"), catalog, files)
   got <- store_auth_check(st)
   expect_identical(probed, "grid/part-a.tif")

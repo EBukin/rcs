@@ -14,14 +14,12 @@
 #     (`arrow::arrow_with_gcs()`).
 #   * JSON API through httr2 (object metadata: `md5Hash`): bearer token from
 #     `auth_token()`, scope `cloud-platform`.
-#   * GDAL `/vsigs/` (rasters, `be_gdal_path()`), not yet built from the
-#     credential: it does not read the application-default credentials of
-#     gcloud on Windows (it tries the metadata server and fails with "Could
-#     not resolve host: metadata.google.internal"). Works when
-#     `GOOGLE_APPLICATION_CREDENTIALS` points to a service-account key or to
-#     the application-default credentials file itself, or with
-#     `GS_OAUTH2_REFRESH_TOKEN`, `GS_OAUTH2_CLIENT_ID` and
-#     `GS_OAUTH2_CLIENT_SECRET`.
+#   * GDAL `/vsigs/` (rasters, `be_gdal_path()`): GDAL does not read the
+#     application-default credentials of gcloud by itself on Windows (it
+#     tries the metadata server), so `be_gdal_path()` sets GDAL's
+#     process-wide options from the credential (`auth_gdal_use()`):
+#     `GS_OAUTH2_*` for a user login, `GOOGLE_APPLICATION_CREDENTIALS` (a GDAL
+#     option) for a service-account key, a bearer header for a token.
 # `gcs_reset_clients()` clears the tokens and file systems cached in every
 # credential.
 #
@@ -246,6 +244,8 @@ be_gdal_path.rcs_backend_gcs <- function(be, path) {
   if (length(path) == 0) {
     return(character())
   }
+  # GDAL's options are process-wide: give it this location's credential.
+  auth_gdal_use(gcs_auth(be))
   paste0("/vsigs/", gcs_fs_path(be, path))
 }
 
