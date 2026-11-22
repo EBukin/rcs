@@ -1,3 +1,41 @@
+# store_status(from = ) needs an address of the connection
+
+    Code
+      store_status(fx$st, from = "elsewhere/location")
+    Condition
+      Error in `store_status()`:
+      ! `from` must be the address of a location of this connection, not "elsewhere/location".
+      i Its locations: '<root>/primary', '<root>/secondary1', and '<root>/secondary2'.
+
+# printed, store_status() names the source
+
+    Code
+      print(store_status(fx$st))
+    Output
+      Source: <root>/primary
+      Locations: [1] <root>/secondary1
+                 [2] <root>/secondary2
+      # A tibble: 4 x 8
+        dataset       location status  newer primary_version  location_version primary_updated     location_updated   
+        <chr>         <chr>    <chr>   <chr> <chr>            <chr>            <dttm>              <dttm>             
+      1 sales/daily   [1]      same    <NA>  <version> <version> 2026-01-31 12:00:00 2026-01-31 12:00:00
+      2 sales/summary [1]      same    <NA>  <version> <version> 2026-01-31 12:00:00 2026-01-31 12:00:00
+      3 sales/daily   [2]      differs <NA>  <version> <version> 2026-01-31 12:00:00 2026-01-31 12:00:00
+      4 sales/summary [2]      missing <NA>  <version> <NA>             2026-01-31 12:00:00 NA                 
+    Code
+      print(store_status(fx$st, from = fx$secondary[[2]]))
+    Output
+      Source: <root>/secondary2
+      Locations: [1] <root>/primary
+                 [2] <root>/secondary1
+      # A tibble: 4 x 8
+        dataset       location status  newer primary_version  location_version primary_updated     location_updated   
+        <chr>         <chr>    <chr>   <chr> <chr>            <chr>            <dttm>              <dttm>             
+      1 sales/daily   [1]      differs <NA>  <version> <version> 2026-01-31 12:00:00 2026-01-31 12:00:00
+      2 sales/summary [1]      extra   <NA>  <NA>             <version> NA                  2026-01-31 12:00:00
+      3 sales/daily   [2]      differs <NA>  <version> <version> 2026-01-31 12:00:00 2026-01-31 12:00:00
+      4 sales/summary [2]      extra   <NA>  <NA>             <version> NA                  2026-01-31 12:00:00
+
 # store_datasets() checks its arguments
 
     Code

@@ -3,28 +3,35 @@
 # them work from the catalogs held by the connection: they make no backend
 # call and open no data file.
 
-# Status of a dataset in a secondary ------------------------------------------
+# Status of a dataset in another location ------------------------------------
 
-#' Compare one secondary with the primary, dataset by dataset
+#' Compare one location with a source location, dataset by dataset
 #'
 #' The state vocabulary of `store_status()` and `store_datasets()`, from
 #' catalogs only.
 #'
-#' @param primary The primary `rcs_location`.
-#' @param location A secondary `rcs_location`.
-#' @return A tibble, one row per dataset of the primary catalog (in its
+#' @param source The `rcs_location` compared against (the primary unless
+#'   `store_status(from = )` names another).
+#' @param location Another `rcs_location`, the target.
+#' @return A tibble, one row per dataset of the source catalog (in its
 #'   order) followed by the datasets found only in `location`: `dataset`,
 #'   `status` (`"same"`, `"differs"`, `"missing"`, `"extra"`, or
-#'   `"unavailable"` for every primary dataset when `location` is
-#'   unavailable), `newer` (for `differs`: `"primary"` or `"secondary"`, the
-#'   side with the later `updated`; `NA` otherwise and on a tie),
-#'   `primary_version`, `location_version`, `primary_updated`,
-#'   `location_updated`.
+#'   `"unavailable"` for every row when either location is unavailable:
+#'   then the rows are the datasets of the source catalog, or of the
+#'   target's when the source is the unavailable one), `newer` (for
+#'   `differs`: `"source"` or `"target"`, the side with the later `updated`;
+#'   `NA` otherwise and on a tie), `primary_version`, `location_version`,
+#'   `primary_updated`, `location_updated` (`primary_*` describe the
+#'   source).
 #' @noRd
-location_status <- function(primary, location) {
-  pc <- primary$catalog
+location_status <- function(source, location) {
+  pc <- source$catalog
   sc <- location$catalog
+  available <- source$available && location$available
   if (!location$available) {
+    sc <- sc[0, ]
+  } else if (!source$available) {
+    pc <- sc
     sc <- sc[0, ]
   }
   extra <- setdiff(sc$dataset, pc$dataset)
@@ -35,17 +42,24 @@ location_status <- function(primary, location) {
   sv <- sc$version[is_]
   pu <- pc$updated[ip]
   su <- sc$updated[is_]
+  if (!source$available) {
+    # The rows come from the target's catalog; nothing of the source is known.
+    pv <- rep(NA_character_, length(dataset))
+    sv <- location$catalog$version[match(dataset, location$catalog$dataset)]
+    su <- location$catalog$updated[match(dataset, location$catalog$dataset)]
+    pu <- su[0][seq_along(dataset)]
+  }
   status <- rep("differs", length(dataset))
   status[!is.na(pv) & !is.na(sv) & pv == sv] <- "same"
   status[is.na(is_)] <- "missing"
   status[is.na(ip)] <- "extra"
-  if (!location$available) {
+  if (!available) {
     status <- rep("unavailable", length(dataset))
   }
   newer <- rep(NA_character_, length(dataset))
   differs <- status == "differs"
-  newer[differs & pu > su] <- "primary"
-  newer[differs & su > pu] <- "secondary"
+  newer[differs & pu > su] <- "source"
+  newer[differs & su > pu] <- "target"
   tibble::tibble(
     dataset = dataset,
     status = status,
@@ -70,32 +84,40 @@ is_index_entry <- function(catalog) {
 
 # store_status() --------------------------------------------------------------
 
-#' Compare the secondary locations with the primary
+#' Compare the locations of a connection with one of them
 #'
-#' For each secondary location and each dataset, compares the catalogs held
-#' by the connection: a copy is the same when its version equals the
-#' primary's. No file is read and no location contacted; run
+#' For each location other than the source and each dataset, compares the
+#' catalogs held by the connection: a copy is the same when its version
+#' equals the source's. The source is the primary unless `from` names
+#' another location. No file is read and no location contacted; run
 #' [store_refresh()] first to compare what is stored now.
 #'
 #' @param st A store connection made by [store_connect()].
-#' @return A tibble with one row per secondary location and dataset of the
-#'   primary catalog (index tables included), plus one per dataset found
-#'   only in a secondary, ordered by location (in connection order) and
-#'   dataset:
+#' @param from `NULL` (the default) to compare every secondary location with
+#'   the primary, or the address of a location of the connection (as given
+#'   to [store_connect()]) to compare every other location, the primary
+#'   included, with that one.
+#' @return A tibble with one row per location other than the source and
+#'   dataset of the source catalog (index tables included), plus one per
+#'   dataset found only in that location, ordered by location (in
+#'   connection order) and dataset:
 #'
 #'   * `dataset`: the full name;
-#'   * `location`: the address of the secondary location;
+#'   * `location`: the address of the location compared with the source;
 #'   * `status`: `"same"`, `"differs"` (another version), `"missing"` (not
-#'     in the secondary), `"extra"` (only in the secondary), or
-#'     `"unavailable"` when the location could not be reached;
+#'     in that location), `"extra"` (only in that location), or
+#'     `"unavailable"` when it or the source could not be reached;
 #'   * `newer`: for `"differs"`, the side with the later `updated` time,
-#'     `"primary"` or `"secondary"`; `NA` otherwise. A hint only: the clocks
-#'     of the machines that wrote may differ;
+#'     `"source"` or `"target"` (the location of the row); `NA` otherwise.
+#'     A hint only: the clocks of the machines that wrote may differ;
 #'   * `primary_version`, `location_version`: the versions compared;
-#'   * `primary_updated`, `location_updated`: the times of the last writes.
+#'     `primary_version` is the source's (the primary's by default);
+#'   * `primary_updated`, `location_updated`: the times of the last writes,
+#'     `primary_updated` in the source.
 #'
-#'   Zero rows when the connection has no secondary location.
-#'   `store_sync()` brings missing and differing datasets up to date.
+#'   The attribute `source` holds the address of the source. Zero rows when
+#'   the connection has no other location. `store_sync()` brings missing
+#'   and differing datasets up to date.
 #' @seealso [store_datasets()], [store_refresh()].
 #' @export
 #' @examples
@@ -110,12 +132,21 @@ is_index_entry <- function(catalog) {
 #'   key = c("shop_id", "date", "product"), partition = "year"
 #' )
 #' store_status(st)
+#' store_status(st, from = file.path(root, "copy"))
 #' unlink(root, recursive = TRUE)
-store_status <- function(st) {
+store_status <- function(st, from = NULL) {
   validate_store(st)
   local_trace("store_status")
-  parts <- lapply(st$secondary, function(location) {
-    out <- location_status(st$primary, location)
+  source_uri <- if (is.null(from)) {
+    st$primary$uri
+  } else {
+    location_arg(st, from, "from", rlang::current_env())
+  }
+  source <- current_location(st, source_uri)
+  targets <- store_locations(st)
+  targets <- targets[store_uris(st) != source_uri]
+  parts <- lapply(targets, function(location) {
+    out <- location_status(source, location)
     tibble::add_column(out, location = rep(location$uri, nrow(out)), .after = "dataset")
   })
   empty <- tibble::tibble(
@@ -125,6 +156,7 @@ store_status <- function(st) {
     location_updated = local_time(as.POSIXct(character(), tz = "UTC"))
   )
   out <- vctrs::vec_rbind(empty, !!!parts)
+  attr(out, "source") <- source_uri
   class(out) <- c("rcs_status", class(out))
   out
 }
@@ -132,20 +164,29 @@ store_status <- function(st) {
 #' @rdname store_status
 #' @param x The result of `store_status()`.
 #' @param ... Passed on to the tibble's print method.
-#' @details Printed, the addresses are listed once above the table and the
-#'   column `location` shows their numbers, so that long addresses stay
-#'   readable; the values of the column are the full addresses.
+#' @details Printed, the source is named first; the addresses of the other
+#'   locations are listed once above the table and the column `location`
+#'   shows their numbers, so that long addresses stay readable; the values
+#'   of the column are the full addresses.
 #' @export
 print.rcs_status <- function(x, ...) {
   shown <- x
   class(shown) <- setdiff(class(x), "rcs_status")
+  attr(shown, "source") <- NULL
+  source <- attr(x, "source", exact = TRUE)
+  if (is.character(source) && length(source) == 1) {
+    cat("Source: ", source, "
+", sep = "")
+  }
   if (nrow(x) == 0 || !"location" %in% names(x) || !is.character(x$location)) {
     print(shown, ...)
     return(invisible(x))
   }
   uris <- unique(x$location[!is.na(x$location)])
   shown$location <- ifelse(is.na(x$location), NA_character_, paste0("[", match(x$location, uris), "]"))
-  cat(paste0("Locations: ", paste0("[", seq_along(uris), "] ", uris, collapse = "\n           ")), "\n", sep = "")
+  cat(paste0("Locations: ", paste0("[", seq_along(uris), "] ", uris, collapse = "
+           ")), "
+", sep = "")
   print(shown, ...)
   invisible(x)
 }
