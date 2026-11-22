@@ -152,10 +152,9 @@ test_that("store_status(from = ) needs an address of the connection", {
   fx <- local_test_store(partial = TRUE)
   expect_error(store_status(fx$st, from = "not/a/location"), class = "rcs_error_argument")
   expect_error(store_status(fx$st, from = 1), class = "rcs_error_argument")
-  dir <- withr::local_tempdir()
   expect_snapshot(error = TRUE, {
-    store_status(fx$st, from = file.path(dir, "elsewhere"))
-  }, transform = function(x) gsub(normalizePath(dir, winslash = "/", mustWork = FALSE), "<dir>", scrub(dirname(fx$primary))(x), fixed = TRUE))
+    store_status(fx$st, from = "elsewhere/location")
+  }, transform = scrub(dirname(fx$primary)))
 })
 
 test_that("printed, store_status() names the source", {
