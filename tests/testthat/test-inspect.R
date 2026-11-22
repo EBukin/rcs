@@ -61,7 +61,7 @@ test_that("store_status() compares every secondary with the primary", {
   expect_identical(s1$dataset, c("sales/daily", "sales/summary", "extra/only"))
   expect_identical(s1$status, c("same", "same", "extra"))
   expect_identical(s2$status[match(c("sales/daily", "sales/summary"), s2$dataset)], c("differs", "missing"))
-  expect_identical(s2$newer[s2$dataset == "sales/daily"], "primary")
+  expect_identical(s2$newer[s2$dataset == "sales/daily"], "source")
   expect_true(all(is.na(status$newer[status$status != "differs"])))
   expect_identical(s2$primary_version[1], st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"])
   expect_identical(attr(status$primary_updated, "tzone"), "")
@@ -72,10 +72,11 @@ test_that("printed, store_status() lists long addresses once and numbers them", 
   fx <- local_test_store(partial = TRUE)
   status <- store_status(fx$st)
   out <- capture.output(print(status, width = 80))
-  expect_match(out[[1]], paste0("Locations: [1] ", fx$secondary[[1]]), fixed = TRUE)
-  expect_match(out[[2]], paste0("[2] ", fx$secondary[[2]]), fixed = TRUE)
-  expect_true(any(grepl("[1]", out[-(1:2)], fixed = TRUE)))
-  expect_false(any(grepl(fx$secondary[[1]], out[-(1:2)], fixed = TRUE)))
+  expect_identical(out[[1]], paste0("Source: ", fx$primary))
+  expect_match(out[[2]], paste0("Locations: [1] ", fx$secondary[[1]]), fixed = TRUE)
+  expect_match(out[[3]], paste0("[2] ", fx$secondary[[2]]), fixed = TRUE)
+  expect_true(any(grepl("[1]", out[-(1:3)], fixed = TRUE)))
+  expect_false(any(grepl(fx$secondary[[1]], out[-(1:3)], fixed = TRUE)))
   capture.output(printed <- print(status))
   expect_identical(printed, status)
   expect_identical(unique(status$location), unname(unlist(fx$secondary)))
@@ -89,7 +90,99 @@ test_that("newer names the side with the later update", {
   location$catalog$updated[i] <- location$catalog$updated[i] + 3600 * 24 * 365
   store_set_location(st, location)
   status <- store_status(st)
-  expect_identical(status$newer[status$location == fx$secondary[[2]] & status$dataset == "sales/daily"], "secondary")
+  expect_identical(status$newer[status$location == fx$secondary[[2]] & status$dataset == "sales/daily"], "target")
+})
+
+test_that("store_status(from = ) compares every other location with that one", {
+  fx <- local_test_store(partial = TRUE)
+  st <- fx$st
+  daily <- function(location) {
+    location$catalog[location$catalog$dataset == "sales/daily", ]
+  }
+  status <- store_status(st, from = fx$secondary[[2]])
+  expect_s3_class(status, "rcs_status")
+  expect_named(status, c(
+    "dataset", "location", "status", "newer", "primary_version", "location_version",
+    "primary_updated", "location_updated"
+  ))
+  expect_identical(attr(status, "source"), fx$secondary[[2]])
+  # The other locations in connection order: the primary, then the first secondary.
+  expect_identical(unique(status$location), c(fx$primary, fx$secondary[[1]]))
+  for (uri in c(fx$primary, fx$secondary[[1]])) {
+    s <- status[status$location == uri, ]
+    expect_identical(s$dataset, c("sales/daily", "sales/summary"))
+    expect_identical(s$status, c("differs", "extra"))
+    # The source holds the older version of sales/daily.
+    expect_identical(s$newer, c("target", NA))
+    expect_identical(s$primary_version, c(daily(st$secondary[[2]])$version, NA))
+    expect_identical(s$location_version[[1]], daily(st$primary)$version)
+  }
+
+  # Source newer than the target.
+  location <- st$secondary[[2]]
+  i <- location$catalog$dataset == "sales/daily"
+  location$catalog$updated[i] <- location$catalog$updated[i] + 3600 * 24 * 365
+  store_set_location(st, location)
+  status <- store_status(st, from = fx$secondary[[2]])
+  expect_identical(status$newer[status$dataset == "sales/daily"], c("source", "source"))
+  expect_true(all(is.na(status$newer[status$status != "differs"])))
+  expect_store_valid(st)
+})
+
+test_that("store_status(from = ) gives the same table as the default for the primary", {
+  fx <- local_test_store(partial = TRUE)
+  st <- fx$st
+  fixture_write(st, rcs_sim_table(10, seed = 5), "extra/only",
+    title = "Only here", description = "A dataset only in the first secondary.",
+    locations = st$secondary[1]
+  )
+  default <- store_status(st)
+  expect_identical(attr(default, "source"), fx$primary)
+  expect_identical(store_status(st, from = fx$primary), default)
+  expect_identical(store_status(st, from = st$primary$uri), default)
+  # The table of the default, as before `from` existed (newer renamed).
+  expect_identical(default$location, rep(unlist(fx$secondary), c(3, 2)))
+  expect_identical(default$dataset, c("sales/daily", "sales/summary", "extra/only", "sales/daily", "sales/summary"))
+  expect_identical(default$status, c("same", "same", "extra", "differs", "missing"))
+  expect_identical(default$newer, c(NA, NA, NA, "source", NA))
+  expect_no_work(store_status(st, from = fx$secondary[[1]]))
+})
+
+test_that("store_status(from = ) needs an address of the connection", {
+  fx <- local_test_store(partial = TRUE)
+  expect_error(store_status(fx$st, from = "not/a/location"), class = "rcs_error_argument")
+  expect_error(store_status(fx$st, from = 1), class = "rcs_error_argument")
+  dir <- withr::local_tempdir()
+  expect_snapshot(error = TRUE, {
+    store_status(fx$st, from = file.path(dir, "elsewhere"))
+  }, transform = function(x) gsub(normalizePath(dir, winslash = "/", mustWork = FALSE), "<dir>", scrub(dirname(fx$primary))(x), fixed = TRUE))
+})
+
+test_that("printed, store_status() names the source", {
+  fx <- local_test_store(partial = TRUE)
+  fix_catalogs(fx$st)
+  local_snapshot_output()
+  expect_snapshot({
+    print(store_status(fx$st))
+    print(store_status(fx$st, from = fx$secondary[[2]]))
+  }, transform = scrub(dirname(fx$primary)))
+})
+
+test_that("store_status(from = ) marks every row of an unavailable location", {
+  fx <- local_test_store(partial = TRUE)
+  st <- fx$st
+  location <- st$secondary[[1]]
+  location$available <- FALSE
+  store_set_location(st, location)
+  status <- store_status(st, from = fx$secondary[[2]])
+  s1 <- status[status$location == fx$secondary[[1]], ]
+  expect_identical(s1$dataset, "sales/daily")
+  expect_identical(s1$status, "unavailable")
+  expect_true(all(is.na(s1$newer)))
+  # An unavailable source: every other location is unavailable to compare.
+  status <- store_status(st, from = fx$secondary[[1]])
+  expect_true(all(status$status == "unavailable"))
+  expect_identical(unique(status$location), c(fx$primary, fx$secondary[[2]]))
 })
 
 test_that("an empty store has no status rows and no datasets", {
