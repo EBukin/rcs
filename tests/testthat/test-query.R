@@ -12,15 +12,148 @@ opened_files <- function() {
   trace$detail[trace$counter == "file_open"]
 }
 
-test_that("store_open() returns a lazy query that prints its dataset, files and columns", {
+# The version hex of a fixture depends on when it was written.
+scrub_version <- function(x) gsub("(Version:  )[0-9a-f]{8}", "\\1<version>", x)
+
+print_lines <- function(x, ...) utils::capture.output(print(x, ...))
+
+test_that("store_open() returns a lazy query without opening files", {
   fx <- local_test_store(secondaries = 0L)
   withr::local_options(rcs.trace = TRUE)
   q <- store_open(fx$st, "daily")
   expect_s3_class(q, "rcs_query")
   expect_length(opened_files(), 0)
-  expect_snapshot(q)
-  expect_snapshot(dplyr::filter(q, year == 2024))
   expect_snapshot(store_open(fx$st, "nothing"), error = TRUE)
+})
+
+test_that("an unfiltered query prints a header, the first rows and the rows left", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- store_open(fx$st, "summary")
+  expect_snapshot(q, transform = scrub_version)
+  out <- print_lines(q)
+  entry <- q$entry
+  expect_match(out[[3]], paste0("Version:  ", substr(entry$version, 1, 8), " (current)"), fixed = TRUE)
+  expect_match(out[[1]], "[40 x 15] (table)", fixed = TRUE)
+  expect_match(print_lines(dplyr::select(q, shop_id, qty))[[1]], "[40 x 2]", fixed = TRUE)
+  expect_match(print_lines(dplyr::mutate(q, value = qty * price))[[1]], "[40 x 16]", fixed = TRUE)
+  expect_match(print_lines(dplyr::arrange(q, qty))[[1]], "[?? x 15]", fixed = TRUE)
+})
+
+test_that("a filtered or shortened query prints ?? rows, the filter and the pruned files", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- store_open(fx$st, "sales/daily")
+  filtered <- q |>
+    dplyr::filter(year == 2024, qty > 20) |>
+    dplyr::select(shop_id, date, qty, price) |>
+    dplyr::arrange(shop_id, date, qty, price)
+  expect_snapshot(filtered, transform = scrub_version)
+  short <- utils::head(store_open(fx$st, "summary"), 5)
+  expect_snapshot(short, transform = scrub_version)
+})
+
+test_that("a geospatial query prints geometry and cells in hex", {
+  skip_if_no_h3()
+  fx <- local_test_store(tables = FALSE, geospatial = "polygons", secondaries = 0L)
+  q <- store_open(fx$st, "shapes/polygons")
+  expect_match(print_lines(q)[[1]], "shapes/polygons [60 x ", fixed = TRUE)
+  sorted <- q |>
+    dplyr::select(id, h3, area, geometry) |>
+    dplyr::arrange(id)
+  expect_snapshot(sorted, transform = scrub_version)
+  out <- print_lines(sorted)
+  first <- dplyr::collect(utils::head(sorted, 1))
+  expect_true(any(grepl(format(first$h3), out, fixed = TRUE)))
+})
+
+test_that("a spatial filter prints its description and a footer that allows more rows", {
+  skip_if_no_h3()
+  fx <- local_test_store(tables = FALSE, geospatial = "polygons", secondaries = 0L)
+  box <- sf::st_as_sfc(sf::st_bbox(c(xmin = -29, ymin = 6, xmax = -26, ymax = 9), crs = sf::st_crs(4326)))
+  q <- store_open(fx$st, "shapes/polygons") |>
+    dplyr::filter(area > 0) |>
+    store_intersects(box) |>
+    dplyr::select(id, area, geometry) |>
+    dplyr::arrange(id)
+  expect_snapshot(print(q, n = 3), transform = scrub_version)
+  out <- print_lines(q, n = 3)
+  expect_true("# Filter:   (with spatial predicate)" %in% out)
+  expect_identical(utils::tail(out, 2)[[1]], "# i more rows may exist")
+  # printing is quiet, also when collect() would say the result is a candidate set
+  nested <- dplyr::select(utils::head(q, 50), id)
+  expect_message(dplyr::collect(nested), "candidate set")
+  expect_silent(print_lines(nested))
+})
+
+test_that("a query with no rows prints its header and 0 rows", {
+  fx <- local_test_store(secondaries = 0L)
+  none <- dplyr::filter(store_open(fx$st, "sales/daily"), year == 1999L)
+  expect_snapshot(none, transform = scrub_version)
+})
+
+test_that("a dropped geometry is not counted and not printed", {
+  skip_if_no_h3()
+  fx <- local_test_store(tables = FALSE, geospatial = "polygons", secondaries = 0L)
+  q <- store_open(fx$st, "shapes/polygons")
+  with_geometry <- print_lines(q)[[1]]
+  ncol_shown <- function(line) as.integer(sub(".* x ([0-9]+)\\].*", "\\1", line))
+  flat <- q
+  flat$geometry <- FALSE
+  out <- print_lines(dplyr::arrange(dplyr::select(flat, id, area, geometry), id))
+  expect_match(out[[1]], "[?? x 2]", fixed = TRUE)
+  expect_false(any(grepl("geometry", out, fixed = TRUE)))
+  expect_identical(ncol_shown(print_lines(flat)[[1]]), ncol_shown(with_geometry) - 1L)
+  expect_identical(ncol_shown(print_lines(dplyr::select(q, -geometry))[[1]]), ncol_shown(with_geometry) - 1L)
+})
+
+test_that("print() takes the number of rows from n or from rcs.print_rows", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- store_open(fx$st, "summary")
+  expect_snapshot(print(q, n = 3), transform = scrub_version)
+  three <- print_lines(q, n = 3)
+  withr::local_options(rcs.print_rows = 3)
+  expect_identical(print_lines(q), three)
+  expect_snapshot(print(q, n = 0), error = TRUE)
+})
+
+test_that("a long filter is cut to the console width", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- dplyr::filter(store_open(fx$st, "summary"), shop_id %in% c(1:30, 41:70), qty > 0)
+  expect_snapshot(q, transform = scrub_version)
+  out <- print_lines(q, width = 60)
+  filter_line <- grep("^# Filter:", out, value = TRUE)
+  expect_length(filter_line, 1)
+  expect_match(filter_line, "...", fixed = TRUE)
+  expect_lte(nchar(filter_line), 60)
+})
+
+test_that("a long chain of comparisons stays on one Filter line at any width", {
+  fx <- local_test_store(secondaries = 0L)
+  q <- dplyr::filter(
+    store_open(fx$st, "summary"),
+    qty > 0, price > 1, shop_id > 2, year > 2000, promo == FALSE | qty > 100000,
+    qty < 1000000, price < 1000000
+  )
+  for (width in c(60, 100)) {
+    withr::local_options(width = width, cli.width = width)
+    out <- print_lines(q)
+    filter_at <- grep("^# Filter:", out)
+    expect_length(filter_at, 1)
+    expect_match(out[[filter_at]], "\\.\\.\\.$")
+    expect_lt(nchar(out[[filter_at]]), width)
+    # the next line is the column header, not a wrapped piece of the filter
+    expect_false(grepl("^#", out[[filter_at + 1L]]))
+  }
+})
+
+test_that("printing a filtered query opens only the kept files and returns the query", {
+  fx <- local_test_store(secondaries = 0L)
+  files <- fx$st$primary$files[fx$st$primary$files$dataset == "sales/daily", ]
+  q <- dplyr::filter(store_open(fx$st, "sales/daily"), year == 2024L)
+  withr::local_options(rcs.trace = TRUE)
+  utils::capture.output(res <- withVisible(print(q)))
+  expect_identical(opened_files(), files$path[grepl("2024", files$partition_values)])
+  expect_false(res$visible)
+  expect_identical(res$value, q)
 })
 
 test_that("dplyr verbs on a query equal dplyr on the collected data", {
@@ -152,7 +285,8 @@ test_that("a lazy query reads from the location store_read() would read from", {
     transform = function(x) gsub("[A-Za-z]:?[^ ]*secondary1", "<secondary1>", x)
   )
   expect_identical(q$location$uri, fx$secondary[[1]])
-  expect_snapshot(q)
+  expect_snapshot(q, transform = scrub_version)
+  expect_match(print_lines(q)[[2]], "Location: secondary 1 (local)", fixed = TRUE)
 })
 
 test_that("a query on geospatial data collects sf without .rcs_id", {
