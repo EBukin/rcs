@@ -402,8 +402,8 @@ files_row_group_counts <- function(be, paths) {
 #' Turn collected rows into the R data a read returns
 #'
 #' Restores the R types recorded in the entry's `columns` (`r_type`) for the
-#' columns that still carry their stored name and a compatible type, and
-#' decodes a WKB `geometry` column of a geospatial dataset into `sf` with
+#' columns that still carry their stored name and a compatible type, gives
+#' the cell columns class `rcs_h3` (`h3_classify()`, D8), and decodes a WKB `geometry` column of a geospatial dataset into `sf` with
 #' the entry's CRS.
 #'
 #' @param data A data frame collected from Arrow (with
@@ -414,6 +414,7 @@ files_row_group_counts <- function(be, paths) {
 rows_finish <- function(data, entry) {
   data <- tibble::as_tibble(data)
   data <- restore_types(data, columns_from_json(entry$columns))
+  data <- h3_classify(data, entry)
   if (identical(entry$kind, "geospatial") && "geometry" %in% names(data) && is.list(data$geometry)) {
     data <- geo_decode(data, entry$crs)
   }

@@ -556,3 +556,112 @@ test_that("files_stage() with a geocoding engine embeds it in the files and the 
   )
   expect_false(identical(plain$entry$version, out$entry$version))
 })
+
+# H3 cell class on write (plan 0002, D8) ---------------------------------------
+
+o2_hex <- c("85283473fffffff", "85283447fffffff", "8528340bfffffff", "8428347ffffffff")
+
+o2_cells <- function(n, hex = o2_hex) {
+  new_rcs_h3(h3_hex_to_int64_raw(rep_len(hex, n)))
+}
+
+o2_r_type <- function(spec) {
+  stats::setNames(spec$r_type, spec$name)
+}
+
+test_that("files_columns_spec() records rcs_h3 for user cell columns and integer64 for the package's cells", {
+  n <- 8
+  x <- tibble::tibble(
+    id = seq_len(n),
+    h3 = o2_cells(n),
+    cell = o2_cells(n),
+    big = bit64::as.integer64(seq_len(n))
+  )
+  spec <- files_columns_spec(x, files_arrow_schema(x))
+  r_type <- o2_r_type(spec)
+  # a table: no name rule, every rcs_h3 column is a user column
+  expect_identical(r_type$h3, list(class = "rcs_h3"))
+  expect_identical(r_type$cell, list(class = "rcs_h3"))
+  expect_identical(r_type$big, list(class = "integer64"))
+  expect_identical(spec$type[spec$name %in% c("h3", "cell", "big")], rep("int64", 3))
+  expect_identical(columns_from_json(columns_to_json(spec)), spec)
+
+  # the package's own cell columns record integer64 whatever their class
+  y <- tibble::tibble(
+    .rcs_id = bit64::as.integer64(seq_len(n)),
+    h3 = o2_cells(n), h3_main = o2_cells(n), h3_p3 = o2_cells(n),
+    cell = o2_cells(n), plain = bit64::as.integer64(o2_cells(n))
+  )
+  own <- o2_r_type(files_columns_spec(y, files_arrow_schema(y), cells_by_name = TRUE))
+  for (name in c("h3", "h3_main", "h3_p3", "plain")) {
+    expect_identical(own[[name]], list(class = "integer64"), info = name)
+  }
+  expect_identical(own$cell, list(class = "rcs_h3"))
+  # rows with .rcs_id are geospatial rows or an index table by default
+  expect_identical(o2_r_type(files_columns_spec(y, files_arrow_schema(y))), own)
+  expect_identical(
+    o2_r_type(files_columns_spec(y, files_arrow_schema(y), cells_by_name = FALSE))$h3,
+    list(class = "rcs_h3")
+  )
+})
+
+test_that("files_stage() records integer64 for the cells of geospatial data and index tables", {
+  local_geo_mocks()
+  g <- fake_geo()
+  g$h3 <- new_rcs_h3(g$h3)
+  g$cell <- new_rcs_h3(g$h3)
+  geo <- stage_table(g, kind = "geospatial", crs = "{}")
+  r_type <- o2_r_type(columns_from_json(geo$entry$columns))
+  expect_identical(r_type$h3, list(class = "integer64"))
+  expect_identical(r_type$cell, list(class = "rcs_h3"))
+  plain <- g
+  plain$h3 <- bit64::as.integer64(plain$h3)
+  expect_identical(stage_table(plain, kind = "geospatial", crs = "{}")$files$md5, geo$files$md5)
+
+  n <- 10
+  index <- tibble::tibble(
+    .rcs_id = bit64::as.integer64(seq_len(n)),
+    h3 = o2_cells(n), h3_main = o2_cells(n), share = rep(1, n)
+  )
+  staged <- stage_table(index, "shapes/polygons__h3", index_of = "shapes/polygons", sorted_by = c("h3", ".rcs_id"))
+  r_type <- o2_r_type(columns_from_json(staged$entry$columns))
+  expect_identical(r_type$h3, list(class = "integer64"))
+  expect_identical(r_type$h3_main, list(class = "integer64"))
+})
+
+test_that("a user column written as rcs_h3 or as integer64 gives the same files, paths and version", {
+  n <- 40
+  x <- tibble::tibble(id = seq_len(n), cell = o2_cells(n), qty = seq_len(n) * 2L)
+  y <- x
+  y$cell <- bit64::as.integer64(y$cell)
+  expect_false(inherits(y$cell, "rcs_h3"))
+  for (partition in list(NULL, "cell")) {
+    a <- stage_table(x, "cells/user", key = "id", partition = partition)
+    b <- stage_table(y, "cells/user", key = "id", partition = partition)
+    info <- paste("partition:", partition %||% "none")
+    expect_identical(a$files$path, b$files$path, info = info)
+    expect_identical(a$files$md5, b$files$md5, info = info)
+    expect_identical(a$entry$version, b$entry$version, info = info)
+    expect_identical(o2_r_type(columns_from_json(a$entry$columns))$cell, list(class = "rcs_h3"), info = info)
+    expect_identical(o2_r_type(columns_from_json(b$entry$columns))$cell, list(class = "integer64"), info = info)
+    expect_identical(unname(tools::md5sum(a$staged$local)), unname(tools::md5sum(b$staged$local)), info = info)
+  }
+  expect_length(stage_table(x, "cells/user", key = "id", partition = "cell")$files$path, length(o2_hex))
+})
+
+test_that("restore_types() gives rcs_h3 to columns recorded as rcs_h3 only", {
+  n <- 6
+  x <- tibble::tibble(id = seq_len(n), cell = o2_cells(n), big = bit64::as.integer64(o2_cells(n)))
+  out <- stage_table(x)
+  back <- read_parquet64(out$staged$local)
+  expect_false(inherits(back$cell, "rcs_h3"))
+  restored <- restore_types(back, columns_from_json(out$entry$columns))
+  expect_s3_class(restored$cell, "rcs_h3")
+  expect_identical(restored$cell, x$cell)
+  expect_false(inherits(restored$big, "rcs_h3"))
+  expect_identical(restored$big, x$big)
+  # a column a query changed keeps its type
+  changed <- back
+  changed$cell <- as.character(changed$cell)
+  expect_identical(restore_types(changed, columns_from_json(out$entry$columns))$cell, changed$cell)
+})
