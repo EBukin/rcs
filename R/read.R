@@ -382,11 +382,13 @@ glimpse_first_rows <- function(target) {
 #' H3 cells as hex strings
 #'
 #' Cells are stored as 64-bit integers (`bit64::integer64`), the compact form
-#' that Parquet filters and sorts fast. `store_h3_hex()` converts them to the
+#' that Parquet filters and sorts fast, and a read returns them as [rcs_h3]
+#' (`integer64` printed as hex). `store_h3_hex()` converts them to the
 #' 15-character hex strings that other H3 tools use.
 #'
 #' @param x A data frame returned by a read (a tibble or an `sf` object), or
-#'   a vector of cells (`bit64::integer64`, hex strings or `h3o` `H3`).
+#'   a vector of cells ([rcs_h3], `bit64::integer64`, hex strings or `h3o`
+#'   `H3`).
 #' @param columns For a data frame, the columns to convert (tidyselect);
 #'   `NULL` converts the cell columns the package adds that are present:
 #'   `h3`, `h3_main` and `h3_p<r>`.
@@ -409,7 +411,7 @@ store_h3_hex <- function(x, columns = NULL) {
   columns <- rlang::enquo(columns)
   names_x <- names(x)
   if (rlang::quo_is_null(columns)) {
-    chosen <- names_x[names_x %in% c("h3", "h3_main") | grepl("^h3_p[0-9]+$", names_x)]
+    chosen <- h3_cell_names(names_x)
   } else {
     plain <- if (inherits(x, "sf")) sf::st_drop_geometry(x) else x
     chosen <- names(tidyselect::eval_select(columns, data = plain, error_call = call))

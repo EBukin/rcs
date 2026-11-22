@@ -463,10 +463,9 @@ test_that("cells of geospatial data and index tables come back as rcs_h3 from ev
   expect_s3_class(got$h3, "rcs_h3")
   expect_s3_class(got[[partition]], "rcs_h3")
   expect_false(inherits(got$id, "rcs_h3"))
-  expected <- fx$data[["shapes/polygons"]]
   expect_identical(
-    bit64::as.integer64(got$h3[order(got$id)]),
-    bit64::as.integer64(store_read(st, "shapes/polygons", geometry = FALSE)$h3[order(got$id)])
+    sort(bit64::as.integer64(got$h3)),
+    sort(bit64::as.integer64(store_read(st, "shapes/polygons", geometry = FALSE)$h3))
   )
 
   collected <- dplyr::collect(store_open(st, "shapes/polygons"))

@@ -254,12 +254,16 @@ files_arrow_schema <- function(data) {
 }
 
 # The data as written: every difftime column as a plain double in its own
-# units (restored by `restore_types()` from `r_type`).
+# units (restored by `restore_types()` from `r_type`), and every `rcs_h3`
+# column as plain `integer64` (the same bits), so that a column written as
+# `rcs_h3` or as `integer64` gives the same files.
 files_arrow_values <- function(data) {
   data <- tibble::as_tibble(data)
   for (name in names(data)) {
     if (inherits(data[[name]], "difftime")) {
       data[[name]] <- as.double(unclass(data[[name]]))
+    } else if (inherits(data[[name]], "rcs_h3")) {
+      data[[name]] <- rcs_h3_strip(data[[name]])
     }
   }
   data
@@ -272,12 +276,18 @@ files_arrow_values <- function(data) {
 #' @param descriptions Named character vector, column name to description,
 #'   or `NULL`.
 #' @param call Environment for the error.
+#' @param cells_by_name `TRUE` for the rows of a geospatial dataset or an
+#'   index table, whose `h3`, `h3_main` and `h3_p<r>` columns are the
+#'   package's own cells. Default: `TRUE` when the data have `.rcs_id`.
 #' @return A tibble as `columns_spec()` builds it, with `r_type` for
 #'   difftime, `integer64`, factor and plain list columns (not for the WKB
-#'   `geometry`). Aborts with class `rcs_error_argument` when `descriptions`
-#'   names a column the data lack.
+#'   `geometry`). An `rcs_h3` column records `list(class = "rcs_h3")`, except
+#'   the package's own cells, which record `list(class = "integer64")`
+#'   whatever their class (D8). Aborts with class `rcs_error_argument` when
+#'   `descriptions` names a column the data lack.
 #' @noRd
-files_columns_spec <- function(data, schema, descriptions = NULL, call = caller_env()) {
+files_columns_spec <- function(data, schema, descriptions = NULL, call = caller_env(),
+                               cells_by_name = ".rcs_id" %in% names(data)) {
   if (!is.null(descriptions)) {
     if (!is.character(descriptions) || !rlang::is_named(descriptions)) {
       cli::cli_abort(
@@ -293,9 +303,12 @@ files_columns_spec <- function(data, schema, descriptions = NULL, call = caller_
       )
     }
   }
+  own_cells <- if (isTRUE(cells_by_name)) h3_cell_names(names(data)) else character()
   r_type <- lapply(names(data), function(name) {
     col <- data[[name]]
-    if (inherits(col, "integer64")) {
+    if (inherits(col, "rcs_h3") && !name %in% own_cells) {
+      list(class = "rcs_h3")
+    } else if (inherits(col, "integer64")) {
       list(class = "integer64")
     } else if (inherits(col, "difftime")) {
       list(class = "difftime", units = units(col))
@@ -313,6 +326,20 @@ files_columns_spec <- function(data, schema, descriptions = NULL, call = caller_
     r_type = r_type,
     description = description
   )
+}
+
+# The `columns` specification as the files embed it: `rcs_h3` recorded as
+# `integer64`.
+columns_spec_embedded <- function(spec) {
+  spec$r_type <- lapply(spec$r_type, function(r) {
+    if (identical(r$class, "rcs_h3")) list(class = "integer64") else r
+  })
+  spec
+}
+
+# The names among `x` of the package's own cell columns.
+h3_cell_names <- function(x) {
+  x[x %in% c("h3", "h3_main") | grepl("^h3_p[0-9]+$", x)]
 }
 
 # Facts per file --------------------------------------------------------------
@@ -478,12 +505,18 @@ files_stage <- function(data, dataset, title, description,
   }
 
   schema <- files_arrow_schema(data)
-  spec <- files_columns_spec(data, schema, columns, call = call)
+  spec <- files_columns_spec(data, schema, columns,
+    call = call,
+    cells_by_name = kind == "geospatial" || !is.na(index_of)
+  )
   columns_json <- columns_to_json(spec)
+  # the files embed `integer64` for an `rcs_h3` column, so that writing a
+  # column as `rcs_h3` or as `integer64` gives the same files and version;
+  # the catalog and the manifest keep `rcs_h3` (D8)
   provisional <- new_entry(
     dataset = dataset, kind = kind, title = title, description = description,
     version = strrep("0", 16), n_files = 0, rows = 0, bytes = 0,
-    columns = columns_json, key = key, sorted_by = sorted_by,
+    columns = columns_to_json(columns_spec_embedded(spec)), key = key, sorted_by = sorted_by,
     partition = plan$partition, source = source, inputs = inputs, crs = crs,
     h3_res = h3_res, geocode_engine = geocode_engine, index_of = index_of,
     history = history
@@ -591,6 +624,9 @@ files_stage <- function(data, dataset, title, description,
 #'   `files_arrow_schema()`), restored with those units; a column Arrow
 #'   returns as difftime gets the recorded units;
 #' * `integer64`: a numeric column becomes `bit64::integer64`;
+#' * `rcs_h3`: a numeric column becomes `rcs_h3` (the name rule for the
+#'   package's own cells is applied by `rows_finish()` through
+#'   `h3_classify()`, which knows the entry);
 #' * factor: a factor or character column gets the recorded levels and
 #'   order (zero-row files lose them);
 #' * plain list: a bare list, the attributes of its elements dropped;
@@ -616,6 +652,8 @@ restore_types <- function(data, spec) {
       v <- restore_list(v, strip = name != "geometry")
     } else if (cls == "integer64") {
       if (is.numeric(v) && !inherits(v, "integer64")) v <- bit64::as.integer64(v)
+    } else if (cls == "rcs_h3") {
+      if (is.numeric(v) && !inherits(v, "rcs_h3")) v <- new_rcs_h3(v)
     } else if (cls == "difftime") {
       v <- restore_difftime(v, r_type$units)
     } else if (cls == "factor") {
