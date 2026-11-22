@@ -155,7 +155,7 @@ test_that("an earlier version is read from the history with that version's entry
   current <- st$primary$catalog$version[st$primary$catalog$dataset == "sales/daily"]
   expect_same_table(store_read(st, "sales/daily", version = current), fx$data[["sales/daily"]], daily_key)
   q <- store_open(st, "sales/daily", version = old)
-  expect_snapshot(q)
+  expect_snapshot(print(dplyr::arrange(q, shop_id, date, ts)))
   expect_identical(q$entry$version, old)
   expect_identical(nrow(dplyr::collect(q)), nrow(fx$old))
 })

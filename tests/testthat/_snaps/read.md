@@ -36,7 +36,7 @@
 # an earlier version is read from the history with that version's entry
 
     Code
-      q
+      print(dplyr::arrange(q, shop_id, date, ts))
     Output
       <rcs_query> sales/daily (table, earlier version)
       Location: primary
@@ -109,6 +109,15 @@
     Condition
       Error in `store_read()`:
       ! "grids/sim" is a raster: `columns` and `exact` do not apply.
+      i A raster read takes only `intersects`, which crops it to the query's box.
+
+---
+
+    Code
+      store_read(fx$st, "grids/sim", exact_engine = "planar")
+    Condition
+      Error in `store_read()`:
+      ! "grids/sim" is a raster: `exact_engine` does not apply.
       i A raster read takes only `intersects`, which crops it to the query's box.
 
 ---

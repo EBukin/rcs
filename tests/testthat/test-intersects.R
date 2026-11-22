@@ -418,14 +418,14 @@ test_that("store_intersects() combines with other verbs and with a second query"
     dplyr::select(id, area) |>
     store_intersects(a) |>
     store_intersects(b)
-  expect_snapshot(q)
+  expect_snapshot(print(dplyr::arrange(q, id)))
   got <- dplyr::collect(q)
   expected <- ref_filter(ref_filter(data, a), b)
   expect_setequal(got$id, expected$id)
   expect_named(got, c("id", "area"))
   # geocode = FALSE: the box test alone
   q2 <- store_intersects(store_open(fx$st, "polygons"), a, exact = FALSE)
-  expect_snapshot(q2)
+  expect_snapshot(print(dplyr::arrange(q2, id)))
   expect_snapshot(loose <- dplyr::collect(q2))
   expect_true(all(ref_filter(fx$data[["polygons"]], a)$id %in% loose$id))
 })
@@ -545,7 +545,7 @@ test_that("(c) auto: invalid rows in the plane, valid rows on the sphere, no s2 
   }
   # the whole answer for a wide query against the per-row reference
   local_s2(TRUE)
-  wide <- sf::st_union(c(sq(-30, 6, -24, 9), sq(-27.6, 10.05, -27.4, 10.15)))
+  wide <- suppressMessages(sf::st_union(c(sq(-30, 6, -24, 9), sq(-27.6, 10.05, -27.4, 10.15))))
   geog <- s2::as_s2_geography(sf::st_as_binary(sf::st_geometry(data)), check = FALSE)
   valid <- s2::s2_is_valid(geog)
   sphere <- s2::s2_intersects(geog[valid], s2::as_s2_geography(sf::st_as_binary(wide)))
@@ -618,7 +618,7 @@ test_that("(g) projected data are tested in the plane of the data CRS whatever t
 
 test_that("exact_keep() follows the engine for geographic data", {
   g <- c(geo_sfc_of_wkt(geo_long_edge_wkt()), geo_sfc_of_wkt(geo_invalid_wkt()))
-  shape <- sf::st_union(c(engine_point(), engine_box()))
+  shape <- suppressMessages(sf::st_union(c(engine_point(), engine_box())))
   local_s2(FALSE)
   expect_identical(exact_keep(g, shape, "planar", TRUE), c(TRUE, TRUE, TRUE))
   expect_identical(exact_keep(g, shape, "s2", TRUE), c(FALSE, FALSE, FALSE))

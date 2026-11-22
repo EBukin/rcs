@@ -91,9 +91,16 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   tibble.
 #' @param version `NULL` for the current version, or the 16 hex characters of
 #'   an earlier version kept in the history.
-#' @param exact `TRUE` tests the candidate rows of a spatial filter exactly
-#'   with [sf::st_intersects()], under the session's [sf::sf_use_s2()]
-#'   setting.
+#' @param exact `TRUE` tests the candidate rows of a spatial filter exactly,
+#'   on the sphere or in the plane as `exact_engine` says.
+#' @param exact_engine How the exact test of a spatial filter reads the
+#'   geometries: `NULL` (the default) follows the geocoding engine the
+#'   dataset was written with (`"s2"`: on the sphere; `"planar"`: in the
+#'   plane; `"auto"`: on the sphere for rows valid on the sphere, in the
+#'   plane for the others), and the session's [sf::sf_use_s2()] setting for
+#'   a dataset written before the engine was recorded. `"s2"`, `"planar"`
+#'   or `"session"` override it. Data in a projected CRS are always tested
+#'   in the plane of that CRS. See [store_intersects()].
 #' @return A tibble; an `sf` object for geospatial data read with geometry;
 #'   a `terra::SpatRaster` for a raster.
 #' @seealso [store_open()] for lazy queries, [store_sample()],
@@ -121,12 +128,14 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #' store_read(st, "polygons", geometry = FALSE)
 #' unlink(location, recursive = TRUE)
 store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
-                       geometry = TRUE, version = NULL, exact = TRUE) {
+                       geometry = TRUE, version = NULL, exact = TRUE,
+                       exact_engine = NULL) {
   validate_store(st)
   local_trace("store_read")
   call <- rlang::current_env()
   check_flag(geometry)
   check_flag(exact)
+  check_exact_engine(exact_engine, call = call)
   quos <- rlang::enquos(...)
   columns <- rlang::enquo(columns)
   target <- read_target(st, dataset, version, call = call)
@@ -136,7 +145,8 @@ store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
       if (length(quos) > 0) "...",
       if (!rlang::quo_is_null(columns)) "columns",
       if (!missing(geometry)) "geometry",
-      if (!missing(exact)) "exact"
+      if (!missing(exact)) "exact",
+      if (!is.null(exact_engine)) "exact_engine"
     )
     if (length(given) > 0) {
       cli::cli_abort(
@@ -156,7 +166,7 @@ store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
   if (!is.null(intersects)) {
     plan <- spatial_plan(c(list(store = st), target[c("entry", "location", "files")]),
       intersects, exact,
-      call = call
+      call = call, exact_engine = exact_engine
     )
   }
   q <- query_new(st, target, quos = quos, plan = plan)
@@ -165,7 +175,10 @@ store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
     q <- query_filter(q, quos)
   }
   if (!is.null(intersects)) {
-    q <- query_intersects(q, intersects, exact, call = call, plan = plan)
+    q <- query_intersects(q, intersects, exact,
+      call = call, plan = plan,
+      exact_engine = exact_engine
+    )
   }
   keep_id <- FALSE
   if (!rlang::quo_is_null(columns)) {

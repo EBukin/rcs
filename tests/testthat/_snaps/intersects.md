@@ -83,7 +83,7 @@
 # store_intersects() combines with other verbs and with a second query
 
     Code
-      q
+      print(dplyr::arrange(q, id))
     Output
       <rcs_query> shapes/polygons (geospatial, current)
       Location: primary
@@ -94,7 +94,7 @@
 ---
 
     Code
-      q2
+      print(dplyr::arrange(q2, id))
     Output
       <rcs_query> polygons (geospatial, current)
       Location: primary
@@ -109,4 +109,54 @@
     Message
       i Spatial filter: `exact = FALSE`, so the result is the candidate set.
         It holds every intersecting row and may hold rows that do not intersect the query.
+
+# (e) an explicit exact_engine overrides the dataset's engine
+
+    Code
+      store_read(st, "eng/auto", intersects = engine_point(), exact_engine = "sphere")
+    Condition
+      Error in `store_read()`:
+      ! `exact_engine` must be `NULL` or one of "s2", "planar", and "session".
+      x It is "sphere".
+
+---
+
+    Code
+      store_intersects(store_open(st, "eng/auto"), engine_point(), exact_engine = NA)
+    Condition
+      Error in `store_intersects()`:
+      ! `exact_engine` must be `NULL` or one of "s2", "planar", and "session".
+      x It is `NA`.
+
+# (h) the query validity check follows the engine, and advises planar
+
+    Code
+      store_read(st, "eng/auto", intersects = dup)
+    Condition
+      Error in `store_read()`:
+      ! The query geometry is not valid on the sphere (s2).
+      x Loop 0: Edge 1 is degenerate (duplicate vertex).
+      i Repair it with `sf::st_make_valid()`.
+      i Or test in the plane with `exact_engine = "planar"`.
+
+---
+
+    Code
+      store_intersects(store_open(st, "eng/s2"), dup)
+    Condition
+      Error in `store_intersects()`:
+      ! The query geometry is not valid on the sphere (s2).
+      x Loop 0: Edge 1 is degenerate (duplicate vertex).
+      i Repair it with `sf::st_make_valid()`.
+      i Or test in the plane with `exact_engine = "planar"`.
+
+---
+
+    Code
+      store_read(st, "eng/old", intersects = dup)
+    Condition
+      Error in `store_read()`:
+      ! The query geometry is not valid on the sphere (s2).
+      x Loop 0: Edge 1 is degenerate (duplicate vertex).
+      i Repair it with `sf::st_make_valid()`.
 
