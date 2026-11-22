@@ -1,5 +1,5 @@
 # store_write() of a lazy table on a DuckDB connection (plan 0002, D36-D38,
-# D40): tests b, c and g of "Tests of V1 and V2".
+# D40): tests a to g of "Tests of V1 and V2".
 
 # Helpers -----------------------------------------------------------------------
 
