@@ -41,6 +41,15 @@
 #'   `geocode = FALSE`) and `bbox` (bounding box), and are sorted by `h3`.
 #'   Rows that cross H3 cells are listed in an index table
 #'   `<dataset>__h3`, written, replaced and removed with the dataset.
+#' * Prepared geospatial data ([rcs_geo_add()], or rows read back with
+#'   `collect()`) may hold these columns already: `.rcs_id` is dropped and
+#'   assigned again; `h3` and `bbox` must equal what the write computes
+#'   (else the write aborts naming the rows; prepare with the same
+#'   `geocode_engine`, or call [rcs_geo_strip()] first), and `h3_res`, when
+#'   not given, is taken from the cells. Columns `h3_p<r>` are written as
+#'   they are; with `partition = "h3"` one named as the chosen partition
+#'   column must hold the same cells, and then serves as it. Raw and
+#'   prepared data give the same version.
 #' * A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 #'   partitioned or updated.
 #'
