@@ -170,7 +170,7 @@ test_that("the SQL holds the index subquery only when spatial_use_cells() says s
       store_intersects(store_open(st, "polygons", engine = "duckdb"), queries[[name]])
     )
     expect_identical(grepl("polygons__h3", sql, fixed = TRUE), used[[name]], info = name)
-    expect_identical(grepl("h3 IN", sql, fixed = TRUE), used[[name]], info = name)
+    expect_identical(grepl('"h3" IN', sql, fixed = TRUE), used[[name]], info = name)
     # the box test, skipped for a query across the antimeridian
     expect_identical(grepl("bbox", sql, fixed = TRUE), name != "antimeridian", info = name)
   }
@@ -188,14 +188,16 @@ test_that("above 10,000 cells the cells go through a temporary table", {
   covering <- geo_covering(frame, entry$h3_res, entry$crs)
   expect_gt(length(covering$cells), 10000)
   expect_true(spatial_use_cells(covering))
-  q <- store_intersects(store_open(st, "polygons", engine = "duckdb"), frame)
-  sql <- dbplyr::sql_render(q)
-  expect_match(sql, "rcs_cells_", fixed = TRUE)
-  expect_false(grepl(as.character(covering$cells[[5000]]), sql, fixed = TRUE))
-  got <- dplyr::collect(q)
   want <- arrow_rows(st, "polygons", frame)
   expect_gt(nrow(want), 0)
-  expect_identical(got$id[order(got$id)], want$id)
+  for (mode in c("native", "arrow")) {
+    q <- store_intersects(store_open(st, "polygons", engine = "duckdb", mode = mode), frame)
+    sql <- dbplyr::sql_render(q)
+    expect_match(sql, "rcs_cells_", fixed = TRUE)
+    expect_false(grepl(as.character(covering$cells[[5000]]), sql, fixed = TRUE))
+    got <- dplyr::collect(q)
+    expect_identical(got$id[order(got$id)], want$id, info = mode)
+  }
 })
 
 test_that("several calls combine", {
@@ -279,7 +281,7 @@ test_that("an aggregate after a pending exact test informs about the candidate s
     store_intersects(q)
   withr::local_options(rcs.quiet = FALSE)
   expect_snapshot(n <- dplyr::collect(dplyr::count(x)))
-  candidates <- dplyr::collect(store_intersects(store_open(st, "polygons"), q, exact = FALSE))
   withr::local_options(rcs.quiet = TRUE)
+  candidates <- dplyr::collect(store_intersects(store_open(st, "polygons"), q, exact = FALSE))
   expect_equal(as.numeric(n$n), nrow(candidates))
 })

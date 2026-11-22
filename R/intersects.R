@@ -51,7 +51,13 @@
 #' The filter applies to the rows of the dataset, before the other verbs of
 #' the query. Several calls combine: a row must intersect every query.
 #'
-#' @param q A query made by [store_open()] on a geospatial dataset.
+#' On a DuckDB table (`store_open(engine = "duckdb")`) the candidate test is
+#' added to the table's SQL (`bbox`, and `h3` with the index view when the
+#' cell filter is used), so it needs those columns: call
+#' `store_intersects()` before a [dplyr::select()] that drops them.
+#'
+#' @param q A query made by [store_open()] on a geospatial dataset, with
+#'   either engine.
 #' @param y The query: an `sf`, `sfc` or `bbox` object with a coordinate
 #'   reference system (in any CRS; several geometries are combined), or H3
 #'   cells of any resolution as hex strings, `bit64::integer64` or `h3o`
@@ -67,7 +73,11 @@
 #' @param exact `TRUE` runs the exact test in `collect()`. `FALSE` returns
 #'   the candidate rows, a superset of the intersecting rows, with a
 #'   message saying so. The candidate set is also returned, with the same
-#'   message, when the geometry is not collected.
+#'   message, when the geometry is not collected. On a DuckDB table, `"sql"`
+#'   runs the exact test in DuckDB instead (`ST_Intersects()` of its
+#'   `spatial` extension, loaded and installed when needed, which needs the
+#'   network once): the query stays lazy, and the test is in the plane of
+#'   the coordinates, as `exact_engine = "planar"`, whatever `exact_engine`.
 #' @param exact_engine How the exact test reads the geometries. `NULL` (the
 #'   default) follows the geocoding engine the dataset was written with
 #'   (`geocode_engine` of [store_write()]): `"s2"` tests on the sphere (a
@@ -97,6 +107,9 @@
 #' unlink(location, recursive = TRUE)
 store_intersects <- function(q, y, exact = TRUE, exact_engine = NULL) {
   local_trace("store_intersects")
+  if (inherits(q, "rcs_duckdb_tbl")) {
+    return(duckdb_intersects(q, y, exact, exact_engine, call = rlang::current_env()))
+  }
   validate_query(q)
   check_flag(exact)
   call <- rlang::current_env()
