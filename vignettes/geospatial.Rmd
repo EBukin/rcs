@@ -72,7 +72,9 @@ polys
 
 An `sf` object is written like a table. The dataset's kind becomes
 `geospatial`, and its coordinate reference system (CRS) is kept in the
-catalog. Any CRS can be used.
+catalog. Any CRS can be used. The data are stored in their own CRS; only
+the H3 cells are computed on a copy in EPSG:4326 (see "Geocoding
+engines" below).
 
 ```{r, eval = has_h3o}
 store_write(st, polys, "shapes/polygons",
@@ -107,8 +109,14 @@ applies before it reads any geometry.
 
 A geometry that crosses the edge of its cell also lies in other cells. The
 *index table* `<dataset>__h3` lists every such row with every cell it
-touches. It is written, replaced and deleted with its dataset, and is
-hidden unless asked for:
+touches. It does not store the data twice: it holds no geometry and no
+attributes, only `.rcs_id`, the cells and the share of the row in each.
+It exists so that a query by cells finds a row in any cell it touches, not
+only in its main cell; this matters for thin or long queries, whose
+bounding box is much larger than the query. `store_duckdb()` exposes it
+as the view `<schema>.<name>__h3` (see `vignette("duckdb")`), and a write
+with `geocode = FALSE` makes none. It is written, replaced and deleted
+with its dataset, and is hidden unless asked for:
 
 ```{r, eval = has_h3o}
 print(st, index = TRUE)
@@ -454,7 +462,9 @@ version every time.
 exact test runs. By default (`NULL`) it follows the dataset's engine:
 `"s2"` on the sphere, `"planar"` in the plane, and `"auto"` on the sphere
 for candidate rows valid there and in the plane for the others, so that an
-invalid row never makes s2 fail. Datasets without a recorded engine
+invalid row never makes s2 fail. On the sphere (dataset engine `"s2"`, or
+`exact_engine = "s2"`), a row that is invalid there is first rebuilt by
+s2, as a write with engine `"s2"` does, and then tested. Datasets without a recorded engine
 (written before engines were recorded, or with `geocode = FALSE`) follow
 the session's `sf::sf_use_s2()`. `"s2"`, `"planar"` and `"session"`
 override it. Data in a projected CRS are always tested in the
