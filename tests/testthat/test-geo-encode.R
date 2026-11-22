@@ -19,7 +19,7 @@ test_that("geo_encode() returns the documented columns, types and order", {
   skip_if_no_h3()
   x <- small_polygons()
   out <- geo_encode(x)
-  expect_named(out, c("data", "index", "crs", "bbox"))
+  expect_named(out, c("data", "index", "crs", "bbox", "order", "rebuilt", "fallback"))
   data <- out$data
   expect_s3_class(data, "tbl_df")
   expect_false(inherits(data, "sf"))
@@ -330,4 +330,15 @@ test_that("geo_decode() gives the sfc that sf::st_as_sfc() gives from the WKB", 
     expected <- sf::st_as_sfc(structure(w, class = "WKB"), EWKB = FALSE, crs = crs)
     expect_identical(geo_wkb_to_sfc(w, crs), expected)
   }
+})
+
+test_that("geocode_engine and tol are checked", {
+  skip_if_no_h3()
+  x <- small_polygons()[1:3, ]
+  expect_error(geo_encode(x, geocode_engine = "sphere"), class = "rcs_error_argument")
+  expect_error(geo_encode(x, geocode_engine = NA_character_), class = "rcs_error_argument")
+  expect_error(geo_encode(x, tol = -1), class = "rcs_error_argument")
+  expect_error(geo_encode(x, tol = c(1, 2)), class = "rcs_error_argument")
+  expect_snapshot(geo_encode(x, geocode_engine = "sphere"), error = TRUE)
+  expect_snapshot(geo_encode(x, tol = -1), error = TRUE)
 })
