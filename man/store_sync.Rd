@@ -2,46 +2,95 @@
 % Please edit documentation in R/sync.R
 \name{store_sync}
 \alias{store_sync}
-\title{Bring secondary locations up to date}
+\title{Bring the locations of a store into step}
 \usage{
-store_sync(st, datasets = NULL, to = NULL, dry_run = FALSE)
+store_sync(
+  st,
+  datasets = NULL,
+  to = NULL,
+  from = NULL,
+  delete = FALSE,
+  force = FALSE,
+  dry_run = FALSE
+)
 }
 \arguments{
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}. It is updated in
 place.}
 
-\item{datasets}{\code{NULL} for every dataset of the primary, or names of
-datasets (full names, or last parts that are unique).}
+\item{datasets}{\code{NULL} for every dataset of the source, or names of
+datasets (full names, or last parts that are unique in the source).
+With \code{delete = TRUE} it restricts the deletions too, and a full name
+the source does not hold is accepted.}
 
-\item{to}{\code{NULL} for every secondary location, or the addresses of some
-of them.}
+\item{to}{\code{NULL} for every location other than the source, or the
+addresses of some of them.}
 
-\item{dry_run}{\code{TRUE} reports what would be copied and changes nothing.}
+\item{from}{\code{NULL} for the primary, or the address of the location to
+copy from.}
+
+\item{delete}{\code{TRUE} deletes from each target the datasets the source
+does not hold.}
+
+\item{force}{\code{TRUE} copies over versions that are newer in a target, and
+lets \code{delete = TRUE} delete datasets from the primary.}
+
+\item{dry_run}{\code{TRUE} reports what would be copied, deleted and found in
+conflict, and changes nothing.}
 }
 \value{
-A tibble, invisibly, one row per secondary location: \code{location},
-\code{status} (\code{"synced"}, \code{"same"} when nothing was missing, \code{"behind"}
-when it failed, \code{"unavailable"}, or \code{"to sync"} with \code{dry_run = TRUE}),
-\code{datasets} (a list column: the datasets copied, or to copy), \code{files}
-(files sent, or to send), \code{bytes} and \code{seconds}.
+A tibble, invisibly, one row per target location: \code{location},
+\code{status} (\code{"synced"}, \code{"same"} when nothing was copied or deleted,
+\code{"conflict"} when the target holds a newer version of a dataset,
+\code{"behind"} when it failed, \code{"unavailable"}, or \code{"to sync"} with
+\code{dry_run = TRUE}), the list columns \code{datasets} (copied, or to copy),
+\code{deleted} (deleted, or to delete), \code{kept} (not deleted from the primary
+without \code{force}) and \code{conflicts}, then \code{files} (files sent, or to send),
+\code{bytes} and \code{seconds}.
 }
 \description{
-Copies datasets from the primary location to the secondary ones: every
-dataset whose copy in a secondary is missing or differs from the
-primary's (another version, or another entry). Only the files the
-secondary lacks are sent, each verified by MD5; the catalogs of the
-secondary are switched last, so that its readers always see a complete
-version. A geospatial dataset's index table travels with it.
+Copies datasets from one location, the source (by default the primary),
+to the other locations of the connection: every dataset whose copy in a
+target is missing or differs from the source's (another version, or
+another entry). Only the files a target lacks are sent, each verified by
+MD5; the catalogs of a target are switched last, so that its readers
+always see a complete version. A geospatial dataset's index table
+travels with it.
 }
 \details{
-\code{store_sync()} never deletes a dataset: datasets found only in a secondary
-are left alone (see \code{\link[=store_status]{store_status()}}, status \code{"extra"}). Files of a
-version the secondary replaces are deleted when the dataset keeps no
-history, as in \code{\link[=store_write]{store_write()}}.
+With \code{from} set to a secondary location, work done there (for example
+through a connection whose primary was that location, while the primary
+could not be reached) is brought to the primary and to the other
+secondaries.
+}
+\section{Conflicts}{
 
-A secondary that fails is reported as behind with a warning, and the next
+When a target holds another version of a dataset and its entry was
+updated later than the source's, the dataset is not copied there: it is
+a conflict. Every other copy and deletion goes ahead; after the last
+target the call aborts with class \code{rcs_error_sync_conflict}, listing the
+conflicts, and the condition's field \code{result} holds the result tibble.
+\code{force = TRUE} copies the source over the newer version instead. Every
+version of a target that is replaced by another one is listed in one
+warning (class \code{rcs_warning_sync_overwrite}). The times compared are
+those of the machines that wrote; their clocks may differ.
+}
+
+\section{Deletions}{
+
+By default \code{store_sync()} never deletes a dataset: datasets found only in
+a target are left alone (see \code{\link[=store_status]{store_status()}}, status \code{"extra"}). With
+\code{delete = TRUE} they are deleted from that target, with their index table,
+after its copies, as \code{\link[=store_delete]{store_delete()}} does for one location (the history
+kept). The primary is a target only when \code{from} is a secondary; datasets
+are deleted there only with \code{force = TRUE}, and are otherwise reported in
+the result column \code{kept}. Files of a version a target replaces are
+deleted when the dataset keeps no history, as in \code{\link[=store_write]{store_write()}}.
+
+A target that fails is reported as behind with a warning, and the next
 one is synced; running the call again sends only what is still missing.
 }
+
 \examples{
 root <- file.path(tempdir(), "rcs-example-sync")
 store_create(file.path(root, "copy"))
@@ -58,6 +107,13 @@ st <- store_connect(file.path(root, "primary"),
 store_status(st)
 store_sync(st, dry_run = TRUE)
 store_sync(st)
+
+# Work done on the secondary alone, brought back to the primary
+offline <- store_connect(file.path(root, "copy"))
+store_write(offline, rcs_sim_table(50, seed = 2), "sales/weekly",
+  title = "Weekly sales", description = "Simulated weekly sales."
+)
+store_sync(st, from = file.path(root, "copy"))
 store_status(st)
 unlink(root, recursive = TRUE)
 }

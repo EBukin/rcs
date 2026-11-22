@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-2 done (2026-11-22)
+- **Status:** in execution; waves 0-3 done (2026-11-22)
 
 ## Goal
 
@@ -362,7 +362,7 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 3: S, S2, O2, O3 (three at a time, in this order)
 
-- [ ] **S. Sync in both directions.** D29, D42 (`rcs_error_sync_conflict`, `rcs_warning_sync_overwrite`); fact 22. Plan 0001: "Inspecting and maintaining", "Results of wave 4" (G).
+- [x] **S. Sync in both directions.** D29, D42 (`rcs_error_sync_conflict`, `rcs_warning_sync_overwrite`); fact 22. Plan 0001: "Inspecting and maintaining", "Results of wave 4" (G).
   - Owns: `R/sync.R`, `tests/testthat/test-sync.R`, `_snaps/sync.md`.
   - Tests first (three local locations; `expect_store_valid()` after every step):
     a. Delete on primary, `store_sync(delete = TRUE)` removes the dataset and its index table from both secondaries; without `delete` they stay and show `extra`.
@@ -375,20 +375,30 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
     h. At `full`: (a) and (b) with the test bucket as one secondary.
   - Acceptance: a–h pass; existing sync tests pass; whole suite at default passes.
 
-- [ ] **S2. Status against any location.** D29a.
+- [x] **S2. Status against any location.** D29a.
   - Owns: `R/inspect.R`, `tests/testthat/test-inspect.R`, `_snaps/inspect.md`.
   - Tests first: `store_status(from = <secondary>)` compares every other location with it; `newer` is `"source"` or `"target"`; the print names the source (snapshot); the default (`from = NULL`) gives the same table as before this package; the existing expectations on `"primary"`/`"secondary"` in `test-inspect.R` updated where the source changes.
   - Acceptance: all pass; whole suite at default passes.
 
-- [ ] **O2. H3 class in reads and writes.** D8 (read and write), fact 15. Plan 0001: "Types".
+- [x] **O2. H3 class in reads and writes.** D8 (read and write), fact 15. Plan 0001: "Types".
   - Owns: `R/query.R` (`rows_finish()` and the collect path only), `R/files.R` (`files_arrow_schema()`, `files_columns_spec()`, `restore_types()`), `R/read.R` (`store_h3_hex()` accepts `rcs_h3`), and the existing test files whose expectations change because cells come back as `rcs_h3`: `test-read.R`, `test-query.R`, `test-intersects.R`, `test-integration.R`, `test-check.R`, `test-files.R`, `test-random-operations.R`, `test-interop.R`, `test-write.R`, with their snapshots. Expectations are adjusted (compare `bit64::as.integer64()` values, or expect class `rcs_h3`), never weakened.
   - Tests first (new blocks in `test-read.R`/`test-files.R`): geospatial `collect()` gives `rcs_h3` for `h3` and `h3_p<r>`; index tables for `h3` and `h3_main`; a fixture written before this plan too; a plain table with an `integer64` column `h3` stays `integer64`; a user `rcs_h3` column written as `rcs_h3` and as `integer64` gives identical paths, MD5s and version (also as partition column), and reads back as `rcs_h3` / `integer64` respectively; the serialization check passes.
   - Acceptance: all pass; the whole suite at default passes with no expectation removed (verifier compares expectation counts with the wave 2 gate).
 
-- [ ] **O3. Restoring types.** D4, D5. Plan 0001: "Types".
+- [x] **O3. Restoring types.** D4, D5. Plan 0001: "Types".
   - Owns: new `R/types.R`, new `tests/testthat/test-types.R`, new `_snaps/types.md`.
   - Tests first: `store_restore_types()` on data read with `arrow::read_parquet()` from the dataset's files (storage types) restores factor (with unused levels), ordered, difftime (hours), `integer64` (small values that Arrow returns as integer), list; values outside the levels warn with the count; incompatible types unchanged; doubles above 2^53 not converted (warning); class of `x` kept for tibble, data frame, `sf`; H3 per `h3_classify()`; unknown dataset aborts `rcs_error_dataset_not_found`.
   - Acceptance: all pass; whole suite at default passes.
+
+#### Results of wave 3
+
+- All four packages passed verification at the first round; no decision contradicted.
+- S (`R/sync.R`): choices where D29 is silent, accepted by the verifier: the `rcs_warning_sync_overwrite` warning lists every target version replaced (newer source, equal `updated`, and conflicts copied with `force = TRUE`); a target where datasets were only kept gets status `same` with a `!` line and the footer "delete on primary needs force"; dry run status `to sync` or `same`; with `delete = TRUE`, `datasets` accepts a full name the source does not hold (so it can restrict deletions); after a failed copy that target's deletions are skipped and it is `behind` (a repeat completes them); the conflict test looks at the dataset's own entry only (an index table differing alone is copied). Changed snapshots: the `to = <primary>` abort ("`to` names the source location"), and the existing copy test now shows the overwrite warning. `location_arg()` and `current_location()` keep their signatures (S2 calls them).
+- S2 (`R/inspect.R`): `newer` is `"source"`/`"target"` also for the default (D29a); rows, statuses and versions of the default are as before; the print starts with `Source: <uri>`. The orchestrator restored escaped newlines in `print.rcs_status()` at the gate (literal line breaks in strings). `vignettes/locations.Rmd` still describes the old `newer` values (X2).
+- O2 (`R/query.R`, `R/files.R`, `R/read.R`): no existing expectation changed. `files_stage()` embeds per file a columns specification with `rcs_h3` written as `integer64` (D8 "not embedded per file"), so files, paths and version are identical; consequence: a catalog rebuilt from file metadata alone records such a user column as `integer64` (values intact, class lost). `files_columns_spec(cells_by_name = ".rcs_id" %in% names(data))`. An update whose column type differs only as `rcs_h3` against `integer64` aborts `rcs_error_schema` (existing "update keeps types" rule).
+- O3 (`R/types.R`): the new warnings carry no custom class (D42 lists none). The orchestrator fixed the sf block of the H3 test at the gate (it zeroed the cell values; it now keeps the bits and asserts them).
+- Gate: `document()` added `export(store_restore_types)`, `man/store_restore_types.Rd`, and updated `store_status.Rd`, `store_sync.Rd`, `store_h3_hex.Rd`. No non-ASCII in `R/`. Whole suite at default: 33 files, 12,531 expectations, 0 failed, 0 errors, 15 skipped. `devtools::check(cran = TRUE)`: 0/0/0.
+- For X2: `_pkgdown.yml` also lacks `store_restore_types`.
 
 ### Wave 4: Q, R, N2
 

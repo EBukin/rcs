@@ -8,7 +8,8 @@ store_h3_hex(x, columns = NULL)
 }
 \arguments{
 \item{x}{A data frame returned by a read (a tibble or an \code{sf} object), or
-a vector of cells (\code{bit64::integer64}, hex strings or \code{h3o} \code{H3}).}
+a vector of cells (\link{rcs_h3}, \code{bit64::integer64}, hex strings or \code{h3o}
+\code{H3}).}
 
 \item{columns}{For a data frame, the columns to convert (tidyselect);
 \code{NULL} converts the cell columns the package adds that are present:
@@ -21,7 +22,8 @@ number aborts: it cannot hold an H3 cell.
 }
 \description{
 Cells are stored as 64-bit integers (\code{bit64::integer64}), the compact form
-that Parquet filters and sorts fast. \code{store_h3_hex()} converts them to the
+that Parquet filters and sorts fast, and a read returns them as \link{rcs_h3}
+(\code{integer64} printed as hex). \code{store_h3_hex()} converts them to the
 15-character hex strings that other H3 tools use.
 }
 \examples{

@@ -3,50 +3,60 @@
 \name{store_status}
 \alias{store_status}
 \alias{print.rcs_status}
-\title{Compare the secondary locations with the primary}
+\title{Compare the locations of a connection with one of them}
 \usage{
-store_status(st)
+store_status(st, from = NULL)
 
 \method{print}{rcs_status}(x, ...)
 }
 \arguments{
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}.}
 
+\item{from}{\code{NULL} (the default) to compare every secondary location with
+the primary, or the address of a location of the connection (as given
+to \code{\link[=store_connect]{store_connect()}}) to compare every other location, the primary
+included, with that one.}
+
 \item{x}{The result of \code{store_status()}.}
 
 \item{...}{Passed on to the tibble's print method.}
 }
 \value{
-A tibble with one row per secondary location and dataset of the
-primary catalog (index tables included), plus one per dataset found
-only in a secondary, ordered by location (in connection order) and
-dataset:
+A tibble with one row per location other than the source and
+dataset of the source catalog (index tables included), plus one per
+dataset found only in that location, ordered by location (in
+connection order) and dataset:
 \itemize{
 \item \code{dataset}: the full name;
-\item \code{location}: the address of the secondary location;
+\item \code{location}: the address of the location compared with the source;
 \item \code{status}: \code{"same"}, \code{"differs"} (another version), \code{"missing"} (not
-in the secondary), \code{"extra"} (only in the secondary), or
-\code{"unavailable"} when the location could not be reached;
+in that location), \code{"extra"} (only in that location), or
+\code{"unavailable"} when it or the source could not be reached;
 \item \code{newer}: for \code{"differs"}, the side with the later \code{updated} time,
-\code{"primary"} or \code{"secondary"}; \code{NA} otherwise. A hint only: the clocks
-of the machines that wrote may differ;
+\code{"source"} or \code{"target"} (the location of the row); \code{NA} otherwise.
+A hint only: the clocks of the machines that wrote may differ;
 \item \code{primary_version}, \code{location_version}: the versions compared;
-\item \code{primary_updated}, \code{location_updated}: the times of the last writes.
+\code{primary_version} is the source's (the primary's by default);
+\item \code{primary_updated}, \code{location_updated}: the times of the last writes,
+\code{primary_updated} in the source.
 }
 
-Zero rows when the connection has no secondary location.
-\code{store_sync()} brings missing and differing datasets up to date.
+The attribute \code{source} holds the address of the source. Zero rows when
+the connection has no other location. \code{store_sync()} brings missing
+and differing datasets up to date.
 }
 \description{
-For each secondary location and each dataset, compares the catalogs held
-by the connection: a copy is the same when its version equals the
-primary's. No file is read and no location contacted; run
+For each location other than the source and each dataset, compares the
+catalogs held by the connection: a copy is the same when its version
+equals the source's. The source is the primary unless \code{from} names
+another location. No file is read and no location contacted; run
 \code{\link[=store_refresh]{store_refresh()}} first to compare what is stored now.
 }
 \details{
-Printed, the addresses are listed once above the table and the
-column \code{location} shows their numbers, so that long addresses stay
-readable; the values of the column are the full addresses.
+Printed, the source is named first; the addresses of the other
+locations are listed once above the table and the column \code{location}
+shows their numbers, so that long addresses stay readable; the values
+of the column are the full addresses.
 }
 \examples{
 root <- file.path(tempdir(), "rcs-example-status")
@@ -60,6 +70,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
   key = c("shop_id", "date", "product"), partition = "year"
 )
 store_status(st)
+store_status(st, from = file.path(root, "copy"))
 unlink(root, recursive = TRUE)
 }
 \seealso{

@@ -146,12 +146,13 @@ test_that("H3 cells by h3_classify(): geospatial datasets and index tables", {
 
   # sf class kept
   shapes <- store_read(fx$st, "shapes/polygons")
-  shapes$h3 <- bit64::as.integer64(unclass(shapes$h3))
+  cells <- shapes$h3
   class(shapes$h3) <- "integer64"
   got <- store_restore_types(shapes, fx$st, "shapes/polygons")
   expect_identical(class(got), class(shapes))
   expect_identical(attr(got, "sf_column"), attr(shapes, "sf_column"))
   expect_s3_class(got$h3, "rcs_h3")
+  expect_identical(unclass(got$h3), unclass(cells))
 })
 
 test_that("a column recorded as rcs_h3 becomes rcs_h3; a plain integer64 h3 stays", {
