@@ -62,8 +62,9 @@
 #' * `Version:` the first 8 characters of the version, current or earlier.
 #' * `Files:` the files kept of the dataset's files, `(pruned)` when a
 #'   filter on partition columns or a spatial filter dropped some.
-#' * `Spatial:` and `Filter:` the spatial filter and the row filter, when
-#'   set.
+#' * `Spatial:` the spatial filter, when set.
+#' * `Filter:` the row filter, or `(with spatial predicate)` when a spatial
+#'   filter is set.
 #'
 #' The footer says how many rows are not shown (`more rows` when the total is
 #' not known, `more rows may exist` while an exact spatial test is pending)

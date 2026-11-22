@@ -241,7 +241,8 @@ types of any data frame from a dataset's catalog entry.
 
 `store_intersects()` works on a table made by `store_open(engine =
 "duckdb")`. The candidate test is added to the table's SQL: the box test on
-`bbox` and, for thin or long queries, the H3 cells with the index view. The
+`bbox` and, for queries that fill little of their bounding box (a thin
+diagonal strip, a line), the H3 cells with the index view. The
 table must still hold those columns, so call it before a `select()` that
 drops them.
 
