@@ -361,6 +361,39 @@ test_that("an update of partition = \"h3\" beyond max_files re-partitions the da
   expect_true(all(as.numeric(rows$.rcs_id[rows$id %in% b$id]) > max_id))
 })
 
+test_that("a re-partitioning update that replaces every old file keeps the new rows", {
+  skip_if_no_h3()
+  s <- local_store()
+  old <- rcs_sim_points(40)
+  new <- rcs_sim_points(200, seed = 2)
+  write_points <- function(x, ...) {
+    suppressMessages(store_write(s$st, x, "points/sites",
+      title = "Points", description = "Simulated points.", ...
+    ))
+  }
+  write_points(old, partition = "h3", max_files = 10)
+  old_pv <- s$st$primary$files$partition_values
+  res_old <- as.integer(sub("^h3_p", "", s$st$primary$catalog$partition[[1]]))
+  parents <- vctrs::vec_unique(h3_parent(geo_encode(new, 5L)$data$h3, res_old))
+  new_pv <- vapply(seq_along(parents), function(i) partition_values_json(rlang::set_names(list(parents[i]), paste0("h3_p", res_old))), character(1))
+  # the precondition of the bug: every old partition is replaced
+  expect_true(all(old_pv %in% new_pv))
+
+  write_points(new, mode = "update", max_files = 3)
+  expect_store_valid(s$st)
+  expect_identical(as.numeric(s$st$primary$catalog$rows), 200)
+  rows <- stored_rows(s$st$primary, "points/sites")
+  # the union of the kept rows (none) and the new rows
+  row_text <- function(id, value, wkb) {
+    paste(id, value, vapply(wkb, function(g) paste(as.character(g), collapse = ""), character(1)))
+  }
+  new_wkb <- unclass(sf::st_as_binary(sf::st_geometry(new), EWKB = FALSE))
+  expect_setequal(
+    row_text(rows$id, rows$value, rows$geometry),
+    row_text(new$id, new$value, new_wkb)
+  )
+})
+
 # Geocoding engines (plan 0002, D30, D32) ----------------------------------------
 
 write_shapes <- function(st, x, mode = "create", ...) {
