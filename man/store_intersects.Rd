@@ -28,9 +28,12 @@ the candidate rows, a superset of the intersecting rows, with a
 message saying so. The candidate set is also returned, with the same
 message, when the geometry is not collected. On a DuckDB table, \code{"sql"}
 runs the exact test in DuckDB instead (\code{ST_Intersects()} of its
-\code{spatial} extension, loaded and installed when needed, which needs the
-network once): the query stays lazy, and the test is in the plane of
-the coordinates, as \code{exact_engine = "planar"}, whatever \code{exact_engine}.}
+\code{spatial} extension, installed and loaded when needed; the first
+installation downloads it): the query stays lazy, so the result can be
+aggregated or joined in DuckDB, and the test is in the plane of the
+coordinates whatever \code{exact_engine}. It returns the rows the Arrow
+engine returns with \code{exact_engine = "planar"}, except for queries
+across the antimeridian or around a pole.}
 
 \item{exact_engine}{How the exact test reads the geometries. \code{NULL} (the
 default) follows the geocoding engine the dataset was written with
@@ -64,9 +67,16 @@ The filter applies to the rows of the dataset, before the other verbs of
 the query. Several calls combine: a row must intersect every query.
 
 On a DuckDB table (\code{store_open(engine = "duckdb")}) the candidate test is
-added to the table's SQL (\code{bbox}, and \code{h3} with the index view when the
-cell filter is used), so it needs those columns: call
-\code{store_intersects()} before a \code{\link[dplyr:select]{dplyr::select()}} that drops them.
+added to the table's SQL: the box test on \code{bbox} and, when the cell
+filter is used, \code{h3} and the dataset's index view. The table must
+therefore still hold \code{bbox} and, for the cell filter, \code{h3} and \code{.rcs_id}
+(\code{geometry} too with \code{exact = "sql"}): call \code{store_intersects()} before a
+\code{\link[dplyr:select]{dplyr::select()}} that drops them.
+Above 10,000 cells, the cells go to a temporary table on the connection,
+kept until it is closed. With \code{exact = TRUE} the exact test runs in R in
+\code{collect()}, with the same engine and the same rows as on the Arrow
+engine; \code{exact = FALSE} gives the same candidate rows as on the Arrow
+engine. See \code{vignette("duckdb")}.
 }
 \examples{
 location <- file.path(tempdir(), "rcs-example-intersects")

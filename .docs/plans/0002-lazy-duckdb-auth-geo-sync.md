@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-8 done, X2 merged (2026-11-22)
+- **Status:** in execution; waves 0-10 done (2026-11-22)
 
 ## Goal
 
@@ -536,10 +536,17 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 9: X1
 
-- [ ] **X1. Documentation: README, getting started, DuckDB.** D1, D11–D20, D28, D36–D40, D44. Prototype: `dev/prototype/demo.R`.
+- [x] **X1. Documentation: README, getting started, DuckDB.** D1, D11–D20, D28, D36–D40, D44. Prototype: `dev/prototype/demo.R`.
   - Owns: `README.Rmd`, `README.md`, `vignettes/rcs.Rmd`, new `vignettes/duckdb.Rmd`, roxygen of `store_duckdb()`, `store_tables()`, `store_open()`, and the whole help of `store_write()` (DuckDB input and geocoding engines sections), `_pkgdown.yml` (articles: `duckdb`).
   - Content: `rcs.Rmd` leads with `store_open()` and its print; `duckdb.Rmd`: views, file database, `store_tables()`, reopening and its limits, spatial filter in DuckDB, writing from DuckDB, the local-first workflow (local store, DuckDB, write back, sync to a bucket later), credentials and the hourly refresh. Chunks needing `duckdb`/`dbplyr` carry `eval = requireNamespace(...)`; chunks needing `spatial`, `httpfs` or GCS are `eval = FALSE`; connections are closed.
   - Acceptance: `devtools::build_vignettes()` succeeds; check 0/0/0; a verifier reads the texts against the decisions (no contradiction).
+
+#### Results of wave 9
+
+- X1 passed at the first verification; no decision contradicted. The verifier rendered the vignettes and README, checked them for machine-specific values (none), ran `build_vignettes()`, `check_pkgdown()` and check 0/0/0 on a roxygenised copy, and spot-checked about fifteen statements by running code.
+- Two minor wording findings fixed by the orchestrator on the branch: the `Filter:` line of the `store_open()` print (shows `(with spatial predicate)` when a spatial filter is set, D2), and the cell rule in `duckdb.Rmd` (cells are used for queries that fill little of their bounding box, not for long ones).
+- `print.rcs_query` is now documented on the `store_open()` page (`@rdname store_open`); NAMESPACE unchanged.
+- Gate (main at 22af3ba): `document()` regenerated `store_duckdb.Rd`, `store_intersects.Rd`, `store_open.Rd`, `store_write.Rd`. No non-ASCII in `R/`. `pkgdown::check_pkgdown()`: no problems (the `duckdb` article now exists, closing the X2 note). Filtered tests (`query|preview|duckdb`): 7 files, 788 expectations, 0 failed, 1 skipped. `devtools::check(cran = TRUE, args = "--no-tests")`: 0/0/0.
 
 ### Wave 10: X2
 

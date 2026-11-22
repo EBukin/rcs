@@ -43,9 +43,17 @@ so that the datasets can be queried with SQL or with dbplyr. A view stores
 no data: DuckDB reads the Parquet files when a query runs, and only the
 columns and row groups the query needs. The file list comes from the
 catalog held by the connection \code{st}, so the views show the versions it
-knows: after \code{\link[=store_refresh]{store_refresh()}} call \code{store_duckdb()} again.
+knows: after \code{\link[=store_refresh]{store_refresh()}} call \code{store_duckdb()} again. One message
+names the views made.
 }
 \details{
+The views are queried with SQL (\code{DBI::dbGetQuery()}), with dbplyr
+(\code{dplyr::tbl(con, DBI::Id(schema = , table = ))}, or
+\code{store_open(st, dataset, engine = "duckdb", con = con)}, whose
+\code{collect()} restores the R types and the geometry and which takes
+\code{\link[=store_intersects]{store_intersects()}}), and can be joined with your own tables. A lazy
+table on the connection can be written back to the store with
+\code{\link[=store_write]{store_write()}}. \code{vignette("duckdb")} shows each step.
 \itemize{
 \item View names: the first part of the dataset name is the schema, the other
 parts joined with \verb{__} are the view; a one-part name goes to schema
@@ -56,17 +64,21 @@ or \code{system}) abort.
 \item \code{mode = "native"} (the default): DuckDB reads the files itself with
 \code{read_parquet()}, from the location a read would use. For locations on
 Google Cloud Storage a temporary DuckDB secret is created from the
-location's credential (see \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}}). Its access token is valid
-for about an hour: call \code{store_duckdb()} again to renew it. The
-\code{geometry} column of geospatial datasets is of DuckDB type \code{GEOMETRY}.
+location's credential (see \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}}); it lives only in this
+connection and holds an access token, valid for about an hour. After
+an hour of DuckDB work on a bucket, call \code{store_duckdb()} again: every
+call renews the secrets. The \code{geometry} column of geospatial datasets
+is of DuckDB type \code{GEOMETRY}, readable without the \code{spatial} extension.
 \item \code{mode = "arrow"}: the Arrow dataset the package opens for reads is
 registered in DuckDB and the view selects from it, so DuckDB needs no
 credential of its own; filters are pushed into the Arrow scan. The
-\code{geometry} column is WKB (\code{BLOB}).
+\code{geometry} column is WKB (\code{BLOB}). The registration lasts only as long
+as the connection: in a database file such views stop working once it
+is closed (see "Database files").
 \item \code{spatial = TRUE} installs and loads DuckDB's \code{spatial} extension and, in
 arrow mode, adds a column \code{geom} (\code{GEOMETRY}) to geospatial views.
-\item The macro \code{rcs_h3_hex(x)} turns H3 cells (\code{BIGINT}) into hex strings in
-SQL.
+\item H3 cells are \code{BIGINT} columns, read into R as \code{bit64::integer64}; the
+macro \code{rcs_h3_hex(x)} turns them into hex strings in SQL.
 }
 
 The connection records its views in the table \code{rcs.views} (\code{view},
@@ -93,11 +105,12 @@ and views are left untouched (a table or a view not made by
 without \code{st} reconnects to the store recorded in \code{rcs.store}, with default
 credentials, and refreshes the same way.
 
-A plain \code{DBI::dbConnect(duckdb::duckdb(dbdir = path))} also opens the
-file: your tables work, and native views work while their files exist,
-but they show the versions of the last refresh, views on Google Cloud
-Storage need a secret first, and views in arrow mode do not work until
-\code{store_duckdb()} is called again.
+A plain \code{DBI::dbConnect(duckdb::duckdb(dbdir = path), bigint = "integer64")} also opens the file: your tables work, and native views
+work while their files exist, but they show the versions of the last
+refresh (a later write may have deleted those files, unless the store
+keeps history), views on Google Cloud Storage need a secret first, and
+views in arrow mode do not work until \code{store_duckdb()} is called again.
+\code{\link[=store_tables]{store_tables()}} with \code{st} says which views are not current.
 }
 
 \examples{
@@ -116,5 +129,6 @@ unlink(root, recursive = TRUE)
 \dontshow{\}) # examplesIf}
 }
 \seealso{
-\code{\link[=store_tables]{store_tables()}}, \code{\link[=store_open]{store_open()}}.
+\code{\link[=store_tables]{store_tables()}}, \code{\link[=store_open]{store_open()}}, \code{\link[=store_intersects]{store_intersects()}},
+\code{\link[=store_write]{store_write()}}.
 }

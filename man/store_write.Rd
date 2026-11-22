@@ -51,23 +51,14 @@ by the H3 parent cell at the finest resolution that gives at most
 \item{h3_res}{H3 resolution of the geocodes, 0 to 15.}
 
 \item{geocode}{\code{FALSE} writes geospatial data without H3 cells and
-without index table; spatial reads then use bounding boxes only.}
+without index table (no engine is recorded); spatial reads then use
+bounding boxes only.}
 
-\item{geocode_engine}{How the H3 cells of geometries that cross cell
-edges are computed, recorded with the dataset:
-\itemize{
-\item \code{"auto"} (default): each such geometry is checked on the sphere; an
-invalid one (for example valid in the plane but with a duplicated
-vertex) is rebuilt by s2, and when the rebuilt copy does not keep its
-area (length for lines) it is geocoded in the plane instead.
-\item \code{"s2"}: on the sphere; invalid geometries are rebuilt by s2.
-\item \code{"planar"}: in the plane (slower).
-}
-
-Rebuilt geometries are used only for the cells; the stored geometry is
-unchanged. One warning names the rows rebuilt or geocoded in the plane.
-An update uses the stored engine (a different one aborts); a dataset
-written without one geocodes new rows with \code{"s2"}.}
+\item{geocode_engine}{\code{"auto"}, \code{"s2"} or \code{"planar"}: how the H3 cells of
+geometries that cross cell edges are computed (see "Geocoding
+engines"); recorded with the dataset. An update uses the stored engine
+(a different one aborts); a dataset written without one geocodes new
+rows with \code{"s2"}.}
 
 \item{max_files}{Most partition files.}
 
@@ -86,9 +77,10 @@ before anything is uploaded (see \code{\link[=store_check]{store_check()}}).}
 
 \item{rows_per_group}{Rows per Parquet row group.}
 
-\item{crs}{The coordinate reference system of the WKB column \code{geometry}
-of a lazy DuckDB table (anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, e.g. \code{4326});
-required for such a table, ignored otherwise.}
+\item{crs}{The coordinate reference system of the column \code{geometry} of
+a lazy DuckDB table (anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, e.g. \code{4326});
+required for such a table, ignored otherwise (an \code{sf} object carries
+its own).}
 }
 \value{
 A tibble with one row per location, invisibly: \code{location},
@@ -126,34 +118,86 @@ column must hold the same cells, and then serves as it. Raw and
 prepared data give the same version.
 \item A raster is written as one Cloud Optimized GeoTIFF; it cannot be
 partitioned or updated.
-\item A lazy table on a DuckDB connection is written as a \code{table} (see
-"DuckDB input").
+\item A lazy table on a DuckDB connection is a \code{table}, or \code{geospatial} when
+it has a column \code{geometry} (see "DuckDB input").
 }
 }
 
 \section{DuckDB input}{
 
-\code{x} may be a lazy table on a DuckDB connection (from \code{\link[dplyr:tbl]{dplyr::tbl()}} or
-\code{store_open(engine = "duckdb")}). Its query runs once inside DuckDB into a
-temporary copy, the table \verb{rcs_write_<random>} on the same connection,
-which every later step reads and which is dropped when the call ends,
-also after an error; the copy needs room in DuckDB's memory or its
-temporary folder. The key and the partitions are checked in DuckDB, and
-the rows are fetched in batches of \code{getOption("rcs.duckdb_batch_rows")}
-rows (default \code{5e5}), so that R holds about one batch at a time; a
-progress bar shows the batches unless \code{options(rcs.quiet = TRUE)}. The
-files equal those written from the same rows collected into R.
+\code{x} may be a lazy table on a DuckDB connection (from \code{\link[dplyr:tbl]{dplyr::tbl()}}, for
+example on a view of \code{\link[=store_duckdb]{store_duckdb()}}, or from
+\code{store_open(engine = "duckdb")}), so that a result computed in DuckDB is
+stored without being collected into R as a whole. Its query runs once
+inside DuckDB into a temporary copy, the table \verb{rcs_write_<random>} on
+the same connection, which every later step reads and which is dropped
+when the call ends, also after an error; the copy needs room in DuckDB's
+memory or its temporary folder. The key and the partitions are checked
+in DuckDB, and the rows are fetched in batches of
+\code{getOption("rcs.duckdb_batch_rows")} rows (default \code{5e5}), so that R
+holds about one batch at a time; a progress bar shows the batches unless
+\code{options(rcs.quiet = TRUE)}. DuckDB never uploads: the files are staged
+and land in every location as for any other write. The files equal those
+written from the same rows collected into R, so both give the same
+version.
 \itemize{
-\item Modes \code{"create"} and \code{"replace"} only; \code{"update"} aborts.
-\item Columns \code{.rcs_id}, \code{h3}, \code{bbox} and \code{geom} are the package's own and
-are dropped with a message.
+\item Modes \code{"create"} and \code{"replace"} only; \code{"update"} aborts (collect the
+rows and update from R, or write the whole dataset).
+\item Columns \code{.rcs_id}, \code{h3}, \code{bbox} and \code{geom} are the package's own: they
+are dropped with a message and computed again. Columns \verb{h3_p<r>} are
+user columns.
 \item Types: integer, double, \code{VARCHAR}, \code{DATE} and \code{BOOLEAN} are stored as
 they are; \code{BIGINT} is stored as 64-bit integers read back as
 \code{bit64::integer64}; \code{TIMESTAMP} is stored without time zone (its wall
 clock) and \verb{TIMESTAMP WITH TIME ZONE} in UTC. \code{HUGEINT}, \code{UHUGEINT},
-\code{INTERVAL}, \code{UNION} and \code{MAP} columns abort; cast them in the query.
+\code{INTERVAL}, \code{UNION} and \code{MAP} columns abort, naming them; cast them in
+the query. DuckDB's \code{sum()} of an integer column is a \code{HUGEINT}: write
+\code{as.integer(sum(x))} or \code{as.numeric(sum(x))} in dbplyr. Values keep
+their storage types: a factor read through a view is \code{VARCHAR} and is
+stored as text.
+\item Geospatial data: a column \code{geometry} holding WKB (\code{BLOB}, as in views
+in arrow mode) or of type \code{GEOMETRY} (as in native views) makes the
+dataset geospatial, and \code{crs} is then required. The geometries pass
+through R in batches: for each batch the bounding boxes, the H3 cells
+and the index rows are computed as for an \code{sf} object (with
+\code{geocode_engine}, and the warning of "Geocoding engines") and kept in
+the staging folder; the rows are then sorted by cell and written from
+DuckDB. \code{partition = "h3"} and \code{geocode = FALSE} work as for an \code{sf}
+object.
 \item Lazy tables on other databases abort: collect them first.
 }
+}
+
+\section{Geocoding engines}{
+
+A geospatial row whose geometry lies inside one H3 cell gets that cell.
+For a row that crosses cell edges, the package computes the cells it
+touches and the share of the row in each; \code{h3} is the cell of the largest
+share, and every touched cell goes to the index table. \code{geocode_engine}
+says how these cells are computed:
+\itemize{
+\item \code{"auto"} (the default): each such row is checked on the sphere (s2).
+A valid row is geocoded on the sphere. An invalid one (for example
+valid in the plane, but with a duplicated vertex or a spike that s2
+rejects) is rebuilt by s2; when the rebuilt copy is empty or does not
+keep its area (length for lines) within
+\code{getOption("rcs.s2_rebuild_tol")} (default \code{1e-3}), the row is geocoded
+in the plane instead.
+\item \code{"s2"}: on the sphere; invalid rows are rebuilt by s2 (geocoded in the
+plane when the rebuild fails).
+\item \code{"planar"}: every crossing row in the plane of the coordinates
+(slower).
+}
+
+Rows whose box spans 180 degrees of longitude or more are geocoded on the
+sphere with every engine. Rebuilt geometries are used only for the
+cells; the stored geometry is unchanged. One warning per write (class
+\code{rcs_warning_s2_rebuild}) counts the rows rebuilt and those geocoded in
+the plane, and names the first five of each by key (or \code{.rcs_id}). The
+engine is recorded with the dataset, and the exact test of
+\code{\link[=store_read]{store_read()}} and \code{\link[=store_intersects]{store_intersects()}} follows it by default
+(\code{exact_engine}). The same input always gives the same cells, shares and
+version. Data in a projected CRS are geocoded from a copy in EPSG:4326.
 }
 
 \section{Modes}{
@@ -236,5 +280,6 @@ st
 unlink(root, recursive = TRUE)
 }
 \seealso{
-\code{\link[=store_check]{store_check()}}, \code{\link[=store_history]{store_history()}}, \code{\link[=store_prune]{store_prune()}}.
+\code{\link[=store_check]{store_check()}}, \code{\link[=store_history]{store_history()}}, \code{\link[=store_prune]{store_prune()}},
+\code{\link[=rcs_geo_add]{rcs_geo_add()}}, \code{\link[=store_duckdb]{store_duckdb()}}.
 }

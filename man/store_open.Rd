@@ -2,6 +2,7 @@
 % Please edit documentation in R/query.R
 \name{store_open}
 \alias{store_open}
+\alias{print.rcs_query}
 \title{Open a dataset as a lazy query}
 \usage{
 store_open(
@@ -13,6 +14,8 @@ store_open(
   mode = "native",
   spatial = FALSE
 )
+
+\method{print}{rcs_query}(x, ..., n = NULL)
 }
 \arguments{
 \item{st}{A store connection made by \code{\link[=store_connect]{store_connect()}}.}
@@ -26,28 +29,43 @@ Only \code{NULL} with \code{engine = "duckdb"}.}
 
 \item{engine}{\code{"arrow"} (the default) for a lazy Arrow query of class
 \code{rcs_query}; \code{"duckdb"} for a dbplyr table on the dataset's DuckDB view
-(see \code{\link[=store_duckdb]{store_duckdb()}}), of class \code{rcs_duckdb_tbl}. Its \code{collect()}
-restores the R types and the geometry as for the Arrow engine; it
-needs the packages duckdb, DBI and dbplyr.}
+(see \code{\link[=store_duckdb]{store_duckdb()}} and \code{vignette("duckdb")}), of class
+\code{rcs_duckdb_tbl}. Every dbplyr verb works on it; its \code{collect()}
+restores the R types (factor levels, difftime units,
+\code{bit64::integer64}, \link{rcs_h3} cells) and the geometry as for the Arrow
+engine, and drops \code{.rcs_id}. It needs the packages duckdb, DBI and
+dbplyr.}
 
 \item{con}{With \code{engine = "duckdb"}: \code{NULL} for an in-memory connection
-that the package keeps, one per store, or a DuckDB connection made with
-\code{bigint = "integer64"}.}
+that the package keeps, one per store, until the end of the session; or
+a DuckDB connection made with \code{bigint = "integer64"}, on which the view
+is created (or refreshed) as by \code{store_duckdb(st, con = con)}.}
 
 \item{mode, spatial}{With \code{engine = "duckdb"}: as in \code{\link[=store_duckdb]{store_duckdb()}}.}
+
+\item{x}{A query made by \code{store_open()} with \code{engine = "arrow"}.}
+
+\item{...}{Passed to the tibble print method (for example \code{width}).}
+
+\item{n}{Number of rows to print; \code{NULL} uses the option \code{rcs.print_rows}
+(10).}
 }
 \value{
-A lazy query of class \code{rcs_query}. Print it to see the dataset,
-the files left after pruning and the columns.
+\code{store_open()}: a lazy query of class \code{rcs_query}, or with
+\code{engine = "duckdb"} a lazy dbplyr table of class \code{rcs_duckdb_tbl}.
+\code{print()}: \code{x}, invisibly.
 }
 \description{
-Builds a lazy query on one dataset of a store, from the files its catalog
-names (the folder is never listed). The query is transformed with the
-dplyr verbs \code{filter()}, \code{select()}, \code{mutate()}, \code{rename()}, \code{arrange()},
-\code{distinct()}, \code{head()}, and run with \code{collect()} (an R data frame),
-\code{compute()} (rows kept in memory as Arrow data), \code{pull()} or \code{glimpse()}.
-Arrow pushes filters and column selection into the scan, so only the
-needed files, row groups and columns are read.
+The usual way to work with a dataset: open it, describe the rows you want
+with dplyr verbs, and read them into R with \code{collect()}. Opening reads no
+data; the query is built from the files the dataset's catalog names (the
+folder is never listed). The query is transformed with the dplyr verbs
+\code{filter()}, \code{select()}, \code{mutate()}, \code{rename()}, \code{arrange()}, \code{distinct()},
+\code{head()}, and run with \code{collect()} (an R data frame), \code{compute()} (rows
+kept in memory as Arrow data), \code{pull()} or \code{glimpse()}. Arrow pushes
+filters and column selection into the scan, so only the needed files, row
+groups and columns are read. \code{\link[=store_read]{store_read()}} is the shortcut for
+\code{store_open()}, \code{filter()}, \code{select()} and \code{collect()} in one call.
 }
 \details{
 \itemize{
@@ -60,12 +78,41 @@ dataset whose geometry is read, with the catalog's coordinate reference
 system. It restores the R types Arrow does not restore by itself
 (difftime units, \code{bit64::integer64}, factor levels, plain list columns)
 and drops the row identifier \code{.rcs_id} that the package adds to
-geospatial data; the columns \code{h3}, \code{bbox} and \verb{h3_p<r>} are returned.
+geospatial data; the columns \code{h3}, \code{bbox} and \verb{h3_p<r>} are returned,
+the cells as \link{rcs_h3} vectors.
 }
 
 The query reads from the location chosen as for \code{\link[=store_read]{store_read()}}, with the
 catalogs held by the connection.
 }
+\section{Printing}{
+
+Printing a query reads its first rows, and only those: \code{head(n + 1)} of
+the query, the exact test of a spatial filter included, so that it can
+tell whether more rows exist without counting them. It opens the data
+files it needs. The first \code{n} rows are shown as a tibble under a header:
+\itemize{
+\item \verb{Dataset:} the full name, the number of rows and columns, and the kind.
+The number of rows comes from the catalog when the query is the dataset
+itself, with columns selected, renamed or computed; after a filter, a
+spatial filter or any other verb it is shown as \verb{??}. The number of
+columns is that of the data frame \code{collect()} returns.
+\item \verb{Location:} the location read (\code{primary} or \verb{secondary <n>}, local or
+GCS).
+\item \verb{Version:} the first 8 characters of the version, current or earlier.
+\item \verb{Files:} the files kept of the dataset's files, \code{(pruned)} when a
+filter on partition columns or a spatial filter dropped some.
+\item \verb{Spatial:} the spatial filter, when set.
+\item \verb{Filter:} the row filter, or \verb{(with spatial predicate)} when a spatial
+filter is set.
+}
+
+The footer says how many rows are not shown (\verb{more rows} when the total is
+not known, \verb{more rows may exist} while an exact spatial test is pending)
+and reminds that \code{collect()} reads the rows into R. A table opened with
+\code{engine = "duckdb"} prints as any dbplyr table.
+}
+
 \examples{
 location <- file.path(tempdir(), "rcs-example-open")
 st <- store_connect(location, create = TRUE)
@@ -75,6 +122,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 q <- store_open(st, "daily")
 q
+print(q, n = 3)
 q |>
   dplyr::filter(year == 2024, qty > 40) |>
   dplyr::select(shop_id, date, qty) |>
@@ -82,5 +130,6 @@ q |>
 unlink(location, recursive = TRUE)
 }
 \seealso{
-\code{\link[=store_read]{store_read()}}, \code{\link[=store_intersects]{store_intersects()}}.
+\code{\link[=store_read]{store_read()}}, \code{\link[=store_intersects]{store_intersects()}}, \link{rcs_query-dplyr},
+\code{\link[=store_duckdb]{store_duckdb()}}.
 }
