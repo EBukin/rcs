@@ -226,7 +226,7 @@ test_that("keys mixing case and NULL give the files of the collected data, in by
   con <- local_duckdb()
   x <- tibble::tibble(
     code = c("b", "B", "a", "A", NA, "c"),
-    grp = c("x", "Y", "y", "x", "Y", "y"),
+    grp = c("x", "Y", "z", "x", "Y", "z"), # distinct on case-insensitive file systems
     flag = c(TRUE, NA, FALSE, TRUE, FALSE, NA),
     day = as.Date(c("2024-01-02", NA, "2024-01-01", "2024-01-02", "2023-12-31", NA)),
     qty = 1:6

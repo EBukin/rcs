@@ -464,7 +464,7 @@ stage_full <- function(a) {
 # when it exceeds `rows_per_group * 100` rows.
 stage_index <- function(index, a, h3_res) {
   index <- index[c(".rcs_id", "h3", "h3_main", "share")]
-  index <- index[vctrs::vec_order(tibble::tibble(h3 = index$h3, id = index$.rcs_id)), ]
+  index <- index[order_radix(tibble::tibble(h3 = index$h3, id = index$.rcs_id)), ]
   large <- nrow(index) > a$rows_per_group * 100
   staged <- files_stage(
     index, index_name(a$dataset),
@@ -688,7 +688,7 @@ stage_update <- function(st, a) {
       vctrs::vec_rbind(old_data, new_data[names(old_data)])
     }
     order_cols <- c(list(h3 = all$h3), lapply(stats::setNames(key, key), function(k) all[[k]]), list(id = all$.rcs_id))
-    all <- all[vctrs::vec_order(tibble::new_tibble(order_cols, nrow = nrow(all)), na_value = "largest"), ]
+    all <- all[order_radix(tibble::new_tibble(order_cols, nrow = nrow(all))), ]
     staged <- stage(all, NULL, res_old - 1L)
     reference <- all
     cli::cli_inform(c(

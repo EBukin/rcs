@@ -243,7 +243,7 @@ check_supplied_partition <- function(supplied, parents, column, call) {
 partition_groups <- function(data, columns) {
   keys <- tibble::as_tibble(as.list(data)[columns])
   loc <- vctrs::vec_group_loc(keys)
-  loc$loc[vctrs::vec_order(loc$key)]
+  loc$loc[order_radix(loc$key)]
 }
 
 # Sorting ---------------------------------------------------------------------
@@ -262,7 +262,22 @@ sort_rows <- function(data, key = NULL) {
   if (length(key) == 0 || nrow(data) < 2) {
     return(data)
   }
-  data[vctrs::vec_order(tibble::as_tibble(as.list(data)[key])), , drop = FALSE]
+  data[order_radix(tibble::as_tibble(as.list(data)[key])), , drop = FALSE]
+}
+
+#' Row order of a data frame in byte order
+#'
+#' The order of the rows by the columns, left to right: characters by their
+#' bytes (C locale, as DuckDB `ORDER BY` on varchar), whatever the session's
+#' collation; `NA` last (`NULLS LAST`); ties in input order. Unlike
+#' `vctrs::vec_order()`, which collates characters by the session locale.
+#'
+#' @param data A data frame (or a vector).
+#' @return Integer row indices.
+#' @noRd
+order_radix <- function(data) {
+  rank <- vctrs::vec_rank(data, ties = "sequential", incomplete = "rank", na_value = "largest")
+  order(rank)
 }
 
 # Schema and columns ----------------------------------------------------------
