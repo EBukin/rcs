@@ -18,3 +18,4 @@
 ^\.Rproj\.user$
 ^.*\.Rcheck$
 ^.*\.tar\.gz$
+^vignettes/use-cases$

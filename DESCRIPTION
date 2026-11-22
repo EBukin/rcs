@@ -1,6 +1,6 @@
 Package: rcs
 Title: Catalog-First Cloud and Local Storage of Tabular and Geospatial Data
-Version: 0.0.0.9000
+Version: 0.0.0.9001
 Authors@R:
     person("Eduard", "Bukin", , "edwardbukin@gmail.com", role = c("aut", "cre", "cph"))
 Description: Stores tabular, geospatial vector and raster data in one store

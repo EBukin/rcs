@@ -9,7 +9,7 @@ secondary location. Works from the catalogs held by the connection."></head><bod
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -24,6 +24,7 @@ secondary location. Works from the catalogs held by the connection."></head><bod
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -116,19 +117,19 @@ the addresses: a named character vector with the names <code>primary</code> and
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 100 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-datasets/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.3s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-datasets/primary  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.6s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_datasets</span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 9</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   dataset  kind  title  rows bytes n_files partition version updated            </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;list&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dttm&gt;</span>             </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   100 <span style="text-decoration: underline;">23</span>722       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> bf16ef… 2026-11-22 <span style="color: #949494;">10:51:58</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   100 <span style="text-decoration: underline;">23</span>722       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> bf16ef… 2026-11-22 <span style="color: #949494;">16:32:53</span></span>
 <span class="r-in"><span><span class="fu">store_datasets</span><span class="op">(</span><span class="va">st</span>, pattern <span class="op">=</span> <span class="st">"^sales/"</span>, kind <span class="op">=</span> <span class="st">"table"</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 9</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   dataset  kind  title  rows bytes n_files partition version updated            </span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;list&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dttm&gt;</span>             </span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   100 <span style="text-decoration: underline;">23</span>722       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> bf16ef… 2026-11-22 <span style="color: #949494;">10:51:58</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   100 <span style="text-decoration: underline;">23</span>722       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> bf16ef… 2026-11-22 <span style="color: #949494;">16:32:53</span></span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

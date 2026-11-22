@@ -15,7 +15,7 @@ geospatial dataset's index table travels with it."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -30,6 +30,7 @@ geospatial dataset's index table travels with it."></head><body>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -119,15 +120,15 @@ history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="va">root</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span>, <span class="st">"rcs-example-copy"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="store_create.html">store_create</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy"</span><span class="op">)</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> Created an empty store in</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span>.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/copy</span>.</span>
 <span class="r-in"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="store_connect.html">store_connect</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"primary"</span><span class="op">)</span>, create <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="fu"><a href="store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="fu"><a href="rcs_sim_table.html">rcs_sim_table</a></span><span class="op">(</span><span class="fl">100</span>, seed <span class="op">=</span> <span class="fl">1</span><span class="op">)</span>, <span class="st">"sales/daily"</span>,</span></span>
 <span class="r-in"><span>  title <span class="op">=</span> <span class="st">"Daily sales"</span>, description <span class="op">=</span> <span class="st">"Simulated daily sales."</span>,</span></span>
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 100 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-copy/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/primary  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.4s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="store_connect.html">store_connect</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"primary"</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  secondary <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy"</span><span class="op">)</span></span></span>
@@ -136,13 +137,13 @@ history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
 <span class="r-in"><span>  from <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"primary"</span><span class="op">)</span>, to <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Copying <span style="color: #0000BB;">"sales/daily"</span> (version bf16efd1aebea856, 2 files) from</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/primary</span> to</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span>.</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2/2 files sent (23.7 kB) in 0.3s, MD5 verified. Catalogs of</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span> updated.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/primary</span> to</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/copy</span>.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2/2 files sent (23.7 kB) in 0.5s, MD5 verified. Catalogs of</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   <span style="color: #0000BB;">C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/copy</span> updated.</span>
 <span class="r-in"><span><span class="fu"><a href="store_status.html">store_status</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Source: /tmp/Rtmp/rcs-example-copy/primary</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> Locations: [1] /tmp/Rtmp/rcs-example-copy/copy</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Source: C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/primary</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> Locations: [1] C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-copy/copy</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 8</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   dataset     location status newer primary_version  location_version</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>           </span>

@@ -17,7 +17,7 @@ version."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -32,6 +32,7 @@ version."></head><body>
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -364,10 +365,10 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  2/2</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.3s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.5s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># The same data again: nothing is uploaded</span></span></span>
@@ -379,8 +380,8 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">"sales/daily"</span> is unchanged (version e39540d1414c4708): 200 rows in 2 files</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  unchanged</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     up</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  unchanged</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     up</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   to date</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> All 2 locations hold this version.</span>
 <span class="r-in"><span></span></span>
@@ -395,21 +396,21 @@ continues with the next location and reports the secondary as behind;
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> year = 2024: 97 rows -&gt; 97 rows</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.3s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  1/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     1/2</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Locations:</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   primary      local  /tmp/Rtmp/rcs-example-write/primary</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   secondary 1  local  /tmp/Rtmp/rcs-example-write/copy</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   primary      local  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   secondary 1  local  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> History: off (store default)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated           1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.8 kB      2  2026-11-22 10:52  =</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.8 kB      2  2026-11-22 16:33  =</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>

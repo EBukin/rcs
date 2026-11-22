@@ -11,7 +11,7 @@ script, or the environment of the session, decides which locations it has."></he
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -26,6 +26,7 @@ script, or the environment of the session, decides which locations it has."></he
   <ul class="dropdown-menu" aria-labelledby="dropdown-articles"><li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -157,18 +158,18 @@ to see what other sessions wrote since.</p>
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 100 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-connect  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-connect  2/2</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Locations:</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   primary  local  /tmp/Rtmp/rcs-example-connect</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   primary  local  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-connect</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> History: off (store default)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.7 kB      2  2026-11-22 10:51</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.7 kB      2  2026-11-22 16:32</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># The same, with the address in the environment</span></span></span>
 <span class="r-in"><span><span class="fu">withr</span><span class="fu">::</span><span class="fu"><a href="https://withr.r-lib.org/reference/with_envvar.html" class="external-link">with_envvar</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>STORE_PRIMARY <span class="op">=</span> <span class="va">primary</span><span class="op">)</span>, <span class="fu">store_connect</span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span></span>
