@@ -15,6 +15,7 @@ store_write(
   mode = c("create", "replace", "update"),
   h3_res = 5L,
   geocode = TRUE,
+  geocode_engine = c("auto", "s2", "planar"),
   max_files = 50L,
   history = NULL,
   source = NULL,
@@ -49,6 +50,22 @@ by the H3 parent cell at the finest resolution that gives at most
 
 \item{geocode}{\code{FALSE} writes geospatial data without H3 cells and
 without index table; spatial reads then use bounding boxes only.}
+
+\item{geocode_engine}{How the H3 cells of geometries that cross cell
+edges are computed, recorded with the dataset:
+\itemize{
+\item \code{"auto"} (default): each such geometry is checked on the sphere; an
+invalid one (for example valid in the plane but with a duplicated
+vertex) is rebuilt by s2, and when the rebuilt copy does not keep its
+area (length for lines) it is geocoded in the plane instead.
+\item \code{"s2"}: on the sphere; invalid geometries are rebuilt by s2.
+\item \code{"planar"}: in the plane (slower).
+}
+
+Rebuilt geometries are used only for the cells; the stored geometry is
+unchanged. One warning names the rows rebuilt or geocoded in the plane.
+An update uses the stored engine (a different one aborts); a dataset
+written without one geocodes new rows with \code{"s2"}.}
 
 \item{max_files}{Most partition files.}
 
@@ -110,8 +127,9 @@ partitions are kept; new values add partitions. The columns and their
 types must equal the stored ones, and the key must stay unique across
 the whole dataset. A message lists every replaced partition with its old
 and new number of rows: rows of a replaced partition that are missing
-from \code{x} disappear. In this mode \code{key}, \code{partition}, \code{h3_res} and
-\code{geocode} come from the stored dataset; arguments that disagree abort.
+from \code{x} disappear. In this mode \code{key}, \code{partition}, \code{h3_res},
+\code{geocode} and \code{geocode_engine} come from the stored dataset; arguments
+that disagree abort.
 With \code{partition = "h3"}, an update that would need more than
 \code{max_files} files re-partitions the whole dataset at a coarser H3
 resolution.

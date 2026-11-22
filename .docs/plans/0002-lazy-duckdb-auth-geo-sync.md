@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-21
 - **Author:** Eduard Bukin
-- **Status:** in execution; waves 0-1 done (2026-11-21)
+- **Status:** in execution; waves 0-2 done (2026-11-22)
 
 ## Goal
 
@@ -328,20 +328,37 @@ At most 3 implementers at once; a wave with more packages runs them in the liste
 
 ### Wave 2: N1b, O1, P2
 
-- [ ] **N1b. Geocoding engines: write wiring.** D30 (argument and update rules), D32. Plan 0001: "Writing".
+- [x] **N1b. Geocoding engines: write wiring.** D30 (argument and update rules), D32. Plan 0001: "Writing".
   - Owns: `R/write.R`, `R/check.R` (`serialization_reference()` passes `entry$geocode_engine`, `NA` → `"s2"`), `tests/testthat/test-write.R`, `_snaps/write.md`.
   - Tests first: (k) `store_check(st, d, x)` passes for keyless `sf` datasets written with each engine; (d) 10,000 valid rows plus the two polygons of fact 18 repeated 25 times each (shifted by whole degrees of longitude inside the simulation box), `partition = "h3"`: every row in exactly one partition, no `NA` `h3` except empty geometries, index shares per row sum to 1 (±1e-6), `store_check()` passes, `rcs_warning_s2_rebuild` names the first five keys; (e) same data twice → same version; (h) `update` rules of D30 (other engine aborts; `NA` entry: new rows per `"s2"`, explicit argument aborts); `geocode = FALSE` stores `NA`; (i) snapshot of the warning; (j) a store read back with `store_read(intersects = <cell of a rebuilt row>)` returns the row. Level `default` for the 10,000-row test.
   - Acceptance: all pass; whole suite at default passes.
 
-- [ ] **O1. H3 cell class.** D7, D9, D10 (macro text only, used by T1), D8 (`h3_classify()` only); facts 15, 16. Prototype: `dev/prototype/h3.R`.
+- [x] **O1. H3 cell class.** D7, D9, D10 (macro text only, used by T1), D8 (`h3_classify()` only); facts 15, 16. Prototype: `dev/prototype/h3.R`.
   - Owns: new `R/h3-type.R`, new `tests/testthat/test-h3-type.R`, new `_snaps/h3-type.md`.
   - Tests first: print and format (vector, tibble, `sf`), `"<invalid>"` and `NA`, never aborting on any 64-bit value; `[`, `[[`, `[<-`, `c`, `rep`, `unique`, `sort`, `rev` keep the class; `dplyr::filter()`, `arrange()`, `left_join()` (with `rcs_h3` and with `integer64` keys), `bind_rows()` keep values and give `rcs_h3`; `as.character()` gives decimals equal to `as.character(bit64::as.integer64(x))`; `rcs_h3_hex()` for every input form, the double warning and the abort; `h3_classify()` rules of D8 including a plain table with an `integer64` column named `h3` (not classed).
   - Acceptance: all pass; whole suite at default passes.
 
-- [ ] **P2. Credentials: GDAL, DuckDB secret, check.** D22 (DuckDB part), D23, D24; fact 13. Prototype: `dev/prototype/auth.R`.
+- [x] **P2. Credentials: GDAL, DuckDB secret, check.** D22 (DuckDB part), D23, D24; fact 13. Prototype: `dev/prototype/auth.R`.
   - Owns: `R/auth.R`, `R/backend-gcs.R` (`be_gdal_path()` only), `tests/testthat/test-auth.R` (new blocks), `tests/testthat/test-raster.R` (its GCS block: drop the skip on `GOOGLE_APPLICATION_CREDENTIALS`), `_snaps/auth.md`.
   - Tests first: (a) offline, `gdal_config()` mocked: options per credential type, clearing, silent token update for the same credential, one warning on a switch; (b) `auth_duckdb_secret()` offline with `duckdb_exec()` mocked: statement shape, scope `gs://bucket/prefix`, `TEMPORARY`, and when the mock throws a message holding the token the re-abort does not contain it; the real creation is tested only in (d); (c) `store_auth_check()` on a local store; (d) at `full`: a store on the test bucket with a table and `rcs_sim_raster(nrow = 50, ncol = 50)`: `store_auth_check()` all `ok`; the raster read and a value computed twice; `test-raster.R` GCS block passes without `GOOGLE_APPLICATION_CREDENTIALS`; no environment variable changed; prefix removed.
   - Acceptance: a–d pass; whole suite at default passes.
+
+#### Results of wave 2
+
+- All three packages needed one fixer round; all passed re-verification. No decision contradicted.
+- O1 (`R/h3-type.R`):
+  - First verification failed: `vec_proxy()` returning `unclass(x)` made vctrs fill missing values with `NA_real_` bits (`vec_slice(x, NA)`, `vec_init()`, `lag()`, unmatched join rows, `bind_rows()` fills gave `<invalid>`), and bit64's `is.na()`/`is.finite()` kept class `rcs_h3` on the logical result. Fix (orchestrator): `vec_restore.rcs_h3()` maps every element whose double reading is `NA`/`NaN` to `NA_integer64_` (never a valid cell; a non-cell `rcs_h3` value with NaN bits, such as integer64 `-1`, becomes `NA` after a vctrs operation); `is.na`, `is.finite`, `is.infinite` methods for `rcs_h3` added to D7's list, returning plain logicals.
+  - Pre-existing bug fixed in `R/geo-h3.R` (ownership granted for `int64_halves()` and dependent lines): a valid cell whose low 32 bits are `0x80000000` (resolution 11 and finer, e.g. `8f2834780000000`) gave malformed hex.
+  - Tooling fact: under `load_all()`, S3 methods called from inside base, pillar, vctrs or dplyr are found only through NAMESPACE; agents test such methods in a roxygenised copy of their worktree (never committing NAMESPACE).
+  - `h3_duckdb_macro_sql()` holds the D10 macro text for T1.
+- N1b (`R/write.R`, `R/check.R`):
+  - The D32 warning is raised before the upload lines, but R defers warnings at top level; fix: `warn_s2_rebuild()` sets `warn = 1` locally when `getOption("warn") < 1` (so it also shows when a user set `warn = -1`; `warn = 2` still errors; still catchable by class).
+  - Test (j) reads under `sf_use_s2(FALSE)`: the stored rebuilt geometries are still invalid on the sphere and the session-rule exact test errors on them; N2 covers it with the per-dataset exact engine.
+  - An explicit engine on update of a dataset stored with `NA` aborts for geospatial datasets only (tables ignore `geocode_engine`, as `h3_res`); a `geocode = FALSE` dataset gets its own abort wording. The warning is raised also when the write turns out unchanged.
+  - Test (d): the simulation box allows only 5 whole-degree shifts, so the 25 copies of each polygon use 5 shifts of 5 copies.
+- P2 (`R/auth.R`): first verification failed because the `test-raster.R` GCS test left real `GS_OAUTH2_*` values in GDAL; it now saves and restores the five options and the package's record of the GDAL credential. Choices: `note = "ok"` on success; ambient credentials give `ok = NA` "not supported for ambient credentials" for gdal and duckdb, and `auth_duckdb_secret()` aborts `rcs_error_backend` for them; no `LOAD httpfs` (DuckDB autoloads it for `TYPE gcs`); a missing `terra` gives `ok = NA` with a note.
+- Gate: `pillar` added to Imports (D43). `document()` added `export(rcs_h3_hex)`, `export(store_auth_check)`, the `rcs_h3` methods, `man/rcs_h3.Rd`, `man/rcs_h3_hex.Rd`, `man/store_auth_check.Rd`, and `geocode_engine` in `man/store_write.Rd`. No non-ASCII in `R/`. Whole suite at default: 32 files, 12,216 expectations, 0 failed, 0 errors, 14 skipped. `devtools::check(cran = TRUE)`: 0/0/0.
+- For X2: `_pkgdown.yml` does not yet list `rcs_auth_gcs`, `store_auth_check`, `rcs_h3`, `rcs_h3_hex`.
 
 ### Wave 3: S, S2, O2, O3 (three at a time, in this order)
 

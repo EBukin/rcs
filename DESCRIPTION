@@ -21,6 +21,7 @@ Imports:
     digest,
     dplyr,
     jsonlite,
+    pillar,
     rlang,
     s2,
     sf,
