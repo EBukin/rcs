@@ -3,7 +3,7 @@
 
 # A local store with a secondary: a one-file table (`summary`, view
 # `main.summary`), a table partitioned by year (`sales/daily`), and a
-# geospatial dataset partitioned by "h3" with an empty geometry (so an
+# geospatial dataset partitioned by "h3" with empty geometries (so an
 # `h3_p<r>=null` partition) and its index table.
 duckdb_test_store <- function(frame = parent.frame()) {
   skip_if_not_installed("duckdb")
@@ -169,7 +169,9 @@ test_that("native views have the Arrow column types and the same rows as store_o
   poly <- DBI::dbGetQuery(con, 'SELECT h3, h3_p1, rcs_h3_hex(h3) AS hex FROM "shapes"."polygons" ORDER BY id')
   expect_s3_class(poly$h3_p1, "integer64")
   expect_identical(poly$hex, rcs_h3_hex(poly$h3))
-  expect_identical(sum(is.na(poly$h3_p1)), 1L)
+  empties <- sum(sf::st_is_empty(dplyr::collect(store_open(st, "shapes/polygons"))))
+  expect_gte(empties, 1L)
+  expect_identical(sum(is.na(poly$h3_p1)), empties)
 })
 
 # (c) ----------------------------------------------------------------------------
@@ -416,7 +418,8 @@ test_that("spatial = TRUE adds geom to geospatial views in arrow mode", {
   expect_false("geom" %in% DBI::dbGetQuery(con, 'DESCRIBE "sales"."daily"')$column_name)
   expect_false("geom" %in% DBI::dbGetQuery(con, 'DESCRIBE "shapes"."polygons__h3"')$column_name)
   got <- DBI::dbGetQuery(con, 'SELECT count(*) AS n FROM "shapes"."polygons" WHERE ST_IsEmpty(geom)')
-  expect_equal(as.numeric(got$n), 1)
+  empties <- sum(sf::st_is_empty(dplyr::collect(store_open(st, "shapes/polygons"))))
+  expect_equal(as.numeric(got$n), empties)
 
   # Native views carry GEOMETRY already; spatial adds no column.
   con_native <- local_duckdb_spatial()
