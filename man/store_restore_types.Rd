@@ -48,6 +48,10 @@ geospatial datasets and index tables, and every column recorded as
 Other columns are left unchanged, silently. Columns are matched by name
 only: a computed column that reuses the name of a source column is
 restored as that column.
+
+\code{collect()} of a query from \code{\link[=store_open]{store_open()}}, with either engine, already
+restores the types; this function is for data that reached R another
+way, such as a DuckDB query of your own on the views of \code{\link[=store_duckdb]{store_duckdb()}}.
 }
 \examples{
 root <- file.path(tempdir(), "rcs-example-restore-types")
@@ -63,4 +67,7 @@ class(raw$wait)
 restored <- store_restore_types(raw, st, "sales/daily")
 class(restored$wait)
 unlink(root, recursive = TRUE)
+}
+\seealso{
+\code{\link[=store_describe]{store_describe()}} for the recorded types (\code{r_type}), \link{rcs_h3}.
 }

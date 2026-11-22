@@ -307,7 +307,8 @@ test alone selects the rows, and the index table is not read.
 `geocode = FALSE` writes the geometries with their `bbox` only: no `h3`
 column and no index table, so writing skips the geocoding. A spatial read
 then filters by bounding boxes alone: as fast for compact queries, slower
-for queries much smaller than their box, and always complete. `partition = "h3"` cannot be combined with it.
+for queries much smaller than their box, and always complete.
+`partition = "h3"` cannot be combined with it.
 
 ```{r, eval = has_h3o}
 store_write(st, polys, "shapes/polygons_boxes",

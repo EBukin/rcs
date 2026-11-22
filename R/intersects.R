@@ -84,7 +84,8 @@
 #'   row invalid on the sphere is first rebuilt by s2, as the write did),
 #'   `"planar"` in the plane of the coordinates, `"auto"` on the sphere for
 #'   rows valid on the sphere and in the plane for the others; a dataset
-#'   written before the engine was recorded follows the session's
+#'   with no recorded engine (written before engines were recorded, or
+#'   with `geocode = FALSE`) follows the session's
 #'   [sf::sf_use_s2()] setting. `"s2"`, `"planar"` or `"session"` (the
 #'   [sf::sf_use_s2()] setting) override the dataset's engine. Data in a
 #'   projected CRS are always tested in the plane of that CRS.

@@ -66,10 +66,11 @@ secondaries.
 \section{Conflicts}{
 
 When a target holds another version of a dataset and its entry was
-updated later than the source's, the dataset is not copied there: it is
-a conflict. Every other copy and deletion goes ahead; after the last
-target the call aborts with class \code{rcs_error_sync_conflict}, listing the
-conflicts, and the condition's field \code{result} holds the result tibble.
+updated later than the source's (the times recorded in the catalogs),
+the dataset is not copied there: it is a conflict. Every other copy and
+deletion goes ahead; after the last target the call aborts with class
+\code{rcs_error_sync_conflict}, listing the conflicts, and the condition's
+field \code{result} holds the result tibble.
 \code{force = TRUE} copies the source over the newer version instead. Every
 version of a target that is replaced by another one is listed in one
 warning (class \code{rcs_warning_sync_overwrite}). The times compared are
@@ -119,5 +120,6 @@ unlink(root, recursive = TRUE)
 }
 \seealso{
 \code{\link[=store_status]{store_status()}} to compare the locations, \code{\link[=store_copy]{store_copy()}} for one
-dataset between any two locations.
+dataset between any two locations; \code{vignette("locations")} for syncs
+from a secondary, conflicts and deletions.
 }

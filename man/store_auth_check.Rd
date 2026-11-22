@@ -40,5 +40,5 @@ unlink(primary, recursive = TRUE)
 }
 \seealso{
 \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}} for the credentials and \code{\link[=store_connect]{store_connect()}} to
-pass them.
+pass them; \code{vignette("locations")}.
 }

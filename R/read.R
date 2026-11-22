@@ -98,8 +98,9 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   dataset was written with (`"s2"`: on the sphere; `"planar"`: in the
 #'   plane; `"auto"`: on the sphere for rows valid on the sphere, in the
 #'   plane for the others), and the session's [sf::sf_use_s2()] setting for
-#'   a dataset written before the engine was recorded. `"s2"`, `"planar"`
-#'   or `"session"` override it. Data in a projected CRS are always tested
+#'   a dataset with no recorded engine (written before engines were
+#'   recorded, or with `geocode = FALSE`). `"s2"`, `"planar"` or
+#'   `"session"` override it. Data in a projected CRS are always tested
 #'   in the plane of that CRS. See [store_intersects()].
 #' @return A tibble; an `sf` object for geospatial data read with geometry;
 #'   a `terra::SpatRaster` for a raster.

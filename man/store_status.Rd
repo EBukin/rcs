@@ -74,5 +74,5 @@ store_status(st, from = file.path(root, "copy"))
 unlink(root, recursive = TRUE)
 }
 \seealso{
-\code{\link[=store_datasets]{store_datasets()}}, \code{\link[=store_refresh]{store_refresh()}}.
+\code{\link[=store_datasets]{store_datasets()}}, \code{\link[=store_refresh]{store_refresh()}}, \code{\link[=store_sync]{store_sync()}}.
 }

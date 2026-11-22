@@ -22,6 +22,13 @@ valid cell as \verb{<invalid>}; they never fail.
 \item A column of class \code{rcs_h3} is stored as a 64-bit integer, like an
 \code{integer64} column; \code{class(x) <- "integer64"} or \code{bit64::as.integer64()}
 drops the class.
+\item Inside DuckDB cells stay 64-bit integers (\code{BIGINT}); the SQL macro
+\code{rcs_h3_hex()} of connections prepared by \code{\link[=store_duckdb]{store_duckdb()}} gives their
+hex strings. \code{collect()} of a table opened with
+\code{store_open(engine = "duckdb")} gives \code{rcs_h3} again; a
+\code{dplyr::tbl()} on a view of \code{\link[=store_duckdb]{store_duckdb()}} is collected by dbplyr and
+does not. Data read by other tools, or by such a \code{tbl()}, get the class
+back with \code{\link[=store_restore_types]{store_restore_types()}}.
 }
 }
 \examples{
@@ -29,5 +36,6 @@ cells <- bit64::as.integer64(c("599686042433355775", "599686030622195711"))
 rcs_h3_hex(cells)
 }
 \seealso{
-\code{\link[=rcs_h3_hex]{rcs_h3_hex()}}, \code{\link[=store_h3_hex]{store_h3_hex()}}.
+\code{\link[=rcs_h3_hex]{rcs_h3_hex()}}, \code{\link[=store_h3_hex]{store_h3_hex()}}, \code{\link[=store_restore_types]{store_restore_types()}};
+\code{vignette("geospatial")}.
 }

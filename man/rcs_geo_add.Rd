@@ -85,6 +85,27 @@ with \code{collect()} goes back to the form it was written from.
 Geometries invalid on the sphere are handled as in \code{\link[=store_write]{store_write()}} (see
 its argument \code{geocode_engine}); one warning names their row numbers.
 }
+\section{Prepared writes}{
+
+\code{\link[=store_write]{store_write()}} accepts the result of \code{rcs_geo_add()}: it drops
+\code{.rcs_id}, computes \code{h3} and \code{bbox} itself and compares them with the
+supplied ones. Equal values are accepted silently, so that raw and
+prepared writes of the same data give the same version; different
+values abort (class \code{rcs_error_prepared}) naming the first rows and the
+engine of the write. \code{h3_res} is taken from the supplied cells when the
+write does not give it. The \verb{h3_p<r>} columns are stored as user
+columns; with \code{partition = "h3"}, one equal to the partition column the
+write chooses serves as it.
+}
+
+\section{Round trip}{
+
+For \code{store_write(st, rcs_geo_add(raw), dataset, key = k)},
+\code{rcs_geo_strip(collect(store_open(st, dataset)))} ordered by \code{k} equals
+\code{raw} ordered by \code{k}: the same attributes, identical WKB geometries and
+the same CRS.
+}
+
 \examples{
 \dontshow{if (rlang::is_installed("h3o")) withAutoprint(\{ # examplesIf}
 raw <- rcs_sim_polygons(20, seed = 1)
@@ -98,5 +119,6 @@ identical(rcs_geo_strip(prepared), raw)
 \dontshow{\}) # examplesIf}
 }
 \seealso{
-\code{\link[=store_write]{store_write()}}, which accepts prepared data and checks them.
+\code{\link[=store_write]{store_write()}}, which accepts prepared data and checks them;
+\code{vignette("geospatial")}.
 }

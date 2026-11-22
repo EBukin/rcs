@@ -49,8 +49,9 @@ geometries: \code{NULL} (the default) follows the geocoding engine the
 dataset was written with (\code{"s2"}: on the sphere; \code{"planar"}: in the
 plane; \code{"auto"}: on the sphere for rows valid on the sphere, in the
 plane for the others), and the session's \code{\link[sf:sf_use_s2]{sf::sf_use_s2()}} setting for
-a dataset written before the engine was recorded. \code{"s2"}, \code{"planar"}
-or \code{"session"} override it. Data in a projected CRS are always tested
+a dataset with no recorded engine (written before engines were
+recorded, or with \code{geocode = FALSE}). \code{"s2"}, \code{"planar"} or
+\code{"session"} override it. Data in a projected CRS are always tested
 in the plane of that CRS. See \code{\link[=store_intersects]{store_intersects()}}.}
 }
 \value{
