@@ -175,8 +175,7 @@ print.rcs_status <- function(x, ...) {
   attr(shown, "source") <- NULL
   source <- attr(x, "source", exact = TRUE)
   if (is.character(source) && length(source) == 1) {
-    cat("Source: ", source, "
-", sep = "")
+    cat("Source: ", source, "\n", sep = "")
   }
   if (nrow(x) == 0 || !"location" %in% names(x) || !is.character(x$location)) {
     print(shown, ...)
@@ -184,9 +183,7 @@ print.rcs_status <- function(x, ...) {
   }
   uris <- unique(x$location[!is.na(x$location)])
   shown$location <- ifelse(is.na(x$location), NA_character_, paste0("[", match(x$location, uris), "]"))
-  cat(paste0("Locations: ", paste0("[", seq_along(uris), "] ", uris, collapse = "
-           ")), "
-", sep = "")
+  cat(paste0("Locations: ", paste0("[", seq_along(uris), "] ", uris, collapse = "\n           ")), "\n", sep = "")
   print(shown, ...)
   invisible(x)
 }
