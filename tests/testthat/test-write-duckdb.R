@@ -317,3 +317,227 @@ test_that("the temporary DuckDB table is dropped after an error", {
   expect_identical(duck_write_tables(con), character())
   expect_identical(nrow(s$st$primary$catalog), 0L)
 })
+
+# a. Batches: memory bounded by one batch ------------------------------------------
+
+test_that("a large DuckDB table is streamed in batches of at most rcs.duckdb_batch_rows rows", {
+  skip_if_no_duckdb_write()
+  skip_below_level("default")
+  con <- local_duckdb()
+  n <- 1.2e6
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE big AS SELECT",
+    "range::INTEGER AS id,",
+    "(range % 997)::DOUBLE / 7 AS value,",
+    "'g' || (range % 13)::VARCHAR AS grp,",
+    "DATE '2020-01-01' + (range % 1500)::INTEGER AS day,",
+    "range % 3 = 0 AS flag,",
+    "range::BIGINT * 4294967296 AS big,",
+    "TIMESTAMP '2020-01-01 00:00:00' + to_seconds(range) AS ts",
+    "FROM range(", format(n, scientific = FALSE), ")"
+  ))
+  tbl <- dplyr::tbl(con, "big")
+  withr::local_options(rcs.duckdb_batch_rows = 2e5)
+
+  # a spy around the real iterator: the rows of every batch, per call
+  calls <- list()
+  real <- duckdb_batches
+  local_mocked_bindings(duckdb_batches = function(con, sql, n) {
+    it <- real(con, sql, n)
+    k <- length(calls) + 1L
+    calls[[k]] <<- numeric()
+    next_batch <- it$next_batch
+    it$next_batch <- function() {
+      batch <- next_batch()
+      if (!is.null(batch)) calls[[k]] <<- c(calls[[k]], batch$num_rows)
+      batch
+    }
+    it
+  })
+  s <- duck_store()
+  duck_write(s$st, tbl, key = "id", partition = "grp")
+
+  expect_gte(length(calls), 1L)
+  for (rows in calls) {
+    expect_true(all(rows <= 2e5))
+    expect_lt(max(rows), n)
+  }
+  # the pass over the rows streams every row, in enough batches
+  pass <- calls[vapply(calls, function(r) sum(r) == n, logical(1))]
+  expect_length(pass, 1L)
+  expect_gte(length(pass[[1]]), ceiling(n / 2e5))
+
+  stored <- duck_stored_rows(s$st$primary)
+  expected <- tibble::as_tibble(dplyr::collect(tbl))
+  stored <- stored[order(stored$id), names(expected)]
+  expected <- expected[order(expected$id), ]
+  expect_identical(nrow(stored), as.integer(n))
+  for (col in names(expected)) {
+    expect_identical(normalise_values(stored[[col]]), normalise_values(expected[[col]]), label = col)
+  }
+  expect_s3_class(stored$big, "integer64")
+})
+
+# d. Types, mode, backend, package columns ------------------------------------------
+
+test_that("DuckDB types map as D38 says: BIGINT as integer64, TIMESTAMP without and TIMESTAMPTZ with UTC", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE typed AS SELECT range::INTEGER AS id,",
+    "range::BIGINT * 1000000000000 AS big,",
+    "TIMESTAMP '2024-01-01 10:00:00' + to_seconds(range) AS ts,",
+    "to_timestamp(1704103200 + range) AS tz",
+    "FROM range(5)"
+  ))
+  tbl <- dplyr::tbl(con, "typed")
+  s <- duck_store()
+  duck_write(s$st, tbl, key = "id")
+
+  entry <- s$st$primary$catalog
+  spec <- columns_from_json(entry$columns)
+  expect_identical(spec$r_type[[match("big", spec$name)]], list(class = "integer64"))
+  path <- file.path(s$paths[[1]], s$st$primary$files$path)
+  schema <- arrow::read_parquet(path, as_data_frame = FALSE)$schema
+  expect_identical(schema$ts$type$ToString(), "timestamp[us]")
+  expect_identical(schema$tz$type$ToString(), "timestamp[us, tz=UTC]")
+
+  rows <- duck_stored_rows(s$st$primary)
+  rows <- rows[order(rows$id), ]
+  expect_s3_class(rows$big, "integer64")
+  expect_identical(as.character(rows$big), as.character(bit64::as.integer64(0:4) * bit64::as.integer64(1e12)))
+  # the wall clock of TIMESTAMP, the instant of TIMESTAMPTZ
+  wall <- as.numeric(as.POSIXct("2024-01-01 10:00:00", tz = "UTC")) + 0:4
+  expect_identical(as.numeric(rows$ts), wall)
+  expect_identical(as.numeric(rows$tz), 1704103200 + 0:4)
+  expect_identical(attr(rows$tz, "tzone"), "UTC")
+
+  # the files do not depend on the time zone of the R session
+  s2 <- duck_store()
+  withr::with_timezone("Asia/Tokyo", duck_write(s2$st, tbl, key = "id"))
+  expect_identical(s2$st$primary$catalog$version, entry$version)
+})
+
+test_that("DuckDB types Arrow cannot write abort naming the columns", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE odd AS SELECT range::INTEGER AS id, range::HUGEINT AS huge,",
+    "to_seconds(range) AS span FROM range(3)"
+  ))
+  s <- duck_store()
+  local_snapshot_width()
+  expect_snapshot(duck_write(s$st, dplyr::tbl(con, "odd"), key = "id"), error = TRUE)
+  expect_error(duck_write(s$st, dplyr::tbl(con, "odd"), key = "id"), class = "rcs_error_argument")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+})
+
+test_that("mode update and lazy tables on other databases abort", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  tbl <- duck_table(con, duck_sales_data(50))
+  s <- duck_store()
+  duck_write(s$st, tbl, key = duck_key)
+  local_snapshot_width()
+  expect_snapshot(duck_write(s$st, tbl, mode = "update", key = duck_key), error = TRUE)
+  expect_error(duck_write(s$st, tbl, mode = "update", key = duck_key), class = "rcs_error_argument")
+
+  other <- dbplyr::lazy_frame(a = 1L, b = "x")
+  expect_snapshot(duck_write(s$st, other), error = TRUE)
+  expect_error(duck_write(s$st, other), class = "rcs_error_argument")
+})
+
+test_that("package columns in x are dropped with one message", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- duck_sales_data(40)
+  x$h3 <- 1L
+  x$.rcs_id <- seq_len(nrow(x))
+  tbl <- duck_table(con, x)
+  s <- duck_store()
+  local_snapshot_width()
+  msgs <- character()
+  withCallingHandlers(
+    store_write(s$st, tbl, "sales/daily", title = "Daily sales", description = "Simulated daily sales.", key = duck_key),
+    message = function(m) {
+      msgs <<- c(msgs, cli::ansi_strip(conditionMessage(m)))
+      invokeRestart("muffleMessage")
+    }
+  )
+  dropped <- grep("package's own", msgs, value = TRUE)
+  expect_length(dropped, 1L)
+  expect_snapshot(cat(dropped))
+  stored <- duck_stored_rows(s$st$primary)
+  expect_false(any(c("h3", ".rcs_id") %in% names(stored)))
+  expect_equal(duck_sorted(stored), duck_sorted(x[setdiff(names(x), c("h3", ".rcs_id"))]))
+})
+
+# e. Progress -------------------------------------------------------------------------
+
+test_that("progress is created once and updated per batch, not under rcs.quiet", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  tbl <- duck_table(con, duck_sales_data(500))
+  withr::local_options(rcs.duckdb_batch_rows = 120)
+  log <- list()
+  local_mocked_bindings(write_progress = function(bar = NULL, phase = NULL, total = NULL, batches = NULL,
+                                                  rows = 0, batch = 0L, done = FALSE, .envir = parent.frame()) {
+    event <- if (is.null(bar)) "create" else if (isTRUE(done)) "done" else "update"
+    log[[length(log) + 1L]] <<- list(event = event, total = total, batches = batches, rows = rows, batch = batch)
+    invisible(list(id = "bar"))
+  })
+  s <- duck_store()
+  duck_write(s$st, tbl, key = duck_key, partition = "year")
+  events <- vapply(log, function(e) e$event, character(1))
+  expect_identical(events, c("create", rep("update", 5), "done"))
+  expect_identical(as.numeric(log[[1]]$total), 500)
+  expect_identical(as.numeric(log[[1]]$batches), 5)
+  updates <- log[events == "update"]
+  expect_identical(vapply(updates, function(e) as.numeric(e$rows), numeric(1)), c(120, 240, 360, 480, 500))
+  expect_identical(vapply(updates, function(e) as.integer(e$batch), integer(1)), 1:5)
+
+  log <- list()
+  withr::local_options(rcs.quiet = TRUE)
+  s2 <- duck_store()
+  duck_write(s2$st, tbl, key = duck_key, partition = "year")
+  expect_length(log, 0L)
+})
+
+# f. Check ----------------------------------------------------------------------------
+
+test_that("check = TRUE detects a staged file altered by the writer", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  tbl <- duck_table(con, duck_sales_data(300))
+  # the writer changes one column of every row it writes
+  real <- parquet_stream_group
+  local_mocked_bindings(parquet_stream_group = function(f, chunk) {
+    chunk$qty <- chunk$qty + 1L
+    real(f, chunk)
+  })
+  s <- duck_store()
+  err <- expect_error(duck_write(s$st, tbl, key = duck_key, partition = "year"), class = "rcs_error_check")
+  expect_match(cli::ansi_strip(conditionMessage(err)), "column qty differs from x")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  expect_identical(duck_write_tables(con), character())
+
+  # without the check, the altered files are written
+  s2 <- duck_store()
+  duck_write(s2$st, tbl, key = duck_key, partition = "year", check = FALSE)
+  expect_identical(nrow(s2$st$primary$catalog), 1L)
+})
+
+test_that("check = TRUE detects a footer that does not hold the rows streamed", {
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  tbl <- duck_table(con, duck_sales_data(300))
+  real <- parquet_stream_close
+  local_mocked_bindings(parquet_stream_close = function(f) {
+    facts <- real(f)
+    facts$rows <- facts$rows + 1
+    facts
+  })
+  s <- duck_store()
+  err <- expect_error(duck_write(s$st, tbl, key = duck_key), class = "rcs_error_check")
+  expect_match(cli::ansi_strip(conditionMessage(err)), "were streamed")
+})
