@@ -158,6 +158,242 @@ test_that("h3o's intersect mode alone would miss cells (why the fallback is used
   expect_true(all(lengths(geo_cells_touched(small, 5L)) > 0))
 })
 
+# Degenerate rings (plan 0003, fix A) -------------------------------------------
+
+# Rings that sf::st_segmentize() (lwgeom, geodesic) collapses to fewer than 4
+# points, closed at (x, y): three points 1e-13 degrees apart (1 point left),
+# four points 1e-14 apart, and a zero-area spike A, B, A, A about 4 m long
+# (3 points left). Each holds no area.
+degenerate_ring <- function(kind, x, y) {
+  switch(kind,
+    tiny = cbind(c(x, x + 1e-13, x, x), c(y, y, y + 1e-13, y)),
+    near = cbind(c(x, x + 1e-14, x + 1e-14, x), c(y, y, y + 1e-14, y)),
+    spike = cbind(c(x, x + 5e-5, x, x), c(y, y, y, y))
+  )
+}
+
+# A box of about 15 by 17 km at 30E 48N: wider than a resolution-5 edge, so
+# its interior is filled by centre (the branch that densifying breaks).
+degenerate_outer <- function() {
+  cbind(c(30, 30.2, 30.2, 30, 30), c(48, 48, 48.15, 48.15, 48))
+}
+
+polygon_sfc <- function(...) {
+  sf::st_sfc(sf::st_polygon(list(...)), crs = 4326)
+}
+
+# Cells and shares of each row of `x` by geo_encode(): a data frame (id,
+# cell, share) sorted by id and cell; a row inside one cell has its h3 with
+# share 1.
+encoded_by_id <- function(x, ...) {
+  out <- geo_encode(x, ...)
+  data <- out$data
+  index <- out$index
+  inside <- !is.na(data$h3) & !as.character(data$.rcs_id) %in% as.character(index$.rcs_id)
+  rows <- rbind(
+    data.frame(
+      id = data$id[match(as.character(index$.rcs_id), as.character(data$.rcs_id))],
+      cell = h3_as_hex(index$h3), share = index$share
+    ),
+    data.frame(id = data$id[inside], cell = h3_as_hex(data$h3[inside]), share = rep(1, sum(inside)))
+  )
+  rows[order(rows$id, rows$cell, method = "radix"), , drop = FALSE]
+}
+
+# Same ids and cells, shares equal up to rounding (row names ignored).
+expect_same_encoding <- function(object, expected) {
+  expect_identical(as.list(object[c("id", "cell")]), as.list(expected[c("id", "cell")]))
+  expect_equal(object$share, expected$share, tolerance = 1e-9)
+}
+
+test_that("a hole that densifying collapses to one point changes no cell and does not abort a write", {
+  skip_if_no_h3()
+  outer <- degenerate_outer()
+  holed <- polygon_sfc(outer, degenerate_ring("tiny", 30.1, 48.07))
+  plain <- polygon_sfc(outer)
+  # the premise: lwgeom leaves the hole with 1 point
+  dense <- sf::st_segmentize(holed, h3_edge_m[[6]] / 3)
+  expect_lt(nrow(unclass(dense[[1]])[[2]]), 4L)
+
+  expect_identical(geo_cells_touched(holed, 5L), geo_cells_touched(plain, 5L))
+  # as a MULTIPOLYGON, st_cast() is a no-op and h3o would panic instead
+  expect_identical(geo_cells_touched(sf::st_cast(holed, "MULTIPOLYGON"), 5L), geo_cells_touched(plain, 5L))
+
+  st <- store_connect(withr::local_tempdir(), create = TRUE)
+  expect_no_error(
+    store_write(st, sf::st_sf(id = 1L, geometry = holed), "holed", title = "t", description = "t", key = "id")
+  )
+})
+
+test_that("a zero-area spike hole and a hole of near-identical points change no cell", {
+  skip_if_no_h3()
+  outer <- degenerate_outer()
+  holed <- polygon_sfc(outer, degenerate_ring("spike", 30.05, 48.03), degenerate_ring("near", 30.15, 48.1))
+  plain <- polygon_sfc(outer)
+  dense <- sf::st_segmentize(holed, h3_edge_m[[6]] / 3)
+  expect_true(all(vapply(unclass(dense[[1]])[-1], nrow, integer(1)) < 4L))
+
+  expect_identical(geo_cells_touched(holed, 5L), geo_cells_touched(plain, 5L))
+  expect_identical(geo_cells_touched(sf::st_cast(holed, "MULTIPOLYGON"), 5L), geo_cells_touched(plain, 5L))
+  expect_same_encoding(
+    encoded_by_id(sf::st_sf(id = 1L, geometry = holed)),
+    encoded_by_id(sf::st_sf(id = 1L, geometry = plain))
+  )
+})
+
+test_that("a MULTIPOLYGON part whose outer ring collapses changes no cell and does not panic h3o", {
+  skip_if_no_h3()
+  # the degenerate part lies in a 750 m window cut out of the box, so the
+  # cell around it is touched by the box anyway
+  window <- cbind(c(30.095, 30.095, 30.105, 30.105, 30.095), c(48.065, 48.075, 48.075, 48.065, 48.065))
+  with_part <- sf::st_sfc(
+    sf::st_multipolygon(list(list(degenerate_outer(), window), list(degenerate_ring("tiny", 30.1, 48.07)))),
+    crs = 4326
+  )
+  without <- sf::st_sfc(sf::st_multipolygon(list(list(degenerate_outer(), window))), crs = 4326)
+
+  expect_no_error(touched <- geo_cells_touched(with_part, 5L))
+  expect_identical(touched, geo_cells_touched(without, 5L))
+  for (engine in c("auto", "planar")) {
+    expect_same_encoding(
+      encoded_by_id(sf::st_sf(id = 1L, geometry = with_part), geocode_engine = engine),
+      encoded_by_id(sf::st_sf(id = 1L, geometry = without), geocode_engine = engine)
+    )
+  }
+})
+
+test_that("one degenerate row leaves the cells and shares of the other rows in its chunk unchanged", {
+  skip_if_no_h3()
+  outer <- degenerate_outer()
+  shifted <- outer + rep(c(0.5, 0.2), each = nrow(outer))
+  multi <- sf::st_multipolygon(list(list(outer + 1), list(outer + rep(c(1.3, 1), each = nrow(outer)))))
+  small <- cbind(c(29.5, 29.51, 29.51, 29.5, 29.5), c(47.5, 47.5, 47.51, 47.51, 47.5))
+  holed <- sf::st_polygon(list(
+    outer + 2, degenerate_ring("tiny", 32.1, 50.07), degenerate_ring("spike", 32.05, 50.03),
+    degenerate_ring("near", 32.15, 50.1)
+  ))
+  others <- sf::st_sf(
+    id = 1:4,
+    geometry = sf::st_sfc(
+      sf::st_polygon(list(outer)), sf::st_polygon(list(shifted)), multi, sf::st_polygon(list(small)),
+      crs = 4326
+    )
+  )
+  chunk <- rbind(others, sf::st_sf(id = 5L, geometry = sf::st_sfc(holed, crs = 4326)))
+
+  out <- encoded_by_id(chunk)
+  alone <- encoded_by_id(others)
+  expect_same_encoding(out[out$id != 5L, ], alone)
+  plain <- encoded_by_id(sf::st_sf(id = 5L, geometry = polygon_sfc(outer + 2)))
+  expect_same_encoding(out[out$id == 5L, ], plain)
+})
+
+test_that("degenerate holes injected into simulated polygons change no cell or share", {
+  skip_if_no_h3()
+  edge <- h3_edge_m[[6]]
+  # the random rows (ids above 9; the first rows are fixed edge cases such as
+  # slivers and empty geometries)
+  x <- rcs_sim_polygons(60, seed = 4)
+  x <- x[x$id > 9, ][1:50, ]
+
+  withr::with_seed(11, {
+    # rcs_sim_polygons() rows are mostly smaller than a resolution-5 edge:
+    # scale each about its box centre to 1.2 to 3 edges wide
+    plain <- lapply(sf::st_geometry(x), function(g) {
+      box <- sf::st_bbox(g)
+      centre <- c(mean(box[c("xmin", "xmax")]), mean(box[c("ymin", "ymax")]))
+      extent <- geo_extent_m(as.list(box))
+      (g - centre) * (stats::runif(1, 1.2, 3) * edge / extent) + centre
+    })
+    holed <- lapply(plain, function(g) {
+      # interior points at least 0.01 degrees from every ring, in the plane
+      inner <- sf::st_buffer(sf::st_sfc(g), -0.01)
+      box <- sf::st_bbox(inner)
+      for (k in seq_len(sample(1:3, 1))) {
+        tries <- sf::st_cast(sf::st_sfc(sf::st_multipoint(cbind(
+          stats::runif(100, box[["xmin"]], box[["xmax"]]),
+          stats::runif(100, box[["ymin"]], box[["ymax"]])
+        ))), "POINT")
+        point <- tries[[which(lengths(sf::st_intersects(tries, inner)) > 0)[[1]]]]
+        ring <- degenerate_ring(sample(c("tiny", "near", "spike"), 1), point[[1]], point[[2]])
+        if (inherits(g, "POLYGON")) {
+          g <- sf::st_polygon(c(unclass(g), list(ring)))
+        } else {
+          parts <- unclass(g)
+          at <- which(vapply(parts, function(p) {
+            lengths(sf::st_intersects(sf::st_sfc(point), sf::st_sfc(sf::st_polygon(p)))) > 0
+          }, logical(1)))[[1]]
+          parts[[at]] <- c(parts[[at]], list(ring))
+          g <- sf::st_multipolygon(parts)
+        }
+      }
+      g
+    })
+  })
+  plain <- sf::st_sf(id = x$id, geometry = sf::st_sfc(plain, crs = 4326))
+  holed <- sf::st_sf(id = x$id, geometry = sf::st_sfc(holed, crs = 4326))
+  expect_true(all(geo_extent_m(geo_envelope(geo_wkb(sf::st_geometry(plain)))) > edge))
+  expect_true(all(wk::wk_count(holed)$n_ring > wk::wk_count(plain)$n_ring))
+
+  expect_identical(geo_cells_touched(holed, 5L), geo_cells_touched(plain, 5L))
+  expect_same_encoding(encoded_by_id(holed), encoded_by_id(plain))
+})
+
+test_that("geo_drop_short_rings() drops short rings and polygons with a short outer ring, and nothing else", {
+  square <- cbind(c(0, 1, 1, 0, 0), c(0, 0, 1, 1, 0))
+  dot <- matrix(c(0.5, 0.5), ncol = 2)
+  polygons <- sf::st_sfc(
+    sf::st_polygon(list(square, dot)),
+    sf::st_multipolygon(list(list(dot), list(square, dot))),
+    sf::st_polygon(list(dot)),
+    sf::st_multipolygon(list(list(dot), list(dot))),
+    sf::st_polygon(list(square)),
+    sf::st_polygon()
+  )
+  out <- geo_drop_short_rings(polygons)
+  expect_identical(out[[1]], sf::st_polygon(list(square)))
+  expect_identical(out[[2]], sf::st_multipolygon(list(list(square))))
+  # an element left with no polygon becomes empty, of its own type
+  expect_identical(out[[3]], sf::st_polygon())
+  expect_identical(out[[4]], sf::st_multipolygon())
+  expect_identical(out[[5]], polygons[[5]])
+  expect_identical(out[[6]], polygons[[6]])
+
+  # XYZ, XYM and XYZM keep their dimension
+  for (dim in c("XYZ", "XYM", "XYZM")) {
+    extra <- nchar(dim) - 2
+    square_d <- cbind(square, matrix(1, nrow(square), extra))
+    dot_d <- cbind(dot, matrix(1, 1, extra))
+    out <- geo_drop_short_rings(sf::st_sfc(
+      sf::st_polygon(list(square_d, dot_d), dim = dim),
+      sf::st_multipolygon(list(list(dot_d), list(square_d)), dim = dim),
+      sf::st_polygon(list(dot_d), dim = dim)
+    ))
+    expect_identical(out[[1]], sf::st_polygon(list(square_d), dim = dim), info = dim)
+    expect_identical(out[[2]], sf::st_multipolygon(list(list(square_d)), dim = dim), info = dim)
+    expect_identical(out[[3]], sf::st_polygon(dim = dim), info = dim)
+  }
+
+  # a ring with no point is short: sf's constructors refuse one, WKB can carry it
+  none <- matrix(numeric(), ncol = 2)
+  p <- structure(list(square, none), class = c("XY", "POLYGON", "sfg"))
+  expect_identical(geo_drop_short_rings(sf::st_sfc(p))[[1]], sf::st_polygon(list(square)))
+
+  # an sfc without short rings comes back as the same object
+  x <- sf::st_geometry(rcs_sim_polygons(40, seed = 2))
+  x <- sf::st_set_precision(x[sf::st_geometry_type(x) %in% c("POLYGON", "MULTIPOLYGON")], 1e6)
+  expect_identical(geo_drop_short_rings(x), x)
+  # with one short ring, only that element changes; precision and CRS stay
+  first <- which(sf::st_geometry_type(x) == "POLYGON")[[1]]
+  y <- x
+  y[[first]] <- sf::st_polygon(c(unclass(x[[first]]), list(matrix(c(-27, 7), ncol = 2))))
+  out <- geo_drop_short_rings(y)
+  expect_identical(out[[first]], x[[first]])
+  expect_identical(sfc_list(out[-first]), sfc_list(x[-first]))
+  expect_identical(attr(out, "precision"), 1e6)
+  expect_identical(sf::st_crs(out), sf::st_crs(x))
+})
+
 # Covering ---------------------------------------------------------------------
 
 # Random query shapes in the box, of every kind the plan names.

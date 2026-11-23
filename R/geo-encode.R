@@ -220,11 +220,13 @@ geo_touched_normal <- function(g, h3_res, exact = TRUE, env = geo_envelope(g),
   extent <- geo_extent_m(env)
   dimension <- s2::s2_dimension(geog)
 
-  # boundary points, densified on the sphere where an edge can be long
+  # boundary points, densified on the sphere where an edge can be long: for
+  # lon/lat, sf::st_segmentize() densifies along the geodesic with lwgeom
+  # whatever sf::sf_use_s2() says
   dense <- g
   long <- which(extent > spacing)
   if (length(long) > 0) {
-    dense_long <- with_s2(sf::st_segmentize(geo_sfc(g[long]), spacing))
+    dense_long <- sf::st_segmentize(geo_sfc(g[long]), spacing)
     dense[long] <- geo_wkb(dense_long)
   }
   coords <- wk::wk_coords(dense)
@@ -242,7 +244,7 @@ geo_touched_normal <- function(g, h3_res, exact = TRUE, env = geo_envelope(g),
     if (any(types == "GEOMETRYCOLLECTION")) {
       polygons <- sf::st_collection_extract(polygons, "POLYGON")
     }
-    polygons <- sf::st_cast(polygons, "MULTIPOLYGON")
+    polygons <- sf::st_cast(geo_drop_short_rings(polygons), "MULTIPOLYGON")
     filled <- geo_flatten_cells(h3o::sfc_to_cells(polygons, h3_res, "centroid"))
     interior <- data.frame(from = big[filled$from], cell = filled$hex)
   }
@@ -260,6 +262,51 @@ geo_touched_normal <- function(g, h3_res, exact = TRUE, env = geo_envelope(g),
   out <- split(touched$cell, factor(touched$from, levels = seq_len(n)))
   names(out) <- NULL
   out
+}
+
+# Polygons (`sfc` of POLYGON or MULTIPOLYGON) without their rings of fewer
+# than 4 points; a polygon whose outer ring is that short is dropped whole.
+# Densifying with `sf::st_segmentize()` (lwgeom, geodesic) removes repeated
+# vertices, so a degenerate ring (a hole of identical points, a spike) can
+# come back with 1 to 3 points, which `sf::st_cast()` and
+# `h3o::sfc_to_cells()` reject. Such a ring holds no area, so it cannot hold
+# a cell centre and dropping it changes no interior cell.
+#
+# The scan is vectorised: `wk::wk_coords()` numbers the rings of the whole
+# `sfc` in order and `wk::wk_count()` gives the rings of each element, so a
+# ring with no point at all counts as short too. An `sfc` without short rings
+# is returned as it came (same bounding box and precision).
+geo_drop_short_rings <- function(polygons) {
+  count <- wk::wk_count(polygons)
+  points <- tabulate(wk::wk_coords(polygons)$ring_id, nbins = sum(count$n_ring))
+  short <- unique(rep(seq_along(polygons), count$n_ring)[points < 4L])
+  if (length(short) == 0) {
+    return(polygons)
+  }
+  keep_rings <- function(rings) {
+    if (length(rings) == 0 || nrow(rings[[1]]) < 4L) {
+      return(NULL)
+    }
+    rings[vapply(rings, nrow, integer(1)) >= 4L]
+  }
+  # element by element: `[[<-` on an sfc is cheap, `[<-` rebuilds every
+  # element's type
+  for (i in short) {
+    p <- polygons[[i]]
+    dim <- class(p)[[1]]
+    if (inherits(p, "POLYGON")) {
+      rings <- keep_rings(unclass(p))
+      polygons[[i]] <- if (is.null(rings)) {
+        sf::st_polygon(dim = dim)
+      } else {
+        sf::st_polygon(rings, dim = dim)
+      }
+    } else {
+      parts <- Filter(Negate(is.null), lapply(unclass(p), keep_rings))
+      polygons[[i]] <- sf::st_multipolygon(parts, dim = dim)
+    }
+  }
+  polygons
 }
 
 # Which pairs (geometry `from[i]` of `geog`, cell `cell[i]`) intersect on the
@@ -489,16 +536,20 @@ geo_rebuild <- function(geog) {
 }
 
 # Whether the rebuilt copy of one invalid row is faithful (D31, fact 19):
-# not empty, and its measure (area, length or number of points) as WKB in
-# EPSG:6933 under `sf_use_s2(FALSE)` within `tol` of the original's. A
-# polygon whose rebuilt copy covers more than a hemisphere has turned inside
-# out (its WKB has the same planar area as the original, so the measure
-# alone cannot tell); it is not faithful either. Any error or non-finite
-# measure gives FALSE.
+# not empty, valid on the sphere, and its measure (area, length or number of
+# points) as WKB in EPSG:6933 under `sf_use_s2(FALSE)` within `tol` of the
+# original's. A copy that `s2::s2_is_valid()` still judges invalid (or NA)
+# is not faithful (plan 0003, B1): `s2_rebuild()` can return the same
+# vertices unchanged, so the measure alone would pass it. A polygon whose
+# rebuilt copy covers more than a hemisphere has turned inside out (its WKB
+# has the same planar area as the original, so the measure alone cannot
+# tell); it is not faithful either. Any error or non-finite measure gives
+# FALSE. Only engine "auto" calls this, and not for rows whose box spans 180
+# degrees or more; engine "s2" uses the rebuilt copy as it is (D31).
 geo_rebuild_faithful <- function(original, copy, tol) {
   tryCatch(
     {
-      if (isTRUE(s2::s2_is_empty(copy))) {
+      if (isTRUE(s2::s2_is_empty(copy)) || !isTRUE(s2::s2_is_valid(copy))) {
         return(FALSE)
       }
       original <- geo_sfc(original)
@@ -551,9 +602,17 @@ geo_cell_sfc <- function(hex) {
 # the plane, the parts measured in EPSG:6933 (areas, or lengths for lines)
 # and normalised to sum to 1; `1 / n` for points. Returns pairs (from,
 # cell, share), `from` indexing `g`.
+#
+# Rows invalid in the plane (a bowtie hole, a figure-eight ring, a ring of
+# fewer than 4 points from WKB) would make GEOS abort, so they are repaired
+# first by `geo_planar_valid()` (plan 0003, C1). The repaired copy gives the
+# candidates, the touch test and the shares; the stored geometry is never
+# changed. The repair is silent: under engine "auto" such rows are already
+# reported as fallbacks (D32), under explicit "planar" it is documented in
+# `store_write()` (C2).
 geo_planar_rows <- function(g, h3_res) {
   n <- length(g)
-  sfc <- geo_sfc(g)
+  sfc <- geo_planar_valid(geo_sfc(g))
   edge <- h3_edge_m[[h3_res + 1L]]
   dense <- geo_densify_planar(sfc, edge / 3 / 111320)
   coords <- wk::wk_coords(dense)
@@ -571,7 +630,7 @@ geo_planar_rows <- function(g, h3_res) {
     if (any(types == "GEOMETRYCOLLECTION")) {
       polygons <- sf::st_collection_extract(polygons, "POLYGON")
     }
-    polygons <- sf::st_cast(polygons, "MULTIPOLYGON")
+    polygons <- sf::st_cast(geo_drop_short_rings(polygons), "MULTIPOLYGON")
     filled <- geo_flatten_cells(h3o::sfc_to_cells(polygons, h3_res, "centroid"))
     candidates <- geo_pairs(c(candidates$from, big[filled$from]), c(candidates$cell, filled$hex))
   }
@@ -595,6 +654,69 @@ geo_planar_rows <- function(g, h3_res) {
     }
   })
   do.call(rbind, c(list(data.frame(from = integer(), cell = character(), share = double())), out))
+}
+
+# Geometries (`sfc`, EPSG:4326) made valid in the plane for the planar engine
+# (plan 0003, C1). Rows that `sf::st_is_valid()` judges valid under
+# `sf_use_s2(FALSE)` are returned as they are, so valid rows pay one
+# validity check. Rows judged invalid or NA (or on which the check errors)
+# are repaired one by one by `geo_planar_repair()`.
+geo_planar_valid <- function(sfc) {
+  valid <- without_s2(tryCatch(sf::st_is_valid(sfc), error = function(e) NULL))
+  if (is.null(valid)) {
+    valid <- vapply(seq_along(sfc), function(i) {
+      without_s2(tryCatch(isTRUE(sf::st_is_valid(sfc[i])), error = function(e) FALSE))
+    }, logical(1))
+  }
+  repair <- which(!(valid %in% TRUE))
+  if (length(repair) == 0) {
+    return(sfc)
+  }
+  # a repair can change the geometry type, which `[[<-` on an sfc does not
+  # record, so the sfc is built again
+  geoms <- lapply(sfc, identity)
+  for (i in repair) {
+    geoms[[i]] <- geo_planar_repair(sfc[i])
+  }
+  sf::st_sfc(geoms, crs = sf::st_crs(sfc))
+}
+
+# One geometry (`sfc` of length 1) invalid in the plane, repaired by
+# `sf::st_make_valid()` (GEOS, default method), as an `sfg` of the original
+# dimension. When GEOS cannot read the polygon (a ring of fewer than 4
+# points), its short rings are dropped first (they hold no area, as in
+# `geo_drop_short_rings()`). A repair that changes the dimension keeps the
+# parts of the original dimension (`sf::st_collection_extract()`); a repair
+# that leaves none, or that fails, gives an empty geometry: no cells.
+geo_planar_repair <- function(x) {
+  empty <- sf::st_geometrycollection()
+  dimension <- suppressWarnings(max(sf::st_dimension(x), na.rm = TRUE))
+  if (!is.finite(dimension)) {
+    return(empty)
+  }
+  type <- c("POINT", "LINESTRING", "POLYGON")[[dimension + 1L]]
+  make_valid <- function(y) tryCatch(without_s2(sf::st_make_valid(y)), error = function(e) NULL)
+  fixed <- make_valid(x)
+  if (is.null(fixed) && inherits(x, c("sfc_POLYGON", "sfc_MULTIPOLYGON"))) {
+    fixed <- make_valid(geo_drop_short_rings(x))
+  }
+  if (is.null(fixed) || length(fixed) != 1 || sf::st_is_empty(fixed)) {
+    return(empty)
+  }
+  if (!inherits(fixed[[1]], "GEOMETRYCOLLECTION")) {
+    return(if (isTRUE(sf::st_dimension(fixed) == dimension)) fixed[[1]] else empty)
+  }
+  # one element per part of that dimension, possibly none; all of them are
+  # kept, split into single parts and combined into one multi-geometry
+  parts <- sf::st_collection_extract(fixed, type, warn = FALSE)
+  parts <- parts[!sf::st_is_empty(parts) & sf::st_dimension(parts) %in% dimension]
+  if (length(parts) == 0) {
+    return(empty)
+  }
+  if (length(parts) == 1) {
+    return(parts[[1]])
+  }
+  sf::st_combine(sf::st_cast(parts, type))[[1]]
 }
 
 # Area (dimension 2) or length (1) in EPSG:6933 of the part of the geometry

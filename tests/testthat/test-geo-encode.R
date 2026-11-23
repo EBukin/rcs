@@ -342,3 +342,27 @@ test_that("geocode_engine and tol are checked", {
   expect_snapshot(geo_encode(x, geocode_engine = "sphere"), error = TRUE)
   expect_snapshot(geo_encode(x, tol = -1), error = TRUE)
 })
+
+test_that("degenerate holes encode like no hole under every engine and resolution", {
+  skip_if_no_h3()
+  # a box wider than a resolution-5 edge with three holes that lwgeom's
+  # densifying collapses: 3 points 1e-13 degrees apart, 4 points 1e-14
+  # apart, and a zero-area spike A, B, A, A about 4 m long
+  outer <- cbind(c(30, 30.2, 30.2, 30, 30), c(48, 48, 48.15, 48.15, 48))
+  tiny <- cbind(c(30.1, 30.1 + 1e-13, 30.1, 30.1), c(48.07, 48.07, 48.07 + 1e-13, 48.07))
+  near <- cbind(c(30.15, 30.15 + 1e-14, 30.15 + 1e-14, 30.15), c(48.1, 48.1, 48.1 + 1e-14, 48.1))
+  spike <- cbind(c(30.05, 30.05 + 5e-5, 30.05, 30.05), c(48.03, 48.03, 48.03, 48.03))
+  holed <- sf::st_sf(id = 1L, geometry = sf::st_sfc(sf::st_polygon(list(outer, tiny, near, spike)), crs = 4326))
+  plain <- sf::st_sf(id = 1L, geometry = sf::st_sfc(sf::st_polygon(list(outer)), crs = 4326))
+  for (engine in c("auto", "s2", "planar")) {
+    for (res in c(5L, 7L)) {
+      info <- paste(engine, res)
+      expect_no_error(out <- geo_encode(holed, h3_res = res, geocode_engine = engine))
+      expected <- geo_encode(plain, h3_res = res, geocode_engine = engine)
+      expect_identical(out$data$h3, expected$data$h3, info = info)
+      expect_identical(out$index$h3, expected$index$h3, info = info)
+      expect_gt(nrow(out$index), 1L)
+      expect_equal(out$index$share, expected$index$share, tolerance = 1e-9, info = info)
+    }
+  }
+})

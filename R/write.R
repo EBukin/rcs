@@ -186,7 +186,12 @@
 #'   geometries that cross cell edges are computed (see "Geocoding
 #'   engines"); recorded with the dataset. An update uses the stored engine
 #'   (a different one aborts); a dataset written without one geocodes new
-#'   rows with `"s2"`.
+#'   rows with `"s2"`. Rows geocoded in the plane (`"planar"`, or the
+#'   fallback of `"auto"`) that are invalid in the plane too (for example a
+#'   self-intersecting ring) are first repaired with [sf::st_make_valid()],
+#'   silently: the repaired copy is used only for the cells, and keeps only
+#'   the parts of the row's own dimension (none: no cells, `h3` is `NA`).
+#'   The stored geometry is unchanged.
 #' @param max_files Most partition files.
 #' @param history `TRUE` or `FALSE` sets the dataset's history setting;
 #'   `NULL` leaves it as it is.

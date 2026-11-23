@@ -186,8 +186,9 @@
     Condition
       Warning:
       Geocoding "shapes/polygons": 2 rows are invalid on the sphere.
-      i 2 rebuilt by s2, 0 geocoded in the plane after a failed rebuild check.
-      * Rebuilt: id = 21; id = 22.
+      i 1 rebuilt by s2, 1 geocoded in the plane after a failed rebuild check.
+      * Rebuilt: id = 21.
+      * In the plane: id = 22.
     Message
       i Writing "shapes/polygons": 22 rows in 1 file, and its index table in 1 file.
       v primary  <root>/primary  2/2 files sent  <bytes>  <time>

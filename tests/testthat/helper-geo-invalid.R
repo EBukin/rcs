@@ -14,6 +14,20 @@ geo_invalid_wkt <- function() {
   )
 }
 
+# A polygon valid in the plane, invalid on the sphere, whose real
+# `s2::s2_rebuild()` returns it unchanged and still invalid (plan 0003, fact
+# 5, like row 341's loop 182). Its hole has a long edge along 48N, which
+# bulges north on the sphere by about 2e-4 degrees, and two vertices 5e-5
+# degrees north of 48N, which lie below that bulge: on the sphere two edges
+# of the hole cross (`Loop 1: Edge 1 crosses edge 4`), in the plane none do.
+# Wider than a resolution-5 edge.
+geo_stays_invalid_wkt <- function() {
+  paste0(
+    "POLYGON((29.9 47.9, 30.5 47.9, 30.5 48.2, 29.9 48.2, 29.9 47.9), ",
+    "(30 48, 30.16 48.00005, 30.2 48.1, 30.24 48.00005, 30.4 48, 30 48))"
+  )
+}
+
 # A polygon with long edges, valid in both readings (fact 20): its cells on
 # the sphere and in the plane differ.
 geo_long_edge_wkt <- function() {
@@ -98,4 +112,57 @@ engine_row <- function(encoded, i) {
   index <- encoded$index[encoded$index$row == i, , drop = FALSE]
   o <- order(index$cell, method = "radix")
   list(h3 = encoded$h3[[i]], cells = index$cell[o], share = index$share[o])
+}
+
+# Polygons invalid in the plane and on the sphere (plan 0003, fix C), as WKT
+# in EPSG:4326, each wider than a resolution-5 edge: a box with a bowtie hole
+# (GEOS: self-intersection at 30.1 48.05), and a figure-eight outer ring.
+geo_plane_invalid_wkt <- function() {
+  c(
+    bowtie_hole = paste0(
+      "POLYGON((29.9 47.9, 30.5 47.9, 30.5 48.2, 29.9 48.2, 29.9 47.9), ",
+      "(30 48, 30.2 48.1, 30.2 48, 30 48.1, 30 48))"
+    ),
+    figure_eight = "POLYGON((29.9 47.9, 30.5 48.2, 30.5 47.9, 29.9 48.2, 29.9 47.9))"
+  )
+}
+
+# Polygons whose repair in the plane (`sf::st_make_valid()`, GEOS) loses
+# dimension, wider than a resolution-5 edge: a zero-area polygon (repaired to
+# a line), a multipolygon with a zero-area part (repaired to a
+# GEOMETRYCOLLECTION of a polygon and lines), and the same with a figure
+# eight (two polygons and lines).
+geo_plane_collapse_wkt <- function() {
+  c(
+    flat = "POLYGON((29.9 47.9, 30.5 47.9, 30.2 48.2, 30.5 47.9, 29.9 47.9))",
+    flat_part = paste0(
+      "MULTIPOLYGON(((30 48, 30.3 48, 30.3 48.2, 30 48.2, 30 48)), ",
+      "((31 48, 31.5 48, 31.2 48, 31 48)))"
+    ),
+    # a figure eight beside a zero-area part: a collection of two polygons
+    # and lines
+    two_parts = paste0(
+      "MULTIPOLYGON(((29.9 47.9, 30.5 48.2, 30.5 47.9, 29.9 48.2, 29.9 47.9)), ",
+      "((31 48, 31.5 48, 31.2 48, 31 48)))"
+    )
+  )
+}
+
+# A 0.6 x 0.3 degree box with one hole of `k` points (1 to 3), as an `sfc`
+# in EPSG:4326 built from little-endian WKB: neither sf nor GEOS would build
+# such a ring from coordinates.
+geo_short_ring_sfc <- function(k) {
+  outer <- cbind(c(29.9, 30.5, 30.5, 29.9, 29.9), c(47.9, 47.9, 48.2, 48.2, 47.9))
+  hole <- rbind(c(30.1, 48.05), c(30.2, 48.06), c(30.1, 48.05))[seq_len(k), , drop = FALSE]
+  le_int <- function(v) writeBin(as.integer(v), raw(), size = 4, endian = "little")
+  le_double <- function(v) writeBin(as.vector(v), raw(), size = 8, endian = "little")
+  ring <- function(m) c(le_int(nrow(m)), le_double(t(m)))
+  wkb <- c(as.raw(1), le_int(3), le_int(2), ring(outer), ring(hole))
+  sf::st_as_sfc(structure(list(wkb), class = "WKB"), crs = 4326)
+}
+
+# The box of `geo_short_ring_sfc()` without its hole.
+geo_short_ring_box <- function() {
+  outer <- cbind(c(29.9, 30.5, 30.5, 29.9, 29.9), c(47.9, 47.9, 48.2, 48.2, 47.9))
+  sf::st_sfc(sf::st_polygon(list(outer)), crs = 4326)
 }
