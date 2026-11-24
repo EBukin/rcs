@@ -279,7 +279,11 @@ test_that("a DuckDB write lands in a local primary and secondary with MD5 verifi
       real_land(...)
     }
   )
-  out <- duck_write(s$st, tbl, key = duck_key, partition = "year")
+  # the materialised path (plan 0004, D-B1 opt-out): one table for the write
+  out <- withr::with_options(
+    list(rcs.duckdb_stream = FALSE),
+    duck_write(s$st, tbl, key = duck_key, partition = "year")
+  )
   expect_identical(out$status, c("written", "written"))
   expect_true(all(c(s$st$primary$uri, s$st$secondary[[1]]$uri) %in% verified))
   expect_identical(s$st$secondary[[1]]$catalog$version, s$st$primary$catalog$version)
@@ -289,6 +293,21 @@ test_that("a DuckDB write lands in a local primary and secondary with MD5 verifi
   expect_length(during, 1L)
   expect_identical(duck_write_tables(con), character())
   # the user's table is untouched
+  expect_identical(as.numeric(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sales")$n), 200)
+
+  # the streamed path (plan 0004, D-B2): each partition's table is dropped
+  # after its file, so none is alive while landing
+  verified <- character()
+  during <- NULL
+  s2 <- duck_store(secondaries = 1L)
+  out <- duck_write(s2$st, tbl, key = duck_key, partition = "year")
+  expect_identical(out$status, c("written", "written"))
+  expect_true(all(c(s2$st$primary$uri, s2$st$secondary[[1]]$uri) %in% verified))
+  expect_identical(s2$st$secondary[[1]]$catalog$version, s2$st$primary$catalog$version)
+  expect_equal(duck_sorted(duck_stored_rows(s2$st$secondary[[1]])), duck_sorted(x))
+  expect_store_valid(s2$st)
+  expect_identical(during, character())
+  expect_identical(duck_write_tables(con), character())
   expect_identical(as.numeric(DBI::dbGetQuery(con, "SELECT count(*) AS n FROM sales")$n), 200)
 })
 
@@ -357,15 +376,14 @@ test_that("a large DuckDB table is streamed in batches of at most rcs.duckdb_bat
   s <- duck_store()
   duck_write(s$st, tbl, key = "id", partition = "grp")
 
-  expect_gte(length(calls), 1L)
+  # streamed by partition (plan 0004, D-B2): one call per `grp` value
+  expect_length(calls, 13L)
   for (rows in calls) {
     expect_true(all(rows <= 2e5))
     expect_lt(max(rows), n)
   }
-  # the pass over the rows streams every row, in enough batches
-  pass <- calls[vapply(calls, function(r) sum(r) == n, logical(1))]
-  expect_length(pass, 1L)
-  expect_gte(length(pass[[1]]), ceiling(n / 2e5))
+  # the calls together stream every row
+  expect_identical(sum(unlist(calls)), n)
 
   stored <- duck_stored_rows(s$st$primary)
   expected <- tibble::as_tibble(dplyr::collect(tbl))
@@ -566,4 +584,355 @@ test_that("check = TRUE detects a footer that does not hold the rows streamed", 
   s <- duck_store()
   err <- expect_error(duck_write(s$st, tbl, key = duck_key), class = "rcs_error_check")
   expect_match(cli::ansi_strip(conditionMessage(err)), "were streamed")
+})
+
+# Plan 0004, Part B: streaming lazy DuckDB table writes by partition ----------------
+#
+# B-T1 to B-T8 of plan 0004 (D-B1 to D-B7; D-B6 as "Option A" of the WP3
+# results). Each test states the reason it fails before WP5, or "guard"
+# when it must pass already.
+
+# A synthetic table as a generator view `wide_v` (D-B5, WP3): the rows of
+# `rcs_sim_table(n)` registered as `sim_base`, multiplied by
+# `CROSS JOIN range(k)`, with a unique BIGINT `id`, an INTEGER `part` of
+# `parts` values and `doubles` DOUBLE columns `d1`, `d2`, ... A view is not
+# stored, so it does not count against `memory_limit`.
+duck_wide_view <- function(con, n = 1e4, k = 100, parts = 16, doubles = 20) {
+  base <- as.data.frame(rcs_sim_table(n)[c("shop_id", "qty", "price")])
+  base$b <- seq_len(nrow(base)) - 1L
+  duckdb::duckdb_register(con, "sim_base", base)
+  d <- paste0("(price * ", seq_len(doubles), " + r.range * 0.001 + qty)::DOUBLE AS d", seq_len(doubles),
+    collapse = ", "
+  )
+  DBI::dbExecute(con, paste0(
+    "CREATE VIEW wide_v AS SELECT (b * ", k, " + r.range)::BIGINT AS id, ",
+    "((b * ", k, " + r.range) % ", parts, ")::INTEGER AS part, ", d,
+    " FROM sim_base CROSS JOIN range(", k, ") AS r"
+  ))
+  dplyr::tbl(con, "wide_v")
+}
+
+# A fresh connection under the memory and spill caps of WP3, closed (with
+# its caps) when `frame` ends.
+local_duckdb_capped <- function(memory = "100MB", spill = "50MB", frame = parent.frame()) {
+  con <- local_duckdb(.env = frame)
+  spill_dir <- withr::local_tempdir(.local_envir = frame)
+  DBI::dbExecute(con, paste0("SET memory_limit = '", memory, "'"))
+  DBI::dbExecute(con, paste0("SET max_temp_directory_size = '", spill, "'"))
+  DBI::dbExecute(con, paste0("SET temp_directory = '", normalizePath(spill_dir, winslash = "/"), "'"))
+  con
+}
+
+# The rows of every `rcs_write_%` table on the connection, named by table.
+duck_write_table_rows <- function(con) {
+  tables <- duck_write_tables(con)
+  vapply(tables, function(t) {
+    as.numeric(DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", duckdb_ident(con, t)))$n)
+  }, numeric(1))
+}
+
+# A spy around `duckdb_write_files()`: per call, the rows of the
+# `rcs_write_%` tables present while the writer reads, then the real
+# writer; with `fail_on = i`, call i aborts instead. Returns an environment
+# whose `calls` is a list of named row counts, one per call.
+local_writer_spy <- function(con, fail_on = NA_integer_, frame = parent.frame()) {
+  spy <- new.env(parent = emptyenv())
+  spy$calls <- list()
+  real <- duckdb_write_files
+  local_mocked_bindings(
+    duckdb_write_files = function(...) {
+      spy$calls[[length(spy$calls) + 1L]] <- duck_write_table_rows(con)
+      if (identical(length(spy$calls), as.integer(fail_on))) {
+        cli::cli_abort("Streaming failed.")
+      }
+      real(...)
+    },
+    .env = frame
+  )
+  spy
+}
+
+# The MD5s of the files of the dataset in the primary, in path order.
+duck_md5 <- function(s, dataset = "sales/daily") {
+  files <- s$st$primary$files
+  paths <- sort(files$path[files$dataset == dataset])
+  unname(tools::md5sum(file.path(s$paths[[1]], paths)))
+}
+
+test_that("a partitioned keyed write streams under a DuckDB memory cap below the whole table", {
+  # B-T1. Red before WP5: DuckDB "Out of Memory Error" (class duckdb_error,
+  # error type OUT_OF_MEMORY), raised unwrapped by duckdb_materialise(),
+  # which copies the whole query (1e6 rows x 22 columns) into one temporary
+  # table. One partition (62,500 rows) fits the caps.
+  skip_on_cran()
+  skip_if_no_duckdb_write()
+  con <- local_duckdb_capped()
+  tbl <- duck_wide_view(con, n = 1e4, k = 100, parts = 16, doubles = 20)
+  s <- duck_store()
+
+  duck_write(s$st, tbl, key = "id", partition = "part")
+
+  entry <- s$st$primary$catalog
+  expect_identical(as.numeric(entry$rows), 1e6)
+  expect_identical(as.numeric(entry$n_files), 16)
+  files <- s$st$primary$files
+  expect_setequal(files$partition_values, vapply(0:15, function(p) {
+    partition_values_json(list(part = p))
+  }, character(1)))
+  # full comparison inside DuckDB, caps lifted: the stored rows and the
+  # view are the same multiset (and `id` is unique, so the same rows)
+  DBI::dbExecute(con, "RESET memory_limit")
+  DBI::dbExecute(con, "RESET max_temp_directory_size")
+  paths <- normalizePath(file.path(s$paths[[1]], files$path), winslash = "/")
+  stored <- paste0("SELECT * FROM read_parquet([", paste0("'", paths, "'", collapse = ", "), "])")
+  cols <- paste(duckdb_ident(con, c("id", "part", paste0("d", 1:20))), collapse = ", ")
+  differ <- function(a, b) {
+    as.numeric(DBI::dbGetQuery(con, paste0(
+      "SELECT count(*) AS n FROM (SELECT ", cols, " FROM (", a, ") EXCEPT ALL SELECT ", cols, " FROM (", b, "))"
+    ))$n)
+  }
+  expect_identical(differ("SELECT * FROM wide_v", stored), 0)
+  expect_identical(differ(stored, "SELECT * FROM wide_v"), 0)
+  # the rows of each file sorted by id
+  for (p in paths) {
+    unsorted <- DBI::dbGetQuery(con, paste0(
+      "SELECT count(*) AS n FROM (SELECT id, lag(id) OVER (ORDER BY file_row_number) AS prev ",
+      "FROM read_parquet('", p, "', file_row_number = true)) WHERE id <= prev"
+    ))$n
+    expect_identical(as.numeric(unsorted), 0)
+  }
+  expect_identical(duck_write_tables(con), character())
+})
+
+test_that("with rcs.duckdb_stream = FALSE the same write materialises and runs out of memory", {
+  # B-T2. Same failure as today; becomes a guard after WP5. The option does
+  # not exist yet, so the write materialises and fails with the memory
+  # error, which is what this test expects: it passes before WP5 too.
+  skip_on_cran()
+  skip_if_no_duckdb_write()
+  con <- local_duckdb_capped()
+  tbl <- duck_wide_view(con, n = 1e4, k = 100, parts = 16, doubles = 20)
+  s <- duck_store()
+  withr::local_options(rcs.duckdb_stream = FALSE)
+  expect_error(
+    duck_write(s$st, tbl, key = "id", partition = "part"),
+    class = "duckdb_error", regexp = "Out of Memory Error"
+  )
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  expect_identical(duck_write_tables(con), character())
+})
+
+test_that("streamed, materialised and collected writes give the same version and file MD5s", {
+  # B-T3. Guard: passes before WP5 (both DuckDB modes run the same code) and
+  # must stay green (D-B4).
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- duck_sales_data(2000, seed = 4)
+  tbl <- duck_table(con, x)
+  collected <- tibble::as_tibble(dplyr::collect(tbl))
+  cases <- list(
+    year_keyed = list(key = duck_key, partition = "year"),
+    year_keyless = list(key = NULL, partition = "year"),
+    two_keyed = list(key = duck_key, partition = c("year", "shop_id")),
+    two_keyless = list(key = NULL, partition = c("year", "shop_id"))
+  )
+  frame <- environment()
+  write_one <- function(x, args, stream) {
+    withr::local_options(rcs.duckdb_stream = stream)
+    s <- duck_store(frame = frame)
+    out <- duck_write(s$st, x, key = args$key, partition = args$partition, rows_per_group = 250L)
+    list(version = attr(out, "version"), md5 = duck_md5(s), facts = duck_facts(s))
+  }
+  for (name in names(cases)) {
+    args <- cases[[name]]
+    streamed <- write_one(tbl, args, TRUE)
+    materialised <- write_one(tbl, args, FALSE)
+    from_r <- write_one(collected, args, TRUE)
+    expect_identical(streamed$version, from_r$version, label = name)
+    expect_identical(materialised$version, from_r$version, label = name)
+    expect_identical(streamed$md5, from_r$md5, label = name)
+    expect_identical(materialised$md5, from_r$md5, label = name)
+    expect_identical(streamed$facts, from_r$facts, label = name)
+  }
+})
+
+test_that("a key repeated across two partitions, or a repeated key holding NULL, aborts as today", {
+  # B-T4. Guard: the classes and messages of duckdb_check_key() today.
+  # Today a single NULL in a key is accepted, from R and from DuckDB alike
+  # (checked 2026-11-23), so "an NA key" here is a key holding NULL that
+  # repeats across two partitions, which aborts as a repeated key; a
+  # single NULL key is written, with the version of the collected write.
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- duck_sales_data(100)
+  local_snapshot_width()
+
+  # row 3 again, in the other `year` partition (the other key columns equal)
+  dup <- x[3, ]
+  dup$year <- if (dup$year == 2023L) 2024L else 2023L
+  tbl <- duck_table(con, vctrs::vec_rbind(x, dup), name = "sales_dup")
+  s <- duck_store()
+  expect_snapshot(duck_write(s$st, tbl, key = duck_key, partition = "year"), error = TRUE)
+  expect_error(duck_write(s$st, tbl, key = duck_key, partition = "year"), class = "rcs_error_key")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  expect_identical(duck_write_tables(con), character())
+
+  # a key with a NULL, repeated across the two partitions
+  na <- x
+  na$shop_id[[5]] <- NA
+  dup <- na[5, ]
+  dup$year <- if (dup$year == 2023L) 2024L else 2023L
+  tbl <- duck_table(con, vctrs::vec_rbind(na, dup), name = "sales_na_dup")
+  expect_snapshot(duck_write(s$st, tbl, key = duck_key, partition = "year"), error = TRUE)
+  expect_error(duck_write(s$st, tbl, key = duck_key, partition = "year"), class = "rcs_error_key")
+  expect_identical(nrow(s$st$primary$catalog), 0L)
+  expect_identical(duck_write_tables(con), character())
+
+  # a single NULL in a key is written, as from R
+  tbl <- duck_table(con, na, name = "sales_na")
+  a <- duck_store()
+  b <- duck_store()
+  out_a <- duck_write(a$st, tbl, key = duck_key, partition = "year")
+  out_b <- duck_write(b$st, na, key = duck_key, partition = "year")
+  expect_identical(attr(out_a, "version"), attr(out_b, "version"))
+})
+
+test_that("a streamed write holds one partition's rows at a time and leaves no temporary table", {
+  # B-T5. Red before WP5: today duckdb_write_files() is called once, reading
+  # the materialised table of all 300 rows, so (1) there is one writer
+  # call, not one per `year` partition, (2) the largest rcs_write_% table
+  # the writer sees (300 rows) exceeds the largest partition, and (3) the
+  # mocked failure on the 2nd call never happens, so the write does not
+  # abort. The checks of no rcs_write_% table left pass already.
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- duck_sales_data(300)
+  tbl <- duck_table(con, x)
+  sizes <- as.numeric(table(x$year))
+
+  spy <- local_writer_spy(con)
+  s <- duck_store()
+  duck_write(s$st, tbl, key = duck_key, partition = "year")
+  expect_length(spy$calls, length(sizes))
+  seen <- unlist(spy$calls)
+  expect_gt(length(seen), 0L)
+  expect_lte(max(seen, 0), max(sizes))
+  expect_identical(duck_write_tables(con), character())
+  expect_equal(duck_sorted(duck_stored_rows(s$st$primary)), duck_sorted(x))
+
+  # a failure while writing the second partition
+  spy <- local_writer_spy(con, fail_on = 2L)
+  s2 <- duck_store()
+  expect_error(duck_write(s2$st, tbl, key = duck_key, partition = "year"), "Streaming failed")
+  expect_identical(duck_write_tables(con), character())
+  expect_identical(nrow(s2$st$primary$catalog), 0L)
+})
+
+test_that("under preserve_insertion_order = false the files equal the default ones and the setting is restored", {
+  # B-T6, per D-B6 "Option A". Red before WP5: under the setting the stream
+  # reaches R out of order, and the first case (keyed, partitioned) aborts
+  # with rcs_error_schema "Invalid files table. A path is named twice."
+  # (the keyless partitioned case aborts the same way; the one-file case
+  # fails the serialization check, "columns ... differ from x"). 3e5 rows
+  # in a stored table (more than one DuckDB row group of 122,880 rows)
+  # reproduce it 3 times out of 3 in every case; 1e5 rows do not.
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  duck_wide_view(con, n = 3000, k = 100, parts = 4, doubles = 1)
+  DBI::dbExecute(con, "CREATE TABLE wide AS SELECT * FROM wide_v")
+  tbl <- dplyr::tbl(con, "wide")
+  cases <- list(
+    keyed_partitioned = list(key = "id", partition = "part"),
+    keyless_partitioned = list(key = NULL, partition = "part"),
+    keyed_one_file = list(key = "id", partition = NULL)
+  )
+  setting <- function() {
+    as.character(DBI::dbGetQuery(con, "SELECT current_setting('preserve_insertion_order') AS v")$v)
+  }
+  for (name in names(cases)) {
+    args <- cases[[name]]
+    DBI::dbExecute(con, "RESET preserve_insertion_order")
+    a <- duck_store()
+    out_a <- duck_write(a$st, tbl, key = args$key, partition = args$partition)
+
+    DBI::dbExecute(con, "SET preserve_insertion_order = false")
+    b <- duck_store()
+    out_b <- duck_write(b$st, tbl, key = args$key, partition = args$partition)
+    expect_identical(attr(out_b, "version"), attr(out_a, "version"), label = name)
+    expect_identical(duck_md5(b), duck_md5(a), label = name)
+    expect_identical(tolower(setting()), "false", label = name)
+  }
+  expect_identical(duck_write_tables(con), character())
+})
+
+test_that("a non-partitioned lazy write still materialises once and equals the collected write", {
+  # B-T7. Guard (D-B1: without a partition nothing streams): one call of the
+  # file writer, reading one table of every row, and the files of the
+  # collected write. File equality is also covered by "files, catalog rows,
+  # manifest and version equal those of the collected data" above. The
+  # geospatial lazy write is covered by test-write-duckdb-geo.R: "polygons
+  # and points written from DuckDB equal store_write() of the same sf, ...",
+  # "partition = \"h3\" from DuckDB gives the files and version of
+  # store_write() of the sf" and "partition by an attribute column from
+  # DuckDB equals store_write() of the sf".
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  x <- duck_sales_data(300)
+  tbl <- duck_table(con, x)
+  collected <- tibble::as_tibble(dplyr::collect(tbl))
+  for (key in list(duck_key, NULL)) {
+    spy <- local_writer_spy(con)
+    a <- duck_store()
+    out_a <- duck_write(a$st, tbl, key = key)
+    expect_length(spy$calls, 1L)
+    expect_identical(unname(spy$calls[[1]]), 300)
+    b <- duck_store()
+    out_b <- duck_write(b$st, collected, key = key)
+    expect_identical(attr(out_a, "version"), attr(out_b, "version"))
+    expect_identical(duck_md5(a), duck_md5(b))
+  }
+})
+
+test_that("partition values of every DuckDB type round-trip through the streamed path", {
+  # B-T8. Red before WP5: the values already round-trip (the materialised
+  # path is correct), but there is one writer call reading the whole
+  # table of 60 rows, not one call per partition reading a table of that
+  # partition's 20 (or 30) rows. That spy is what only the streamed path
+  # (D-B2 step 4) gives; the VARCHAR value "O'Brien x" (a quote and a
+  # space) then shows that the per-partition filter binds its values
+  # rather than pasting them.
+  skip_if_no_duckdb_write()
+  con <- local_duckdb()
+  base <- as.data.frame(rcs_sim_table(60)[c("qty", "price")])
+  base$b <- seq_len(nrow(base)) - 1L
+  duckdb::duckdb_register(con, "typed_base", base)
+  DBI::dbExecute(con, paste(
+    "CREATE TABLE typed AS SELECT b::INTEGER AS id, qty, price,",
+    "(b % 3)::INTEGER AS p_int,",
+    "[1.5, 2.25, -0.125][(b % 3) + 1]::DOUBLE AS p_dbl,",
+    "['O''Brien x', 'a b', 'plain'][(b % 3) + 1]::VARCHAR AS p_chr,",
+    "(DATE '2024-02-28' + (b % 3)::INTEGER) AS p_date,",
+    "(b % 2 = 0) AS p_lgl,",
+    "(1099511627776 + (b % 3))::BIGINT AS p_big",
+    "FROM typed_base"
+  ))
+  tbl <- dplyr::tbl(con, "typed")
+  collected <- tibble::as_tibble(dplyr::collect(tbl))
+  expect_true("O'Brien x" %in% collected$p_chr)
+
+  for (col in c("p_int", "p_dbl", "p_chr", "p_date", "p_lgl", "p_big")) {
+    sizes <- as.numeric(table(as.character(collected[[col]])))
+    spy <- local_writer_spy(con)
+    a <- duck_store()
+    out_a <- duck_write(a$st, tbl, key = "id", partition = col)
+    expect_length(spy$calls, length(sizes))
+    expect_gt(length(unlist(spy$calls)), 0L)
+    expect_lte(max(unlist(spy$calls), 0), max(sizes), label = col)
+
+    b <- duck_store()
+    out_b <- duck_write(b$st, collected, key = "id", partition = col)
+    expect_identical(attr(out_a, "version"), attr(out_b, "version"), label = col)
+    expect_identical(duck_facts(a), duck_facts(b), label = col)
+    expect_identical(as.numeric(a$st$primary$catalog$n_files), as.numeric(length(sizes)), label = col)
+  }
 })

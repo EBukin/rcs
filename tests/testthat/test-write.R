@@ -288,6 +288,448 @@ test_that("update brings a secondary that missed a write up to date", {
   expect_rows_equal(stored_rows(st$secondary[[2]], "sales/daily"), expected, sales_key)
 })
 
+# Plan 0004: user h3_p<r> partitions ----------------------------------------------
+# A column named `h3_p<r>` given as `partition` is a user column: kept as given,
+# never recomputed (D-A1 to D-A7). Red reasons are those of the plan, WP1.
+
+# The reporter's table (note 0002): character `h3_p3`, keyed by `id`.
+user_h3_table <- function() {
+  list(
+    x = data.frame(
+      id = 1:5, v = c(1.5, 2.5, 3.5, 4.5, 5.5),
+      h3_p3 = c(rep("831e5afffffffff", 3), rep("831e5cfffffffff", 2))
+    ),
+    y = data.frame(id = 6:7, v = c(6.5, 7.5), h3_p3 = "831e5cfffffffff")
+  )
+}
+
+write_user_table <- function(st, x, mode = "create", ...) {
+  suppressMessages(store_write(st, x, "t/plain",
+    title = "Plain", description = "User h3_p3 partition.",
+    key = if (mode != "update") "id", mode = mode, ...
+  ))
+}
+
+dataset_entry <- function(st, dataset) {
+  catalog <- st$primary$catalog
+  catalog[catalog$dataset == dataset, ]
+}
+
+# Simulated points with a user `h3_p3` (hex text, or `rcs_h3` when `cells`):
+# the res-3 parents, except row `mismatch_id` of `create`, which is given the
+# cell of another partition. `update` replaces the partition `replaced`, adds
+# the partition `added` and holds row 1000 whose `h3_p3` (`added`) is not its
+# computed parent. `expected` is the dataset after the update.
+user_h3_points <- function(cells = FALSE) {
+  x <- rcs_sim_points(40, seed = 1)
+  parent <- h3_as_hex(rcs_geo_add(x, parents = 3L)$h3_p3)
+  by_size <- names(sort(table(parent), decreasing = TRUE))
+  replaced <- by_size[[1]]
+  added <- by_size[[2]]
+  other <- by_size[[3]]
+  create <- x[parent != added, ]
+  create$h3_p3 <- parent[parent != added]
+  mis <- which(!create$h3_p3 %in% c(replaced, other))[[1]]
+  create$h3_p3[mis] <- other
+  update <- x[parent %in% c(replaced, added), ]
+  update$value <- update$value + 1
+  update$h3_p3 <- parent[parent %in% c(replaced, added)]
+  extra <- create[mis, ]
+  extra$id <- 1000L
+  extra$h3_p3 <- added
+  update <- rbind(update, extra)
+  expected <- rbind(create[create$h3_p3 != replaced, ], update)
+  if (cells) {
+    create$h3_p3 <- new_rcs_h3(h3_as_int64(create$h3_p3))
+    update$h3_p3 <- new_rcs_h3(h3_as_int64(update$h3_p3))
+  }
+  list(
+    create = create, update = update, expected = expected,
+    mismatch_id = create$id[[mis]], mismatch = other, replaced = replaced, added = added
+  )
+}
+
+write_user_points <- function(st, x, mode = "create", ...) {
+  suppressMessages(store_write(st, x, "points/user",
+    title = "Points", description = "User h3_p3 partition.",
+    key = if (mode != "update") "id", mode = mode, ...
+  ))
+}
+
+# `h3_p3` of the stored rows as hex, named by `id`.
+stored_h3_p3 <- function(st, dataset) {
+  rows <- stored_rows(st$primary, dataset)
+  hex <- if (is.character(rows$h3_p3)) rows$h3_p3 else h3_as_hex(rcs_h3_strip(rows$h3_p3))
+  stats::setNames(hex, rows$id)[order(rows$id)]
+}
+
+expect_user_points_kept <- function(st, d) {
+  expected <- stats::setNames(d$expected$h3_p3, d$expected$id)[order(d$expected$id)]
+  stored <- stored_h3_p3(st, "points/user")
+  expect_identical(stored, expected)
+  expect_identical(stored[[as.character(d$mismatch_id)]], d$mismatch)
+  expect_identical(stored[["1000"]], d$added)
+  files <- st$primary$files[st$primary$files$dataset == "points/user", ]
+  values <- vctrs::vec_unique(d$expected$h3_p3)
+  if (is.character(stored_rows(st$primary, "points/user")$h3_p3)) {
+    pv <- vapply(values, function(v) partition_values_json(list(h3_p3 = v)), character(1))
+  } else {
+    pv <- vapply(values, function(v) partition_values_json(list(h3_p3 = h3_as_int64(v))), character(1))
+  }
+  expect_setequal(files$partition_values, unname(pv))
+  entry <- dataset_entry(st, "points/user")
+  expect_identical(entry$partition[[1]], "h3_p3")
+  expect_identical(entry$partition_auto, FALSE)
+}
+
+test_that("a table with a character user h3_p3 updates with partition = \"h3_p3\"", {
+  # A-T1. Red: the update aborts with "Stored partition: h3".
+  s <- local_store()
+  d <- user_h3_table()
+  write_user_table(s$st, d$x, partition = "h3_p3")
+  write_user_table(s$st, d$y, mode = "update", partition = "h3_p3")
+  rows <- stored_rows(s$st$primary, "t/plain")
+  rows <- rows[order(rows$id), ]
+  # the update replaces the partition 831e5cfffffffff entirely: ids 4-5 by 6-7
+  expect_identical(rows$id, c(1:3, 6:7))
+  expect_type(rows$h3_p3, "character")
+  expect_identical(rows$h3_p3, c(d$x$h3_p3[1:3], d$y$h3_p3))
+  entry <- dataset_entry(s$st, "t/plain")
+  expect_identical(entry$partition[[1]], "h3_p3")
+  expect_identical(entry$partition_auto, FALSE)
+  expect_store_valid(s$st)
+})
+
+test_that("a table with a character user h3_p3 updates without partition", {
+  # A-T2. Red: the update aborts with "`partition = \"h3\"` needs geocoded
+  # geospatial data".
+  s <- local_store()
+  d <- user_h3_table()
+  write_user_table(s$st, d$x, partition = "h3_p3")
+  write_user_table(s$st, d$y, mode = "update")
+  rows <- stored_rows(s$st$primary, "t/plain")
+  rows <- rows[order(rows$id), ]
+  # the update replaces the partition 831e5cfffffffff entirely: ids 4-5 by 6-7
+  expect_identical(rows$id, c(1:3, 6:7))
+  expect_type(rows$h3_p3, "character")
+  expect_identical(rows$h3_p3, c(d$x$h3_p3[1:3], d$y$h3_p3))
+  entry <- dataset_entry(s$st, "t/plain")
+  expect_identical(entry$partition[[1]], "h3_p3")
+  expect_identical(entry$partition_auto, FALSE)
+  expect_store_valid(s$st)
+})
+
+test_that("sf with a character user h3_p3 updates with partition = \"h3_p3\" and keeps every value", {
+  # A-T3 (a). Red: the update aborts with "Stored partition: h3".
+  skip_if_no_h3()
+  s <- local_store()
+  d <- user_h3_points()
+  write_user_points(s$st, d$create, partition = "h3_p3")
+  write_user_points(s$st, d$update, mode = "update", partition = "h3_p3")
+  expect_user_points_kept(s$st, d)
+  expect_store_valid(s$st)
+})
+
+test_that("sf with a character user h3_p3 updates without partition and keeps every value", {
+  # A-T3 (b). Red: the update aborts with "The column h3_p3 of `x` differs from
+  # the partition column the write computes".
+  skip_if_no_h3()
+  s <- local_store()
+  d <- user_h3_points()
+  write_user_points(s$st, d$create, partition = "h3_p3")
+  write_user_points(s$st, d$update, mode = "update")
+  expect_user_points_kept(s$st, d)
+  expect_store_valid(s$st)
+})
+
+test_that("sf with an rcs_h3 user h3_p3 updates with partition = \"h3_p3\" and keeps every value", {
+  # A-T4 (a). Red: the update aborts with "Stored partition: h3".
+  skip_if_no_h3()
+  s <- local_store()
+  d <- user_h3_points(cells = TRUE)
+  write_user_points(s$st, d$create, partition = "h3_p3")
+  write_user_points(s$st, d$update, mode = "update", partition = "h3_p3")
+  expect_user_points_kept(s$st, d)
+  expect_store_valid(s$st)
+})
+
+test_that("sf with an rcs_h3 user h3_p3 updates without partition and keeps every value", {
+  # A-T4 (b). Red: the update aborts with "The column h3_p3 of `x` differs from
+  # the partition column the write computes".
+  skip_if_no_h3()
+  s <- local_store()
+  d <- user_h3_points(cells = TRUE)
+  write_user_points(s$st, d$create, partition = "h3_p3")
+  write_user_points(s$st, d$update, mode = "update")
+  expect_user_points_kept(s$st, d)
+  expect_store_valid(s$st)
+})
+
+write_auto_points <- function(st, x, mode = "create", ...) {
+  suppressMessages(store_write(st, x, "points/auto",
+    title = "Points", description = "Automatic h3 partition.",
+    key = if (mode != "update") "id", mode = mode, ...
+  ))
+}
+
+test_that("sf with partition = \"h3\" updates with and without partition as before", {
+  # A-T5. Guard: passes before plan 0004.
+  skip_if_no_h3()
+  s <- local_store()
+  x <- rcs_sim_points(60, seed = 4)
+  write_auto_points(s$st, x, partition = "h3", max_files = 10)
+  partition <- dataset_entry(s$st, "points/auto")$partition[[1]]
+  expect_match(partition, "^h3_p[0-9]+$")
+  res <- as.integer(sub("^h3_p", "", partition))
+  # in the order of `rows` (geo_encode() reorders them)
+  part_of <- function(rows) as.character(rcs_geo_add(rows, parents = res)[[partition]])
+  # update 1, with partition = "h3": every row of the largest partition
+  first <- names(sort(table(part_of(x)), decreasing = TRUE))[[1]]
+  y <- x[part_of(x) == first, ]
+  y$value <- y$value + 1
+  # update 2, without partition: new points, new ids
+  z <- rcs_sim_points(10, seed = 9)
+  z$id <- z$id + 100L
+  local_snapshot_output()
+  withr::local_options(rcs.quiet = FALSE)
+  expect_snapshot(
+    store_write(s$st, y, "points/auto", title = "Points", description = "Automatic h3 partition.",
+      mode = "update", partition = "h3", max_files = 10
+    ),
+    transform = scrub(s$root)
+  )
+  expect_snapshot(
+    store_write(s$st, z, "points/auto", title = "Points", description = "Automatic h3 partition.",
+      mode = "update", max_files = 10
+    ),
+    transform = scrub(s$root)
+  )
+  expect_identical(dataset_entry(s$st, "points/auto")$partition[[1]], partition)
+  after_y <- rbind(x[part_of(x) != first, ], y)
+  all_rows <- rbind(after_y[!part_of(after_y) %in% part_of(z), ], z)
+  parents <- vctrs::vec_unique(h3_parent(geo_encode(all_rows, 5L)$data$h3, res))
+  pv <- vapply(seq_along(parents), function(i) {
+    partition_values_json(rlang::set_names(list(parents[i]), partition))
+  }, character(1))
+  expect_setequal(s$st$primary$files$partition_values[s$st$primary$files$dataset == "points/auto"], pv)
+  stored <- stored_rows(s$st$primary, "points/auto")
+  expect_setequal(stored$id, all_rows$id)
+  expect_identical(stored$value[order(stored$id)], all_rows$value[order(all_rows$id)])
+  expect_store_valid(s$st)
+})
+
+test_that("partition = \"h3\" is recorded as partition_auto = TRUE on create and update", {
+  # A-T5, red part. Red: the catalog has no column `partition_auto`.
+  skip_if_no_h3()
+  s <- local_store()
+  x <- rcs_sim_points(60, seed = 4)
+  write_auto_points(s$st, x[1:40, ], partition = "h3", max_files = 10)
+  expect_identical(dataset_entry(s$st, "points/auto")$partition_auto, TRUE)
+  write_auto_points(s$st, x[41:50, ], mode = "update", partition = "h3", max_files = 10)
+  expect_identical(dataset_entry(s$st, "points/auto")$partition_auto, TRUE)
+  write_auto_points(s$st, x[51:60, ], mode = "update", max_files = 10)
+  expect_identical(dataset_entry(s$st, "points/auto")$partition_auto, TRUE)
+})
+
+# A-T6 (guard): an update of partition = "h3" beyond max_files re-partitions to
+# a coarser resolution. Covered by the test "an update of partition = \"h3\"
+# beyond max_files re-partitions the dataset" in the section Geospatial below.
+
+test_that("an update whose partition differs from the stored kind aborts naming the stored partition", {
+  # A-T7. Red: the automatic case aborts today with "Stored partition: h3"
+  # without "written as"; the user case passes the comparison and aborts later
+  # with class `rcs_error_prepared` ("differs from the partition column the
+  # write computes"), not `rcs_error_argument`.
+  skip_if_no_h3()
+  s <- local_store()
+  x <- rcs_sim_points(40, seed = 1)
+  suppressMessages(store_write(s$st, x, "points/auto",
+    title = "Points", description = "Automatic partition.", key = "id", partition = "h3"
+  ))
+  written <- dataset_entry(s$st, "points/auto")$partition[[1]]
+  expect_identical(written, "h3_p5")
+  err <- expect_error(
+    store_write(s$st, x[1:5, ], "points/auto", title = "Points", description = "Automatic partition.",
+      mode = "update", partition = written
+    ),
+    class = "rcs_error_argument"
+  )
+  expect_match(cli::ansi_strip(conditionMessage(err)), paste0("written as [`\"]?", written))
+  d <- user_h3_points()
+  write_user_points(s$st, d$create, partition = "h3_p3")
+  err <- expect_error(
+    write_user_points(s$st, d$update, mode = "update", partition = "h3"),
+    class = "rcs_error_argument"
+  )
+  expect_match(cli::ansi_strip(conditionMessage(err)), "h3_p3", fixed = TRUE)
+  local_snapshot_output()
+  expect_snapshot(error = TRUE, {
+    store_write(s$st, x[1:5, ], "points/auto", title = "Points", description = "Automatic partition.",
+      mode = "update", partition = "h3_p5"
+    )
+    store_write(s$st, d$update, "points/user", title = "Points", description = "User h3_p3 partition.",
+      mode = "update", partition = "h3"
+    )
+  })
+})
+
+test_that("format_partition() shows a character h3_p<r> value as it is and a cell as hex", {
+  # A-T9. Red: the character value gives "h3_p3 = NA" and the warning "NAs
+  # introduced by coercion to integer64 range".
+  expect_no_warning(shown <- format_partition('{"h3_p3":"831e5afffffffff"}'))
+  expect_identical(shown, "h3_p3 = 831e5afffffffff")
+  # an automatic integer64 cell, written as a string of digits
+  cell <- partition_values_json(list(h3_p3 = h3_as_int64("835658fffffffff")))
+  expect_identical(format_partition(cell), "h3_p3 = 835658fffffffff")
+  expect_identical(format_partition('{"year":2024}'), "year = 2024")
+})
+
+test_that("the update message of a character user h3_p3 shows the values as given", {
+  # A-T9, message. Red: the update aborts with "Stored partition: h3".
+  s <- local_store()
+  d <- user_h3_table()
+  write_user_table(s$st, d$x, partition = "h3_p3")
+  local_snapshot_output()
+  withr::local_options(rcs.quiet = FALSE)
+  expect_snapshot(
+    store_write(s$st, d$y, "t/plain", title = "Plain", description = "User h3_p3 partition.",
+      mode = "update", partition = "h3_p3"
+    ),
+    transform = scrub(s$root)
+  )
+})
+
+# Catalog entries for `partition_is_auto()`, one per case of D-A2, written for
+# real so that `spec` is what the write stores.
+partition_cases <- function(st) {
+  tab <- user_h3_table()$x
+  tab_cells <- tab
+  tab_cells$h3_p3 <- h3_as_int64(tab_cells$h3_p3)
+  d <- user_h3_points()
+  cells <- user_h3_points(cells = TRUE)$create
+  pts <- rcs_sim_points(40, seed = 1)
+  w <- function(x, dataset, ...) {
+    suppressMessages(store_write(st, x, dataset, title = "t", description = "d", ...))
+  }
+  w(tab, "tab/char", key = "id", partition = "h3_p3")
+  w(tab_cells, "tab/cells", key = "id", partition = "h3_p3")
+  w(tab, "tab/none", key = "id")
+  w(pts, "sf/auto", key = "id", partition = "h3")
+  w(cells, "sf/cells", key = "id", partition = "h3_p3")
+  w(d$create, "sf/char", key = "id", partition = "h3_p3")
+  w(pts, "sf/cat", key = "id", partition = "cat")
+  w(cells, "sf/two", key = "id", partition = c("cat", "h3_p3"))
+  w(pts, "sf/none", key = "id")
+  function(dataset, auto = NA) {
+    entry <- dataset_entry(st, dataset)
+    entry$partition_auto <- auto
+    list(entry = entry, spec = columns_from_json(entry$columns))
+  }
+}
+
+test_that("partition_is_auto() resolves every case of D-A2", {
+  # A-T10. Red: could not find function "partition_is_auto".
+  skip_if_no_h3()
+  s <- local_store()
+  case <- partition_cases(s$st)
+  is_auto <- function(dataset, auto = NA) {
+    one <- case(dataset, auto)
+    partition_is_auto(one$entry, one$spec)
+  }
+  # a recorded flag is used as it is
+  expect_identical(is_auto("sf/cells", TRUE), TRUE)
+  expect_identical(is_auto("sf/auto", FALSE), FALSE)
+  expect_identical(is_auto("tab/char", FALSE), FALSE)
+  # legacy (NA), no partition
+  expect_identical(is_auto("tab/none"), NA)
+  expect_identical(is_auto("sf/none"), NA)
+  # legacy, a table: never automatic
+  expect_identical(is_auto("tab/char"), FALSE)
+  expect_identical(is_auto("tab/cells"), FALSE)
+  # legacy, geospatial: automatic only for one h3_p<r> column of cells
+  expect_identical(is_auto("sf/auto"), TRUE)
+  expect_identical(is_auto("sf/cells"), TRUE)
+  expect_identical(is_auto("sf/char"), FALSE)
+  expect_identical(is_auto("sf/cat"), FALSE)
+  expect_identical(is_auto("sf/two"), FALSE)
+})
+
+test_that("an update of a user h3_p3 beyond max_files aborts as for any user column and keeps the files", {
+  # D-A4. Red: with `partition = "h3_p3"` the update aborts with "Stored
+  # partition: h3" (right class, wrong message); without it, with class
+  # `rcs_error_prepared` ("differs from the partition column the write
+  # computes"). The expected abort is the one of any user column, as for
+  # `year`: "Partitioning by h3_p3 would give N files, more than `max_files`".
+  skip_if_no_h3()
+  for (cells in c(FALSE, TRUE)) {
+    for (given in list("h3_p3", NULL)) {
+      local({
+        s <- local_store()
+        d <- user_h3_points(cells = cells)
+        n_create <- length(vctrs::vec_unique(d$create$h3_p3))
+        write_user_points(s$st, d$create, partition = "h3_p3", max_files = n_create)
+        files_before <- s$st$primary$files[s$st$primary$files$dataset == "points/user", ]
+        label <- paste0("cells = ", cells, ", partition = ", if (is.null(given)) "NULL" else given)
+        err <- expect_error(
+          write_user_points(s$st, d$update, mode = "update", partition = given, max_files = n_create),
+          class = "rcs_error_argument", label = label
+        )
+        expect_match(
+          cli::ansi_strip(conditionMessage(err)),
+          "Partitioning by h3_p3 would give [0-9]+ files, more than `max_files`",
+          label = label
+        )
+        expect_identical(dataset_entry(s$st, "points/user")$partition[[1]], "h3_p3", label = label)
+        files_after <- s$st$primary$files[s$st$primary$files$dataset == "points/user", ]
+        expect_identical(files_after$path, files_before$path, label = label)
+        expect_identical(files_after$partition_values, files_before$partition_values, label = label)
+      })
+    }
+  }
+})
+
+test_that("create records partition_auto: NA without partition, FALSE for user columns, TRUE for \"h3\"", {
+  # D-A1, D-A5. Red: the catalog has no column `partition_auto`.
+  skip_if_no_h3()
+  s <- local_store()
+  # (a) no partition
+  suppressMessages(store_write(s$st, sales_data(30), "flag/none", title = "t", description = "d"))
+  expect_identical(dataset_entry(s$st, "flag/none")$partition_auto, NA)
+  # (b) a user column that is not h3_p<r>
+  suppressMessages(store_write(s$st, sales_data(30), "flag/year",
+    title = "t", description = "d", key = sales_key, partition = "year"
+  ))
+  expect_identical(dataset_entry(s$st, "flag/year")$partition_auto, FALSE)
+  # (c) sf with partition = "h3_p3" whose values all equal the computed parents
+  x <- rcs_sim_points(40, seed = 1)
+  x$h3_p3 <- rcs_geo_add(x, parents = 3L)$h3_p3
+  suppressMessages(store_write(s$st, x, "flag/equal",
+    title = "t", description = "d", key = "id", partition = "h3_p3"
+  ))
+  expect_identical(dataset_entry(s$st, "flag/equal")$partition[[1]], "h3_p3")
+  expect_identical(dataset_entry(s$st, "flag/equal")$partition_auto, FALSE)
+})
+
+test_that("an index table partitioned by h3 records partition_auto = TRUE", {
+  # D-A1. Red: the catalog has no column `partition_auto`.
+  # stage_index() partitions the index table with partition = "h3" when it
+  # has more than `rows_per_group * 100` rows: 150 polygons give about 370
+  # index rows, so rows_per_group = 1 makes it partitioned. The DuckDB
+  # stager duckdb_stage_index() is not covered here (test-write-duckdb-geo.R
+  # is outside WP1's files).
+  skip_if_no_h3()
+  s <- local_store()
+  pol <- rcs_sim_polygons(150, seed = 1)
+  suppressMessages(store_write(s$st, pol, "shapes/indexed",
+    title = "t", description = "d", key = "id", rows_per_group = 1L
+  ))
+  index <- dataset_entry(s$st, "shapes/indexed__h3")
+  expect_identical(index$index_of, "shapes/indexed")
+  expect_match(index$partition[[1]], "^h3_p[0-9]+$")
+  expect_identical(index$partition_auto, TRUE)
+  expect_identical(dataset_entry(s$st, "shapes/indexed")$partition_auto, NA)
+})
+
 # Geospatial --------------------------------------------------------------------
 
 test_that("geospatial data are written with their index table, replaced and stripped of it", {

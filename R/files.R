@@ -557,7 +557,7 @@ files_stage <- function(data, dataset, title, description,
   meta <- files_meta(
     dataset = dataset, kind = kind, title = title, description = description,
     spec = spec, key = key, sorted_by = sorted_by, partition = plan$partition,
-    source = source, inputs = inputs, crs = crs, h3_res = h3_res,
+    partition_auto = identical(partition, "h3"), source = source, inputs = inputs, crs = crs, h3_res = h3_res,
     geocode_engine = geocode_engine, index_of = index_of, history = history
   )
   rcs_json <- files_rcs_json(meta)
@@ -594,20 +594,24 @@ files_stage <- function(data, dataset, title, description,
 #'
 #' @param spec The `columns` specification (`files_columns_spec()`).
 #' @param partition The partition columns as written.
+#' @param partition_auto `TRUE` when the partition was chosen by
+#'   `partition = "h3"`, `FALSE` for user columns; recorded as `NA` when
+#'   `partition` is empty (plan 0004, D-A1).
 #' @inheritParams files_stage
 #' @return A list of the arguments of `new_entry()`, with `columns` (the
 #'   catalog's JSON, `rcs_h3` kept) and `columns_embedded` (the files' JSON,
 #'   `rcs_h3` recorded as `integer64`, D8).
 #' @noRd
 files_meta <- function(dataset, kind, title, description, spec, key, sorted_by,
-                       partition, source, inputs, crs, h3_res, geocode_engine,
+                       partition, partition_auto, source, inputs, crs, h3_res, geocode_engine,
                        index_of, history) {
   list(
     dataset = dataset, kind = kind, title = title, description = description,
     columns = columns_to_json(spec),
     columns_embedded = columns_to_json(columns_spec_embedded(spec)),
-    key = key, sorted_by = sorted_by, partition = partition, source = source,
-    inputs = inputs, crs = crs, h3_res = h3_res, geocode_engine = geocode_engine,
+    key = key, sorted_by = sorted_by, partition = partition,
+    partition_auto = if (length(partition) > 0) partition_auto else NA,
+    source = source, inputs = inputs, crs = crs, h3_res = h3_res, geocode_engine = geocode_engine,
     index_of = index_of, history = history
   )
 }
@@ -622,7 +626,8 @@ files_rcs_json <- function(meta) {
     dataset = meta$dataset, kind = meta$kind, title = meta$title,
     description = meta$description, version = strrep("0", 16), n_files = 0,
     rows = 0, bytes = 0, columns = meta$columns_embedded, key = meta$key,
-    sorted_by = meta$sorted_by, partition = meta$partition, source = meta$source,
+    sorted_by = meta$sorted_by, partition = meta$partition,
+    partition_auto = meta$partition_auto, source = meta$source,
     inputs = meta$inputs, crs = meta$crs, h3_res = meta$h3_res,
     geocode_engine = meta$geocode_engine, index_of = meta$index_of,
     history = meta$history
@@ -721,8 +726,8 @@ files_finish <- function(meta, new, keep, created, geospatial, has_cells, dir) {
     description = meta$description, version = version, n_files = nrow(files),
     rows = sum(files$rows), bytes = sum(files$bytes), columns = meta$columns,
     key = meta$key, sorted_by = meta$sorted_by, partition = meta$partition,
-    source = meta$source, inputs = meta$inputs, crs = meta$crs,
-    bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
+    partition_auto = meta$partition_auto, source = meta$source,
+    inputs = meta$inputs, crs = meta$crs, bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
     h3_res = meta$h3_res, geocode_engine = meta$geocode_engine,
     index_of = meta$index_of, history = meta$history, created = created,
     updated = now

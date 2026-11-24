@@ -522,3 +522,127 @@ test_that("store_sync() and store_copy() work between an old-format location and
   expect_identical(engines[["shapes/engine"]], "auto")
   expect_true("geocode_engine" %in% catalog_file_columns(fx$primary))
 })
+
+# Partition kind column (plan 0004, D-A1, D-A2) -------------------------------
+
+# Rewrites `_catalog.parquet` of a location folder as the schema before plan
+# 0004 had it: without the column `partition_auto`.
+# The manifests are rewritten too, with the flag left out as an old writer
+# left it out (`manifest_to_json()` omits an `NA` flag), so that the store is
+# a faithful legacy store. The flag embedded in the data files' metadata is
+# kept: rewriting it would change the files' MD5 and the versions, and
+# nothing compares it with the catalog.
+drop_partition_auto_column <- function(root) {
+  path <- file.path(root, "_catalog.parquet")
+  table <- read_catalog_file(root)
+  arrow::write_parquet(table[, setdiff(names(table), "partition_auto")], path, compression = "zstd")
+  manifests <- list.files(root, "^_manifest-[0-9a-f]{16}[.]json$", recursive = TRUE, full.names = TRUE)
+  for (m in manifests) {
+    manifest <- manifest_from_json(readChar(m, file.size(m), useBytes = TRUE))
+    manifest$entry$partition_auto <- NA
+    manifest_write_local(manifest, m)
+  }
+}
+
+catalog_file_partition_auto <- function(root) {
+  catalog <- read_catalog_file(root, as_data_frame = TRUE)
+  if (!"partition_auto" %in% names(catalog)) {
+    return(NULL)
+  }
+  as.list(stats::setNames(catalog$partition_auto, catalog$dataset))
+}
+
+# A store with three datasets written now, then its catalog file rewritten
+# without `partition_auto`: "tab/user", a table with a character user h3_p3;
+# "sf/auto", points with the automatic partition (rows 1 to 30); "sf/user",
+# points with a user rcs_h3 h3_p3 (rows 1 to 30) whose row 1 is not its
+# computed parent. Returns the reconnected store and the data.
+local_legacy_partition_store <- function(frame = parent.frame()) {
+  withr::local_options(rcs.quiet = TRUE, .local_envir = frame)
+  root <- file.path(normalizePath(withr::local_tempdir(.local_envir = frame), winslash = "/"), "store")
+  store_create(root)
+  st <- store_connect(root)
+  w <- function(x, dataset, ...) {
+    store_write(st, x, dataset, title = "t", description = "d", ...)
+  }
+  tab <- data.frame(
+    id = 1:5, v = c(1.5, 2.5, 3.5, 4.5, 5.5),
+    h3_p3 = c(rep("831e5afffffffff", 3), rep("831e5cfffffffff", 2))
+  )
+  w(tab, "tab/user", key = "id", partition = "h3_p3")
+  pts <- rcs_sim_points(40, seed = 1)
+  w(pts[1:30, ], "sf/auto", key = "id", partition = "h3")
+  auto_partition <- st$primary$catalog$partition[[match("sf/auto", st$primary$catalog$dataset)]]
+  parent <- rcs_h3_strip(rcs_geo_add(pts, parents = 3L)$h3_p3)
+  other <- parent[parent != parent[1]][1]
+  cells <- pts
+  cells$h3_p3 <- parent
+  cells$h3_p3[1] <- other
+  cells$h3_p3 <- new_rcs_h3(cells$h3_p3)
+  w(cells[1:30, ], "sf/user", key = "id", partition = "h3_p3")
+  drop_partition_auto_column(root)
+  list(
+    root = root, st = store_connect(root), tab = tab, pts = pts, cells = cells,
+    other = other, auto_partition = auto_partition
+  )
+}
+
+expect_legacy_catalog <- function(fx) {
+  expect_false("partition_auto" %in% catalog_file_columns(fx$root))
+  expect_true("partition_auto" %in% names(fx$st$primary$catalog))
+  expect_true(all(is.na(fx$st$primary$catalog$partition_auto)))
+}
+
+test_that("a legacy catalog: a table with a character user h3_p3 updates without partition", {
+  # A-T8 (i). Red: the update aborts with "`partition = \"h3\"` needs geocoded
+  # geospatial data"; the column assertions fail because `partition_auto`
+  # does not exist.
+  skip_if_no_h3()
+  fx <- local_legacy_partition_store()
+  expect_legacy_catalog(fx)
+  y <- data.frame(id = 6:7, v = c(6.5, 7.5), h3_p3 = "831e5cfffffffff")
+  suppressMessages(store_write(fx$st, y, "tab/user", title = "t", description = "d", mode = "update"))
+  expect_true("partition_auto" %in% catalog_file_columns(fx$root))
+  rows <- dplyr::collect(store_open(fx$st, "tab/user"))
+  rows <- rows[order(rows$id), ]
+  # the update replaces the partition 831e5cfffffffff entirely: ids 4-5 by 6-7
+  expect_identical(rows$id, c(1:3, 6:7))
+  expect_type(rows$h3_p3, "character")
+  expect_identical(rows$h3_p3, c(fx$tab$h3_p3[1:3], y$h3_p3))
+  expect_identical(fx$st$primary$catalog$partition[[match("tab/user", fx$st$primary$catalog$dataset)]], "h3_p3")
+  expect_identical(catalog_file_partition_auto(fx$root)[["tab/user"]], FALSE)
+  expect_store_valid(fx$st)
+})
+
+test_that("a legacy catalog: sf with the automatic h3 partition updates as automatic", {
+  # A-T8 (ii). Red: the column assertions fail because `partition_auto` does
+  # not exist (the update itself works today).
+  skip_if_no_h3()
+  fx <- local_legacy_partition_store()
+  expect_legacy_catalog(fx)
+  suppressMessages(store_write(fx$st, fx$pts[31:40, ], "sf/auto", title = "t", description = "d", mode = "update"))
+  catalog <- fx$st$primary$catalog
+  expect_identical(catalog$partition[[match("sf/auto", catalog$dataset)]], fx$auto_partition)
+  expect_true("partition_auto" %in% catalog_file_columns(fx$root))
+  expect_identical(catalog_file_partition_auto(fx$root)[["sf/auto"]], TRUE)
+  expect_store_valid(fx$st)
+})
+
+test_that("a legacy catalog: sf with a user rcs_h3 h3_p3 updates with partition = \"h3_p3\" and keeps its values", {
+  # A-T8 (iii). Red: the update aborts with "Stored partition: h3"; the column
+  # assertions fail because `partition_auto` does not exist.
+  skip_if_no_h3()
+  fx <- local_legacy_partition_store()
+  expect_legacy_catalog(fx)
+  suppressMessages(store_write(fx$st, fx$cells[c(1, 31:40), ], "sf/user",
+    title = "t", description = "d", mode = "update", partition = "h3_p3"
+  ))
+  back <- dplyr::collect(store_open(fx$st, "sf/user"))
+  back <- back[order(back$id), ]
+  expect_true(1L %in% back$id)
+  expect_identical(as.character(back$h3_p3), as.character(fx$cells$h3_p3[back$id]))
+  expect_identical(as.character(back$h3_p3[back$id == 1]), as.character(fx$other))
+  expect_true("partition_auto" %in% catalog_file_columns(fx$root))
+  expect_identical(catalog_file_partition_auto(fx$root)[["sf/user"]], FALSE)
+  expect_store_valid(fx$st)
+})

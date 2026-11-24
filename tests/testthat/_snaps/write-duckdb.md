@@ -70,3 +70,21 @@
     Output
       i Columns h3 and .rcs_id of `x` are the package's own and are dropped.
 
+# a key repeated across two partitions, or a repeated key holding NULL, aborts as today
+
+    Code
+      duck_write(s$st, tbl, key = duck_key, partition = "year")
+    Condition
+      Error in `store_write()`:
+      ! The key shop_id, date, and product does not identify the rows: 1 key value repeats.
+      x shop_id = 3, date = 2024-01-11, product = p08
+
+---
+
+    Code
+      duck_write(s$st, tbl, key = duck_key, partition = "year")
+    Condition
+      Error in `store_write()`:
+      ! The key shop_id, date, and product does not identify the rows: 1 key value repeats.
+      x shop_id = NA, date = 2023-11-03, product = p11
+

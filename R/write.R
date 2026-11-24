@@ -59,18 +59,38 @@
 #' `x` may be a lazy table on a DuckDB connection (from [dplyr::tbl()], for
 #' example on a view of [store_duckdb()], or from
 #' `store_open(engine = "duckdb")`), so that a result computed in DuckDB is
-#' stored without being collected into R as a whole. Its query runs once
-#' inside DuckDB into a temporary copy, the table `rcs_write_<random>` on
-#' the same connection, which every later step reads and which is dropped
-#' when the call ends, also after an error; the copy needs room in DuckDB's
-#' memory or its temporary folder. The key and the partitions are checked
-#' in DuckDB, and the rows are fetched in batches of
-#' `getOption("rcs.duckdb_batch_rows")` rows (default `5e5`), so that R
-#' holds about one batch at a time; a progress bar shows the batches unless
-#' `options(rcs.quiet = TRUE)`. DuckDB never uploads: the files are staged
-#' and land in every location as for any other write. The files equal those
-#' written from the same rows collected into R, so both give the same
-#' version.
+#' stored without being collected into R as a whole.
+#'
+#' * A table (no `geometry` column) with a `partition` is written one
+#'   partition at a time. The query runs as a subquery `2 + P` times (P
+#'   partitions): once to check the key, once for the partition values and
+#'   row counts, then once per partition, whose rows are copied into the
+#'   temporary table `rcs_write_<random>_part`, written, checked and
+#'   dropped. DuckDB then needs room for about the largest partition, not
+#'   for the whole result. The query must therefore be deterministic (give
+#'   the same rows each time), and is best a scan of stored files or views;
+#'   an expensive query is better computed once into a DuckDB table first.
+#'   `options(rcs.duckdb_stream = FALSE)` turns this off.
+#' * Otherwise (no partition, geospatial data, or
+#'   `rcs.duckdb_stream = FALSE`) the query runs once into a temporary copy,
+#'   the table `rcs_write_<random>` on the same connection, which every
+#'   later step reads; the copy needs room for the whole result in DuckDB's
+#'   memory or its temporary folder.
+#'
+#' The temporary tables are dropped when the call ends, also after an error.
+#' The key and the partitions are checked in DuckDB, and the rows are
+#' fetched in batches of `getOption("rcs.duckdb_batch_rows")` rows (default
+#' `5e5`), so that R holds about one batch at a time; a progress bar shows
+#' the batches unless `options(rcs.quiet = TRUE)`. For the duration of the
+#' call the connection runs with `preserve_insertion_order = true`, so that
+#' the rows reach R in the order the write asks for; the caller's setting is
+#' restored when the call ends, also after an error. DuckDB never uploads:
+#' the files are staged and land in every location as for any other write.
+#' Staged files need free room equal to the output in
+#' `getOption("rcs.staging_dir")` (default [tempdir()]); setting it to a
+#' folder on the store's drive avoids copying them across drives. The files
+#' equal those written from the same rows collected into R, so both give the
+#' same version.
 #'
 #' * Modes `"create"` and `"replace"` only; `"update"` aborts (collect the
 #'   rows and update from R, or write the whole dataset).
@@ -139,7 +159,10 @@
 #'   and new number of rows: rows of a replaced partition that are missing
 #'   from `x` disappear. In this mode `key`, `partition`, `h3_res`,
 #'   `geocode` and `geocode_engine` come from the stored dataset; arguments
-#'   that disagree abort.
+#'   that disagree abort. `partition` may be left out; if given, it must be
+#'   what was given on create: `"h3"`, or the column names. Partition columns
+#'   given by the user, even ones named `h3_p<r>`, are kept as given: never
+#'   recomputed from the geometries.
 #'   With `partition = "h3"`, an update that would need more than
 #'   `max_files` files re-partitions the whole dataset at a coarser H3
 #'   resolution.
@@ -176,7 +199,8 @@
 #' @param partition `NULL` for one file; column names to write one file per
 #'   combination of their values; or `"h3"` (geospatial data) to partition
 #'   by the H3 parent cell at the finest resolution that gives at most
-#'   `max_files` files.
+#'   `max_files` files. The catalog records which of the two it was. On
+#'   update, leave it out or give what was given on create (see "Modes").
 #' @param mode `"create"`, `"replace"` or `"update"` (see "Modes").
 #' @param h3_res H3 resolution of the geocodes, 0 to 15.
 #' @param geocode `FALSE` writes geospatial data without H3 cells and
@@ -308,7 +332,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     inputs = inputs %||% NA_character_, columns = columns,
     rows_per_group = rows_per_group, crs = crs, existing = existing,
     existing_index = existing_index, dir = dir, now = now, mode = mode,
-    call = call
+    check = check, call = call
   )
   plan <- if (kind == "raster") {
     stage_raster(args)
@@ -632,13 +656,30 @@ stage_update <- function(st, a) {
       class = "rcs_error_argument", call = call
     )
   }
-  is_h3 <- length(old_partition) == 1 && grepl("^h3_p[0-9]+$", old_partition)
+  # Plan 0004 (D-A2 to D-A4): whether the stored partition is the automatic
+  # one of `partition = "h3"` comes from the catalog (`partition_is_auto()`),
+  # never from the column name. `partition` is compared with what was given
+  # on create: `"h3"`, or the column names. A legacy entry inferred automatic
+  # that receives its own column names is taken as a user partition. A user
+  # partition, even one named `h3_p<r>`, is kept as given: never recomputed
+  # and never re-partitioned.
+  spec_old <- columns_from_json(existing$columns)
+  is_h3 <- partition_is_auto(existing, spec_old)
+  given <- if (!is.null(a$partition)) as.character(a$partition)
+  if (is_h3 && is.na(existing[["partition_auto"]] %||% NA) && identical(given, old_partition)) {
+    is_h3 <- FALSE
+  }
   given_partition <- if (is_h3) "h3" else old_partition
-  if (!is.null(a$partition) && !identical(as.character(a$partition), given_partition)) {
+  if (!is.null(given) && !identical(given, given_partition)) {
+    stored <- if (is_h3) {
+      "Stored partition: {.code \"h3\"} (written as {.field {old_partition}})."
+    } else {
+      "Stored partition: {.field {old_partition}}."
+    }
     cli::cli_abort(
       c(
         "An update keeps the partitioning of {.val {dataset}}.",
-        i = "Stored partition: {.field {given_partition}}. Use {.code mode = \"replace\"} to change it."
+        i = paste(stored, "Use {.code mode = \"replace\"} to change it.")
       ),
       class = "rcs_error_argument", call = call
     )
@@ -667,7 +708,6 @@ stage_update <- function(st, a) {
   withr::local_options(arrow.int64_downcast = FALSE)
   be <- st$primary$backend
   old_files <- st$primary$files[st$primary$files$dataset == dataset, ]
-  spec_old <- columns_from_json(existing$columns)
 
   ids <- NULL
   enc <- NULL
@@ -688,7 +728,9 @@ stage_update <- function(st, a) {
     data <- tibble::as_tibble(a$x)
   }
   check_key(data, key, call = call)
-  # D27: a supplied partition column is checked by `partition_plan()`.
+  # D27: with the automatic partition, a supplied partition column is checked
+  # by `partition_plan()`; a user partition column is a stored column like
+  # any other.
   supplied_partition <- if (is_h3 && old_partition %in% names(data)) data[[old_partition]]
   data <- check_update_columns(
     data[setdiff(names(data), if (is_h3) old_partition)], spec_old,
@@ -799,6 +841,35 @@ stage_update <- function(st, a) {
     data_dir = data_dir, check_paths = staged$staged$path,
     rebuild = if (!is.null(enc)) rebuild_keys(enc, a$x, if (length(key)) key)
   )
+}
+
+#' Whether the partition of a stored dataset is the automatic one
+#'
+#' Plan 0004, D-A2. The catalog's `partition_auto` when recorded. For an
+#' entry written before it existed (`NA`): `NA` without partition; `FALSE`
+#' for a table; for geospatial data `TRUE` only when the partition is one
+#' column named `h3_p<r>` stored as cells (`integer64` or `rcs_h3`), else
+#' `FALSE`.
+#'
+#' @param entry A one-row catalog entry.
+#' @param spec Its columns specification (`columns_from_json(entry$columns)`).
+#' @return `TRUE`, `FALSE` or `NA`.
+#' @noRd
+partition_is_auto <- function(entry, spec) {
+  auto <- entry[["partition_auto"]] %||% NA
+  if (!is.na(auto)) {
+    return(auto)
+  }
+  partition <- entry$partition[[1]]
+  if (length(partition) == 0) {
+    return(NA)
+  }
+  if (!identical(entry$kind, "geospatial") || length(partition) != 1 ||
+    !grepl("^h3_p[0-9]+$", partition)) {
+    return(FALSE)
+  }
+  at <- match(partition, spec$name)
+  !is.na(at) && any(spec$r_type[[at]]$class %in% c("integer64", "rcs_h3"))
 }
 
 check_update_engine <- function(given, stored, dataset, geocode, call) {
@@ -1109,7 +1180,8 @@ format_partition <- function(pv) {
     v <- values[[name]]
     if (is.null(v)) {
       "null"
-    } else if (grepl("^h3_p[0-9]+$", name)) {
+    } else if (grepl("^h3_p[0-9]+$", name) && (is.numeric(v) || grepl("^[0-9]+$", v))) {
+      # a cell (`integer64`, written as digits); a user value as it is (D-A6)
       h3_as_hex(bit64::as.integer64(as.character(v)))
     } else {
       as.character(v)

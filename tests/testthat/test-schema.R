@@ -40,8 +40,8 @@ test_that("the catalog schema has the columns of the plan", {
     names(catalog_schema()),
     c(
       "dataset", "kind", "title", "description", "source", "inputs", "key",
-      "sorted_by", "partition", "columns", "version", "n_files", "rows", "bytes",
-      "crs", "bbox", "h3_res", "geocode_engine", "index_of", "history", "writer",
+      "sorted_by", "partition", "partition_auto", "columns", "version", "n_files",
+      "rows", "bytes", "crs", "bbox", "h3_res", "geocode_engine", "index_of", "history", "writer",
       "r_version", "rcs_version", "created", "updated"
     )
   )
@@ -376,17 +376,19 @@ test_that("a catalog file without geocode_engine is read with NA and validated",
     class = "rcs_error_schema")
 })
 
-test_that("the embedded metadata and the manifest leave out geocode_engine when NA", {
+test_that("the embedded metadata and the manifest leave out partition_auto and geocode_engine when NA", {
   entry <- example_entry()
   parsed <- jsonlite::fromJSON(entry_metadata_json(entry), simplifyVector = FALSE)
   expect_false("geocode_engine" %in% names(parsed))
+  expect_false("partition_auto" %in% names(parsed))
   kinds <- schema_kinds("catalog")
-  kept <- setdiff(names(kinds), c(entry_not_embedded, "geocode_engine"))
+  kept <- setdiff(names(kinds), c(entry_not_embedded, entry_omitted_when_na))
   expect_identical(entry_metadata_json(entry), to_json(row_to_list(entry, kinds[kept])))
 
   manifest <- new_manifest(entry, example_files(), written = as.POSIXct("2026-03-04", tz = "UTC"))
   json <- manifest_to_json(manifest)
   expect_false("geocode_engine" %in% names(jsonlite::fromJSON(json, simplifyVector = FALSE)$entry))
+  expect_false("partition_auto" %in% names(jsonlite::fromJSON(json, simplifyVector = FALSE)$entry))
   expect_identical(manifest_from_json(json), manifest)
 })
 

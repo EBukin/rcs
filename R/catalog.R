@@ -622,8 +622,8 @@ rebuild_from_files <- function(be, group, listing) {
     description = entry0$description, version = version,
     n_files = nrow(files), rows = sum(group$rows), bytes = sum(listing$bytes[idx]),
     columns = entry0$columns, key = entry0$key[[1]], sorted_by = entry0$sorted_by[[1]],
-    partition = partition, source = entry0$source, inputs = entry0$inputs,
-    crs = entry0$crs, bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
+    partition = partition, partition_auto = entry0$partition_auto,
+    source = entry0$source, inputs = entry0$inputs, crs = entry0$crs, bbox = if (geospatial) bbox_extent(files$bbox) else NULL,
     h3_res = entry0$h3_res, geocode_engine = entry0$geocode_engine,
     index_of = entry0$index_of, history = NA,
     created = min(modified), updated = max(modified)

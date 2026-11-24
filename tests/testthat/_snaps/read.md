@@ -40,7 +40,7 @@
     Output
       # Dataset:  sales/daily [?? x 15] (table)
       # Location: primary (local)
-      # Version:  1ee64570 (earlier)
+      # Version:  5ee47480 (earlier)
       # Files:    2 of 2
          shop_id date        year product   qty  price promo grade delivered      big
            <int> <date>     <int> <fct>   <int>  <dbl> <lgl> <ord> <date>     <int64>

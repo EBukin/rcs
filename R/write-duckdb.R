@@ -1,10 +1,17 @@
-# Writing a lazy table on a DuckDB connection (plan 0002, D36-D38, D40).
+# Writing a lazy table on a DuckDB connection (plan 0002, D36-D38, D40;
+# plan 0004, D-B1-D-B6).
 #
-# `store_write(st, x)` with `x` a lazy table on a DuckDB connection: the
-# query is materialised once inside DuckDB as a temporary table
-# `rcs_write_<random>` with the row number `.rcs_tmp`, every later
-# statement reads that table, and it is dropped when `store_write()` ends,
-# also on error. The key and the partitions are checked in DuckDB; the rows
+# `store_write(st, x)` with `x` a lazy table on a DuckDB connection runs
+# with `preserve_insertion_order = true`, the caller's setting restored
+# when `store_write()` ends (D-B6). A table (no `geometry`) with a
+# partition is streamed by partition (`stage_duckdb_streamed()`): the query
+# is described, checked and grouped as a subquery, and each partition is
+# copied in turn into the temporary table `rcs_write_<random>_part`,
+# written, checked and dropped. Otherwise the query is materialised once
+# inside DuckDB as a temporary table `rcs_write_<random>` with the row
+# number `.rcs_tmp`, every later statement reads that table, and it is
+# dropped when `store_write()` ends, also on error. The key and the
+# partitions are checked in DuckDB; the rows
 # are streamed in batches of `rcs_option("rcs.duckdb_batch_rows")` rows
 # into one Parquet writer per output file, re-buffered so that every row
 # group holds exactly `rows_per_group` rows except the last of a file. The
@@ -120,20 +127,192 @@ duckdb_arrow_schema <- function(schema, duck, types) {
 
 #' Stage a lazy DuckDB table as a table dataset
 #'
+#' Sets `preserve_insertion_order = true` for the rest of `store_write()`
+#' (D-B6), then streams a table with a partition by partition (D-B1,
+#' `stage_duckdb_streamed()`), unless `options(rcs.duckdb_stream = FALSE)`;
+#' anything else is materialised (`stage_duckdb_materialised()`).
+#'
 #' @param a The arguments of `store_write()` as `stage_full()` gets them;
-#'   `a$call` is the frame of `store_write()`, which the temporary table
-#'   lives as long as.
+#'   `a$call` is the frame of `store_write()`, which the temporary tables
+#'   live as long as; `a$check` is its `check`.
 #' @return A staging plan as `stage_full()` returns it, with `check`: the
 #'   serialization check for DuckDB input (D40).
 #' @noRd
 stage_duckdb <- function(a) {
   check_duckdb_write()
-  call <- a$call
   con <- dbplyr::remote_con(a$x)
+  duckdb_local_insertion_order(con, frame = a$call)
+  sql <- as.character(dbplyr::sql_render(a$x, con = con))
+  names_all <- DBI::dbGetQuery(con, paste0("DESCRIBE SELECT * FROM (", sql, ") AS rcs_query LIMIT 0"))$column_name
+  geospatial <- "geometry" %in% setdiff(names_all, duckdb_package_columns)
+  partitioned <- length(a$partition %||% character()) > 0
+  if (!geospatial && partitioned && isTRUE(rcs_option("rcs.duckdb_stream"))) {
+    return(stage_duckdb_streamed(a, con, sql))
+  }
+  stage_duckdb_materialised(a, con)
+}
+
+#' Stage a lazy DuckDB table through one materialised copy
+#'
+#' The query is copied once into `rcs_write_<random>` (D37), which the key
+#' check, the partition values, the stream and the serialization check
+#' (run later by `store_write()`, D40) all read. A table with a column
+#' `geometry` goes on to `stage_duckdb_geo()`.
+#'
+#' @param a The arguments of `store_write()`.
+#' @param con The DuckDB connection.
+#' @return A staging plan, as `stage_duckdb()`.
+#' @noRd
+stage_duckdb_materialised <- function(a, con) {
+  call <- a$call
   tmp <- duckdb_materialise(con, a$x, frame = call)
   q_tmp <- duckdb_ident(con, tmp)
+  described <- duckdb_describe(con, q_tmp, call)
+  cols <- described$cols
+  types <- described$types
+  if ("geometry" %in% cols) {
+    return(stage_duckdb_geo(a, con, tmp, cols, types))
+  }
+  select <- paste(duckdb_ident(con, cols), collapse = ", ")
+  proto_table <- duckdb_frame(con, paste("SELECT", select, "FROM", q_tmp, "LIMIT 0"), table = TRUE)
+  proto <- duckdb_as_tibble(proto_table)
 
-  described <- DBI::dbGetQuery(con, paste("DESCRIBE", q_tmp))
+  key <- as.character(a$key %||% character())
+  check_key(proto, key, call = call)
+  duckdb_check_key(con, q_tmp, key, call)
+  partition <- duckdb_partition_values(con, q_tmp, a, cols, proto)$partition
+
+  table <- duckdb_table_meta(a, proto, proto_table, types, key, partition)
+  data_dir <- file.path(a$dir, "data")
+  tmp_dir <- files_tmp_dir(data_dir, a$dataset)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+
+  order_by <- duckdb_order_by(con, c(partition, key))
+  total <- DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_tmp))$n
+  new <- duckdb_write_files(
+    con,
+    sql = paste("SELECT", select, "FROM", q_tmp, "ORDER BY", order_by),
+    partition = partition, proto = proto, schema = table$schema,
+    rcs_json = files_rcs_json(table$meta), rows_per_group = a$rows_per_group,
+    tmp_dir = tmp_dir, total = as.numeric(total)
+  )
+  staged <- files_finish(table$meta, new, NULL, created_of(a$existing, a$now), FALSE, FALSE, data_dir)
+
+  check <- function(be, files, entry) {
+    duckdb_check_files(con, q_tmp, cols, key, partition, be, files, entry)
+  }
+  list(data = staged_src(staged), index = NULL, reference = NULL, data_dir = data_dir, check = check)
+}
+
+#' Stage a lazy DuckDB table partition by partition
+#'
+#' D-B2: the query runs as a subquery and is never copied whole. It is
+#' described, its key is checked with one grouped query, and its distinct
+#' partition values (with their row counts) give the files. Then, for each
+#' partition in the order of `partition_plan()`, its rows are copied into
+#' the temporary table `rcs_write_<random>_part` (the values bound as
+#' parameters), written to one file, checked against that table (D-B3,
+#' unless `check = FALSE`) and dropped. With a key the rows are ordered by
+#' the key alone (unique, so total); without one, by their row number in
+#' the partition, `.rcs_tmp`. The files equal those of
+#' `stage_duckdb_materialised()` (D-B4).
+#'
+#' @param a The arguments of `store_write()`.
+#' @param con The DuckDB connection.
+#' @param sql The rendered query of `a$x`.
+#' @return A staging plan, as `stage_duckdb()`; its `check` returns the
+#'   results collected in the loop.
+#' @noRd
+stage_duckdb_streamed <- function(a, con, sql) {
+  call <- a$call
+  from <- paste0("(", sql, ") AS rcs_query")
+  described <- duckdb_describe(con, from, call)
+  cols <- described$cols
+  types <- described$types
+  select <- paste(duckdb_ident(con, cols), collapse = ", ")
+  proto_table <- duckdb_frame(con, paste("SELECT", select, "FROM", from, "LIMIT 0"), table = TRUE)
+  proto <- duckdb_as_tibble(proto_table)
+
+  key <- as.character(a$key %||% character())
+  check_key(proto, key, call = call)
+  numbered <- paste0("(SELECT *, row_number() OVER () AS \".rcs_tmp\" FROM ", from, ") AS rcs_numbered")
+  duckdb_check_key(con, from, key, call, from_numbered = numbered)
+  parts <- duckdb_partition_values(con, from, a, cols, proto, counts = TRUE)
+  partition <- parts$partition
+  values <- parts$values
+  rows <- as.numeric(values$.rcs_n)
+
+  table <- duckdb_table_meta(a, proto, proto_table, types, key, partition)
+  rcs_json <- files_rcs_json(table$meta)
+  spec <- columns_from_json(table$meta$columns)
+  data_dir <- file.path(a$dir, "data")
+  tmp_dir <- files_tmp_dir(data_dir, a$dataset)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+
+  q_part <- duckdb_ident(con, paste0(duckdb_table_name(), "_part"))
+  withr::defer(duckdb_drop(con, q_part), envir = call)
+  number <- length(key) == 0
+  create <- paste0(
+    "CREATE TEMPORARY TABLE ", q_part, " AS SELECT *",
+    if (number) ", row_number() OVER () AS \".rcs_tmp\"",
+    " FROM ", from, " WHERE ",
+    paste(duckdb_ident(con, partition), "IS NOT DISTINCT FROM ?", collapse = " AND ")
+  )
+  order_by <- duckdb_order_by(con, key, numbered = number)
+  stream <- paste("SELECT", select, "FROM", q_part, "ORDER BY", order_by)
+  check <- !isFALSE(a$check)
+  progress <- duckdb_progress(sum(rows), rcs_option("rcs.duckdb_batch_rows"))
+
+  new <- vector("list", nrow(values))
+  problems <- character()
+  for (i in seq_len(nrow(values))) {
+    params <- unname(lapply(partition, function(p) values[[p]][[i]]))
+    DBI::dbExecute(con, create, params = params)
+    part_dir <- file.path(tmp_dir, i)
+    facts <- duckdb_write_files(
+      con, sql = stream, partition = partition, proto = proto, schema = table$schema,
+      rcs_json = rcs_json, rows_per_group = a$rows_per_group,
+      tmp_dir = part_dir, total = rows[[i]], progress = progress
+    )[[1]]
+    new[[i]] <- facts
+    if (check) {
+      problems[[facts$partition_values]] <- duckdb_check_problem(
+        con, q_part, select, order_by, character(), be_new(part_dir),
+        basename(facts$tmp), facts$rows, spec
+      )
+    }
+    duckdb_drop(con, q_part)
+  }
+  duckdb_progress_done(progress)
+  staged <- files_finish(table$meta, new, NULL, created_of(a$existing, a$now), FALSE, FALSE, data_dir)
+
+  check_results <- function(be, files, entry) {
+    out <- lapply(seq_len(nrow(files)), function(i) {
+      problem <- unname(problems[files$partition_values[[i]]])
+      if (is.na(problem)) {
+        check_row(be$uri, entry$dataset, files$path[[i]], "ok")
+      } else {
+        check_row(be$uri, entry$dataset, files$path[[i]], "failed", problem)
+      }
+    })
+    vctrs::vec_rbind(check_empty(), !!!out)
+  }
+  list(data = staged_src(staged), index = NULL, reference = NULL, data_dir = data_dir, check = check_results)
+}
+
+#' The columns of a DuckDB query or table
+#'
+#' Drops the package's own columns with one message and aborts on types
+#' Arrow cannot write (D36, D38).
+#'
+#' @param con The DuckDB connection.
+#' @param from A `FROM` source: a quoted table, or a subquery with alias.
+#' @param call Environment for the errors.
+#' @return A list: `cols` (the columns kept) and `types` (their DuckDB
+#'   types).
+#' @noRd
+duckdb_describe <- function(con, from, call) {
+  described <- DBI::dbGetQuery(con, paste("DESCRIBE SELECT * FROM", from, "LIMIT 0"))
   names_all <- setdiff(described$column_name, ".rcs_tmp")
   dropped <- intersect(names_all, duckdb_package_columns)
   if (length(dropped) > 0) {
@@ -144,63 +323,104 @@ stage_duckdb <- function(a) {
   cols <- setdiff(names_all, dropped)
   types <- described$column_type[match(cols, described$column_name)]
   check_duckdb_types(cols, types, call)
-  if ("geometry" %in% cols) {
-    return(stage_duckdb_geo(a, con, tmp, cols, types))
-  }
-  select <-paste(duckdb_ident(con, cols), collapse = ", ")
-  proto_table <- duckdb_frame(con, paste("SELECT", select, "FROM", q_tmp, "LIMIT 0"), table = TRUE)
-  proto <- duckdb_as_tibble(proto_table)
+  list(cols = cols, types = types)
+}
 
-  key <- as.character(a$key %||% character())
-  check_key(proto, key, call = call)
-  duckdb_check_key(con, q_tmp, key, call)
-
+#' The partition of a DuckDB table write, from its distinct values
+#'
+#' The checks and the messages of `partition_plan()`, run on the distinct
+#' partition values (or on the zero-row prototype when a column is
+#' missing, for its message).
+#'
+#' @param con The DuckDB connection.
+#' @param from A `FROM` source of the rows.
+#' @param a The arguments of `store_write()`.
+#' @param cols The columns of `x` kept.
+#' @param proto A zero-row tibble of those columns.
+#' @param counts Also count the rows of each partition?
+#' @return A list: `partition` (the columns, or `character()`) and
+#'   `values` (one row per partition in the order of `partition_plan()`,
+#'   with `.rcs_n`, the rows, when `counts`; `NULL` without a partition).
+#' @noRd
+duckdb_partition_values <- function(con, from, a, cols, proto, counts = FALSE) {
+  call <- a$call
   partition <- as.character(a$partition %||% character())
-  if (length(partition) > 0) {
-    if (!is.character(partition) || anyNA(partition)) {
-      cli::cli_abort("{.arg partition} must be distinct column names.", class = "rcs_error_argument", call = call)
-    }
-    known <- partition[partition %in% cols]
-    values <- if (length(known) == length(partition)) {
+  if (length(partition) == 0) {
+    return(list(partition = character(), values = NULL))
+  }
+  if (!is.character(partition) || anyNA(partition)) {
+    cli::cli_abort("{.arg partition} must be distinct column names.", class = "rcs_error_argument", call = call)
+  }
+  known <- partition[partition %in% cols]
+  values <- if (length(known) == length(partition)) {
+    q_partition <- paste(duckdb_ident(con, partition), collapse = ", ")
+    if (counts) {
       duckdb_frame(con, paste(
-        "SELECT DISTINCT", paste(duckdb_ident(con, partition), collapse = ", "), "FROM", q_tmp
+        "SELECT", q_partition, ", count(*) AS \".rcs_n\" FROM", from, "GROUP BY", q_partition
       ))
     } else {
-      proto
+      duckdb_frame(con, paste("SELECT DISTINCT", q_partition, "FROM", from))
     }
-    # the checks and the message of `partition_plan()`, on the distinct values
-    partition <- partition_plan(values, partition, a$max_files, call = call)$partition
+  } else {
+    proto
   }
+  # the checks and the message of `partition_plan()`, on the distinct values
+  plan <- partition_plan(values[setdiff(names(values), ".rcs_n")], partition, a$max_files, call = call)
+  first <- vapply(plan$groups, function(rows) rows[[1]], integer(1))
+  list(partition = plan$partition, values = values[first, , drop = FALSE])
+}
 
-  descriptions <- a$columns %||% stored_descriptions(a$existing, cols)
+#' The schema and the file metadata of a DuckDB table write
+#'
+#' @param a The arguments of `store_write()`.
+#' @param proto,proto_table The zero-row prototype as a tibble and as the
+#'   Arrow table DuckDB exports.
+#' @param types The DuckDB types of the columns.
+#' @param key,partition The key and the partition columns.
+#' @return A list: `schema` (Arrow) and `meta` (`files_meta()`).
+#' @noRd
+duckdb_table_meta <- function(a, proto, proto_table, types, key, partition) {
+  descriptions <- a$columns %||% stored_descriptions(a$existing, names(proto))
   schema <- duckdb_arrow_schema(files_arrow_schema(proto), proto_table$schema, types)
-  spec <- files_columns_spec(proto, schema, descriptions, call = call, cells_by_name = FALSE)
+  spec <- files_columns_spec(proto, schema, descriptions, call = a$call, cells_by_name = FALSE)
   meta <- files_meta(
     dataset = a$dataset, kind = "table", title = a$title,
     description = a$description, spec = spec, key = key, sorted_by = key,
-    partition = partition, source = a$source, inputs = a$inputs,
+    partition = partition, partition_auto = FALSE, source = a$source, inputs = a$inputs,
     crs = NA_character_, h3_res = NA_integer_, geocode_engine = NA_character_,
     index_of = NA_character_, history = a$history
   )
-  data_dir <- file.path(a$dir, "data")
-  tmp_dir <- files_tmp_dir(data_dir, a$dataset)
-  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+  list(schema = schema, meta = meta)
+}
 
-  order_by <- duckdb_order_by(con, c(partition, key))
-  total <- DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM", q_tmp))$n
-  new <- duckdb_write_files(
-    con,
-    sql = paste("SELECT", select, "FROM", q_tmp, "ORDER BY", order_by),
-    partition = partition, proto = proto, schema = schema,
-    rcs_json = files_rcs_json(meta), rows_per_group = a$rows_per_group,
-    tmp_dir = tmp_dir, total = as.numeric(total)
-  )
-  staged <- files_finish(meta, new, NULL, created_of(a$existing, a$now), FALSE, FALSE, data_dir)
-
-  check <- function(be, files, entry) {
-    duckdb_check_files(con, q_tmp, cols, key, partition, be, files, entry)
+#' Run a DuckDB write with `preserve_insertion_order = true`
+#'
+#' D-B6 ("Option A" of plan 0004): under `false`, DuckDB may return the
+#' rows of a top-level `ORDER BY` out of order, so the files would be
+#' wrong. The setting is turned on when it is off, and the caller's value
+#' is restored when `frame` ends, also on error.
+#'
+#' @param con The DuckDB connection.
+#' @param frame The frame whose end restores the setting.
+#' @noRd
+duckdb_local_insertion_order <- function(con, frame) {
+  value <- DBI::dbGetQuery(con, "SELECT current_setting('preserve_insertion_order') AS v")$v
+  if (identical(tolower(as.character(value)), "true")) {
+    return(invisible())
   }
-  list(data = staged_src(staged), index = NULL, reference = NULL, data_dir = data_dir, check = check)
+  duckdb_exec(con, "SET preserve_insertion_order = true")
+  withr::defer(
+    if (DBI::dbIsValid(con)) {
+      try(DBI::dbExecute(con, paste("SET preserve_insertion_order =", tolower(as.character(value)))), silent = TRUE)
+    },
+    envir = frame
+  )
+  invisible()
+}
+
+# A fresh name for the temporary tables of a write, `rcs_write_<random>`.
+duckdb_table_name <- function() {
+  paste0("rcs_write_", substr(md5_string(paste(Sys.getpid(), as.numeric(Sys.time()), stats::runif(1))), 1, 12))
 }
 
 #' Materialise the query of a lazy table as a temporary DuckDB table
@@ -212,7 +432,7 @@ stage_duckdb <- function(a) {
 #'   `x` and `.rcs_tmp`, the row number (D37).
 #' @noRd
 duckdb_materialise <- function(con, x, frame) {
-  name <- paste0("rcs_write_", substr(md5_string(paste(Sys.getpid(), as.numeric(Sys.time()), stats::runif(1))), 1, 12))
+  name <- duckdb_table_name()
   q_name <- duckdb_ident(con, name)
   withr::defer(duckdb_drop(con, q_name), envir = frame)
   sql <- as.character(dbplyr::sql_render(x, con = con))
@@ -234,10 +454,11 @@ duckdb_ident <- function(con, x) {
   as.character(DBI::dbQuoteIdentifier(con, x))
 }
 
-# `ORDER BY` of the stream: the columns, then the row number (D38).
-duckdb_order_by <- function(con, columns) {
+# `ORDER BY` of the stream: the columns, then the row number (D38), which
+# `numbered = FALSE` leaves out (a unique key alone is a total order).
+duckdb_order_by <- function(con, columns, numbered = TRUE) {
   by <- if (length(columns) > 0) paste(duckdb_ident(con, columns), "NULLS LAST")
-  paste(c(by, "\".rcs_tmp\""), collapse = ", ")
+  paste(c(by, if (numbered) "\".rcs_tmp\""), collapse = ", ")
 }
 
 # A small result as a tibble, through Arrow (the types the stream gets),
@@ -260,19 +481,21 @@ duckdb_as_tibble <- function(x) {
 }
 
 # D38: key uniqueness in DuckDB; the first five repeated values in the
-# order of their first rows.
-duckdb_check_key <- function(con, q_tmp, key, call) {
+# order of their first rows. `from` is a `FROM` source (a quoted table or a
+# subquery with alias); `from_numbered` the same rows with `.rcs_tmp`,
+# read only when keys repeat.
+duckdb_check_key <- function(con, from, key, call, from_numbered = from) {
   if (length(key) == 0) {
     return(invisible())
   }
   q_key <- paste(duckdb_ident(con, key), collapse = ", ")
-  groups <- paste("FROM", q_tmp, "GROUP BY", q_key, "HAVING count(*) > 1")
-  n <- DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM (SELECT 1", groups, ")"))$n
+  groups <- function(source) paste("FROM", source, "GROUP BY", q_key, "HAVING count(*) > 1")
+  n <- DBI::dbGetQuery(con, paste("SELECT count(*) AS n FROM (SELECT 1", groups(from), ")"))$n
   if (n == 0) {
     return(invisible())
   }
   values <- duckdb_frame(con, paste(
-    "SELECT", q_key, groups, "ORDER BY min(\".rcs_tmp\") LIMIT 5"
+    "SELECT", q_key, groups(from_numbered), "ORDER BY min(\".rcs_tmp\") LIMIT 5"
   ))
   abort_key_repeats(key, values, as.numeric(n), call)
 }
@@ -300,10 +523,14 @@ duckdb_check_key <- function(con, q_tmp, key, call) {
 #'   extent of the file's boxes, or `NULL`) and `h3` (the file's cells or
 #'   their range, or `NULL`): the facts a geospatial file or an index file
 #'   needs whose rows are not in R (D39).
+#' @param progress `NULL` (a progress bar of this call's rows), or the
+#'   `duckdb_progress()` of a write over several calls, which this call
+#'   advances but does not end.
 #' @return A list of `files_file_facts()`, one per file.
 #' @noRd
 duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
-                               rows_per_group, tmp_dir, total, file_meta = NULL) {
+                               rows_per_group, tmp_dir, total, file_meta = NULL,
+                               progress = NULL) {
   facts_of <- function(values) {
     if (is.null(file_meta)) list() else file_meta(values)
   }
@@ -317,18 +544,15 @@ duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
   withr::local_options(arrow.int64_downcast = FALSE)
   batches <- duckdb_batches(con, sql, n)
   on.exit(batches$close(), add = TRUE)
-  bar <- NULL
-  if (!isTRUE(rcs_option("rcs.quiet"))) {
-    bar <- write_progress(phase = "Writing files", total = total, batches = ceiling(total / n))
+  own <- is.null(progress)
+  if (own) {
+    progress <- duckdb_progress(total, n)
   }
 
   out <- list()
   current <- NULL
   on.exit(if (!is.null(current)) parquet_stream_abandon(current), add = TRUE)
-  done <- 0
-  k <- 0L
   while (!is.null(batch <- batches$next_batch())) {
-    k <- k + 1L
     data <- tibble::as_tibble(as.data.frame(batch))
     runs <- if (length(partition) > 0) {
       vctrs::vec_group_loc(vctrs::vec_identify_runs(data[partition]))$loc
@@ -350,15 +574,64 @@ duckdb_write_files <- function(con, sql, partition, proto, schema, rcs_json,
       }
       parquet_stream_add(current, part)
     }
-    done <- done + nrow(data)
-    if (!is.null(bar)) write_progress(bar, rows = done, batch = k)
+    duckdb_progress_add(progress, nrow(data))
   }
   if (!is.null(current)) {
     out[[length(out) + 1L]] <- parquet_stream_close(current)
     current <- NULL
   }
-  if (!is.null(bar)) write_progress(bar, done = TRUE)
+  if (own) {
+    duckdb_progress_done(progress)
+  }
   out
+}
+
+#' The progress of the rows written from DuckDB
+#'
+#' One bar over `total` rows in batches of `n` rows, as `write_progress()`
+#' shows it; none under `rcs.quiet`. A streamed write fetches each
+#' partition in its own batches, so the bar counts the batches of `n` rows
+#' of the whole write: batch k is shown when `k * n` rows (or all rows) are
+#' done.
+#'
+#' @param total Rows of the write.
+#' @param n Rows per batch.
+#' @param frame The frame whose end ends the bar.
+#' @return An environment: `bar` (or `NULL`), `total`, `n`, `rows` (done)
+#'   and `batch` (the last batch shown).
+#' @noRd
+duckdb_progress <- function(total, n, frame = parent.frame()) {
+  p <- new.env(parent = emptyenv())
+  p$total <- total
+  p$n <- n
+  p$rows <- 0
+  p$batch <- 0L
+  p$bar <- NULL
+  if (!isTRUE(rcs_option("rcs.quiet"))) {
+    p$bar <- write_progress(
+      phase = "Writing files", total = total, batches = ceiling(total / n), .envir = frame
+    )
+  }
+  p
+}
+
+duckdb_progress_add <- function(p, rows) {
+  p$rows <- p$rows + rows
+  if (is.null(p$bar)) {
+    return(invisible(p))
+  }
+  while (p$rows >= min((p$batch + 1) * p$n, p$total) && p$batch < ceiling(p$total / p$n)) {
+    p$batch <- p$batch + 1L
+    write_progress(p$bar, rows = min(p$batch * p$n, p$total), batch = p$batch)
+  }
+  invisible(p)
+}
+
+duckdb_progress_done <- function(p) {
+  if (!is.null(p$bar)) {
+    write_progress(p$bar, done = TRUE)
+  }
+  invisible(p)
 }
 
 # One output file being streamed: an environment with the path, the
@@ -654,8 +927,8 @@ stage_duckdb_geo <- function(a, con, tmp, cols, types) {
     dataset = a$dataset, kind = "geospatial", title = a$title,
     description = a$description, spec = spec, key = key,
     sorted_by = c(if (geocode) "h3", if (length(key) > 0) key else ".rcs_id"),
-    partition = partition, source = a$source, inputs = a$inputs,
-    crs = crs_json, h3_res = if (geocode) h3_res else NA_integer_,
+    partition = partition, partition_auto = !is.null(h3_part),
+    source = a$source, inputs = a$inputs, crs = crs_json, h3_res = if (geocode) h3_res else NA_integer_,
     geocode_engine = if (geocode) a$geocode_engine else NA_character_,
     index_of = NA_character_, history = a$history
   )
@@ -1046,7 +1319,7 @@ duckdb_stage_index <- function(con, q_index, a, h3_res, tmp) {
     title = paste("H3 index of", a$dataset),
     description = paste0("Rows of ", a$dataset, " that cross H3 cells at resolution ", h3_res, "."),
     spec = spec, key = character(), sorted_by = c("h3", ".rcs_id"),
-    partition = partition, source = NA_character_, inputs = NA_character_,
+    partition = partition, partition_auto = TRUE, source = NA_character_, inputs = NA_character_,
     crs = NA_character_, h3_res = NA_integer_, geocode_engine = NA_character_,
     index_of = a$dataset, history = a$history
   )
@@ -1144,10 +1417,7 @@ duckdb_check_files <- function(con, q_tmp, cols, key, partition, be, files, entr
   order_by <- duckdb_order_by(con, key)
   rows <- lapply(seq_len(nrow(files)), function(i) {
     path <- files$path[[i]]
-    problem <- tryCatch(
-      duckdb_check_file(con, q_tmp, select, order_by, partition, be, path, files$rows[[i]], spec, n),
-      rcs_error_backend = function(e) paste("it cannot be read:", first_line(conditionMessage(e)))
-    )
+    problem <- duckdb_check_problem(con, q_tmp, select, order_by, partition, be, path, files$rows[[i]], spec, n)
     if (is.na(problem)) {
       check_row(be$uri, entry$dataset, path, "ok")
     } else {
@@ -1155,6 +1425,18 @@ duckdb_check_files <- function(con, q_tmp, cols, key, partition, be, files, entr
     }
   })
   vctrs::vec_rbind(check_empty(), !!!rows)
+}
+
+# The problem of one staged file (`NA` when it passes): `duckdb_check_file()`
+# with a file that cannot be read as a problem. Also run by
+# `stage_duckdb_streamed()` on each file against its partition's table
+# (D-B3), with `partition = character()`.
+duckdb_check_problem <- function(con, q_tmp, select, order_by, partition, be, path, streamed, spec, n = 20L) {
+  withr::local_options(arrow.int64_downcast = FALSE)
+  tryCatch(
+    duckdb_check_file(con, q_tmp, select, order_by, partition, be, path, streamed, spec, n),
+    rcs_error_backend = function(e) paste("it cannot be read:", first_line(conditionMessage(e)))
+  )
 }
 
 duckdb_check_file <- function(con, q_tmp, select, order_by, partition, be, path, streamed, spec, n) {

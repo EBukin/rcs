@@ -58,6 +58,7 @@ catalog_schema <- function() {
     key = arrow::list_of(arrow::utf8()),
     sorted_by = arrow::list_of(arrow::utf8()),
     partition = arrow::list_of(arrow::utf8()),
+    partition_auto = arrow::boolean(),
     columns = arrow::utf8(),
     version = arrow::utf8(),
     n_files = arrow::int64(),
@@ -136,7 +137,7 @@ catalog_geocode_engines <- c("auto", "s2", "planar")
 # Columns added to a schema after stores were first written. A catalog file
 # without them is read with the column filled with `NA` (in schema position),
 # validates, and is written back with it.
-schema_optional <- list(catalog = "geocode_engine", files = character(), history = character())
+schema_optional <- list(catalog = c("partition_auto", "geocode_engine"), files = character(), history = character())
 
 # `x` with the missing optional columns of `which` added as `NA`, in schema
 # order (other columns keep their order and are not checked here).
@@ -284,9 +285,10 @@ schema_as_tibble <- function(x, which = c("catalog", "files", "history")) {
 #' file: `catalog`: `dataset` unique and not `NA`, `kind` one of `table`,
 #' `geospatial`, `raster`, `version` 16 hex characters; `files` and
 #' `history`: `dataset`, `version`, `path` and `md5` not `NA`, and in `files`
-#' no `path` twice. A catalog table may lack the optional column
-#' `geocode_engine` (stores written before it existed); when present its
-#' values are `NA` or one of `"auto"`, `"s2"`, `"planar"`.
+#' no `path` twice. A catalog table may lack the optional columns
+#' `partition_auto` and `geocode_engine` (stores written before they
+#' existed); when present the values of `geocode_engine` are `NA` or one of
+#' `"auto"`, `"s2"`, `"planar"`.
 #'
 #' @param x A tibble.
 #' @param which `"catalog"`, `"files"` or `"history"`.
@@ -387,6 +389,9 @@ as_bbox_row <- function(bbox) {
 #' @param n_files,rows,bytes Totals; anything `bit64::as.integer64()` accepts.
 #' @param columns The `columns` JSON string (`columns_to_json()`).
 #' @param key,sorted_by,partition Character vectors, empty when none.
+#' @param partition_auto `TRUE` when the partition was chosen by
+#'   `partition = "h3"`, `FALSE` when the partition columns are user columns,
+#'   `NA` without partition (plan 0004, D-A1).
 #' @param source,inputs Strings or `NA`.
 #' @param crs PROJJSON string or `NA`.
 #' @param bbox Named numeric `c(xmin, ymin, xmax, ymax)` in the data CRS, or
@@ -408,7 +413,7 @@ as_bbox_row <- function(bbox) {
 new_entry <- function(dataset, kind, title, description, version,
                       n_files, rows, bytes, columns,
                       key = character(), sorted_by = character(),
-                      partition = character(),
+                      partition = character(), partition_auto = NA,
                       source = NA_character_, inputs = NA_character_,
                       crs = NA_character_, bbox = NULL, h3_res = NA_integer_,
                       geocode_engine = NA_character_,
@@ -434,6 +439,7 @@ new_entry <- function(dataset, kind, title, description, version,
     key = list(as.character(key)),
     sorted_by = list(as.character(sorted_by)),
     partition = list(as.character(partition)),
+    partition_auto = as.logical(partition_auto %||% NA),
     columns = columns,
     version = version,
     n_files = as_int64_scalar(n_files),
@@ -657,8 +663,8 @@ entry_not_embedded <- c(
 
 # Entry fields left out of the embedded metadata and of the manifest when they
 # are `NA`, so that adding them kept the file MD5s and versions of datasets
-# that do not use them (plan 0002, D30).
-entry_omitted_when_na <- "geocode_engine"
+# that do not use them (plan 0002, D30; `partition_auto`, plan 0004).
+entry_omitted_when_na <- c("partition_auto", "geocode_engine")
 
 # `row_to_list()` of an entry without the fields of `entry_omitted_when_na`
 # that are `NULL` (`NA`).
@@ -675,8 +681,8 @@ entry_to_list <- function(entry, kinds) {
 #' `rows`, `bytes`), the dataset's `bbox`, `history`, `writer`, `r_version`,
 #' `rcs_version`, `created` and `updated`: nothing that changes when the same
 #' data are written again, by any version of R or of the package and under
-#' any history setting, so that file MD5s are reproducible. `geocode_engine`
-#' is embedded only when it is not `NA`.
+#' any history setting, so that file MD5s are reproducible. `partition_auto`
+#' and `geocode_engine` are embedded only when they are not `NA`.
 #' `entry_from_metadata_json()` parses it back; the left-out columns are `NA`
 #' (`version` is `NA` too, so the result does not pass `schema_validate()`
 #' until `store_rebuild()` has filled it).
@@ -706,8 +712,8 @@ entry_from_metadata_json <- function(json) {
 #' `{"entry": {...}, "files": [{...}, ...], "written": "<UTC timestamp>"}`.
 #' In the JSON every `int64` is a string, every timestamp is text
 #' (`time_to_text()`), `bbox` is an object or null, `NA` is null, and
-#' `entry$columns` stays the JSON string of the catalog. `geocode_engine` is
-#' left out when `NA` and read back as `NA` when absent.
+#' `entry$columns` stays the JSON string of the catalog. `partition_auto` and
+#' `geocode_engine` are left out when `NA` and read back as `NA` when absent.
 #'
 #' In memory a manifest is a list of class `rcs_manifest` with `entry` (a
 #' one-row tibble of `catalog_schema()`), `files` (a tibble of

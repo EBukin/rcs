@@ -85,6 +85,7 @@ store_create("~/data/new-store")      # initialise an empty location (empty cata
 | `key` | list<string> | key columns, empty when none |
 | `sorted_by` | list<string> | sort order |
 | `partition` | list<string> | partition columns, empty when one file |
+| `partition_auto` | bool | `TRUE` when the partition was chosen by `partition = "h3"`, `FALSE` when the partition columns are user columns (even ones named `h3_p<r>`), NA without partition or in catalogs written before the column existed (then inferred on update); embedded in the files only when not NA (added in plan 0004) |
 | `columns` | string | JSON array of `{name, type, r_type, description}`; `r_type` holds what Arrow does not restore by itself (see "Types") |
 | `version` | string | 16 hex chars |
 | `n_files`, `rows`, `bytes` | int64 | totals |

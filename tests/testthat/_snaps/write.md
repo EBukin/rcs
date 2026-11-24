@@ -123,6 +123,57 @@
       ! "plain" is stored as one file, so it cannot be updated by partitions.
       i Use `mode = "replace"`.
 
+# sf with partition = "h3" updates with and without partition as before
+
+    Code
+      store_write(s$st, y, "points/auto", title = "Points", description = "Automatic h3 partition.", mode = "update", partition = "h3", max_files = 10)
+    Message
+      i Updating "points/auto": 1 partition replaced, 0 added, 5 kept.
+      * h3_p2 = 827ceffffffffff: 18 rows -> 18 rows
+      i Writing "points/auto": 60 rows in 6 files (partition h3_p2).
+      v primary  <root>/primary  1/6 files sent  <bytes>  <time>
+      v MD5 identical for 6 files in 1 location. Catalogs updated.
+
+---
+
+    Code
+      store_write(s$st, z, "points/auto", title = "Points", description = "Automatic h3 partition.", mode = "update", max_files = 10)
+    Message
+      i Updating "points/auto": 4 partitions replaced, 0 added, 2 kept.
+      * h3_p2 = 82565ffffffffff: 14 rows -> 5 rows
+      * h3_p2 = 827c4ffffffffff: 2 rows -> 2 rows
+      * h3_p2 = 827c5ffffffffff: 10 rows -> 2 rows
+      * h3_p2 = 827ceffffffffff: 18 rows -> 1 row
+      i Writing "points/auto": 26 rows in 6 files (partition h3_p2).
+      v primary  <root>/primary  4/6 files sent  <bytes>  <time>
+      v MD5 identical for 6 files in 1 location. Catalogs updated.
+
+# an update whose partition differs from the stored kind aborts naming the stored partition
+
+    Code
+      store_write(s$st, x[1:5, ], "points/auto", title = "Points", description = "Automatic partition.", mode = "update", partition = "h3_p5")
+    Condition
+      Error in `store_write()`:
+      ! An update keeps the partitioning of "points/auto".
+      i Stored partition: `"h3"` (written as h3_p5). Use `mode = "replace"` to change it.
+    Code
+      store_write(s$st, d$update, "points/user", title = "Points", description = "User h3_p3 partition.", mode = "update", partition = "h3")
+    Condition
+      Error in `store_write()`:
+      ! An update keeps the partitioning of "points/user".
+      i Stored partition: h3_p3. Use `mode = "replace"` to change it.
+
+# the update message of a character user h3_p3 shows the values as given
+
+    Code
+      store_write(s$st, d$y, "t/plain", title = "Plain", description = "User h3_p3 partition.", mode = "update", partition = "h3_p3")
+    Message
+      i Updating "t/plain": 1 partition replaced, 0 added, 1 kept.
+      * h3_p3 = 831e5cfffffffff: 2 rows -> 2 rows
+      i Writing "t/plain": 5 rows in 2 files (partition h3_p3).
+      v primary  <root>/primary  1/2 files sent  <bytes>  <time>
+      v MD5 identical for 2 files in 1 location. Catalogs updated.
+
 # an update of partition = "h3" beyond max_files re-partitions the dataset
 
     Code

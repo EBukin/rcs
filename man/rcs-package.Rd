@@ -24,6 +24,7 @@ defaults.\tabular{lll}{
    \code{rcs.record_writer} \tab \code{FALSE} \tab Record the user name in the catalog. \cr
    \code{rcs.print_rows} \tab \code{10} \tab Rows shown when a lazy query is printed. \cr
    \code{rcs.duckdb_batch_rows} \tab \code{5e5} \tab Rows per batch when writing from DuckDB. \cr
+   \code{rcs.duckdb_stream} \tab \code{TRUE} \tab Write a partitioned lazy DuckDB table one partition at a time; \code{FALSE} copies the whole query first. \cr
    \code{rcs.s2_rebuild_tol} \tab \code{1e-3} \tab Relative area change accepted for a geometry repaired on the sphere. \cr
 }
 }

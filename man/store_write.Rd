@@ -44,7 +44,8 @@ unique together.}
 \item{partition}{\code{NULL} for one file; column names to write one file per
 combination of their values; or \code{"h3"} (geospatial data) to partition
 by the H3 parent cell at the finest resolution that gives at most
-\code{max_files} files.}
+\code{max_files} files. The catalog records which of the two it was. On
+update, leave it out or give what was given on create (see "Modes").}
 
 \item{mode}{\code{"create"}, \code{"replace"} or \code{"update"} (see "Modes").}
 
@@ -133,18 +134,39 @@ it has a column \code{geometry} (see "DuckDB input").
 \code{x} may be a lazy table on a DuckDB connection (from \code{\link[dplyr:tbl]{dplyr::tbl()}}, for
 example on a view of \code{\link[=store_duckdb]{store_duckdb()}}, or from
 \code{store_open(engine = "duckdb")}), so that a result computed in DuckDB is
-stored without being collected into R as a whole. Its query runs once
-inside DuckDB into a temporary copy, the table \verb{rcs_write_<random>} on
-the same connection, which every later step reads and which is dropped
-when the call ends, also after an error; the copy needs room in DuckDB's
-memory or its temporary folder. The key and the partitions are checked
-in DuckDB, and the rows are fetched in batches of
-\code{getOption("rcs.duckdb_batch_rows")} rows (default \code{5e5}), so that R
-holds about one batch at a time; a progress bar shows the batches unless
-\code{options(rcs.quiet = TRUE)}. DuckDB never uploads: the files are staged
-and land in every location as for any other write. The files equal those
-written from the same rows collected into R, so both give the same
-version.
+stored without being collected into R as a whole.
+\itemize{
+\item A table (no \code{geometry} column) with a \code{partition} is written one
+partition at a time. The query runs as a subquery \code{2 + P} times (P
+partitions): once to check the key, once for the partition values and
+row counts, then once per partition, whose rows are copied into the
+temporary table \verb{rcs_write_<random>_part}, written, checked and
+dropped. DuckDB then needs room for about the largest partition, not
+for the whole result. The query must therefore be deterministic (give
+the same rows each time), and is best a scan of stored files or views;
+an expensive query is better computed once into a DuckDB table first.
+\code{options(rcs.duckdb_stream = FALSE)} turns this off.
+\item Otherwise (no partition, geospatial data, or
+\code{rcs.duckdb_stream = FALSE}) the query runs once into a temporary copy,
+the table \verb{rcs_write_<random>} on the same connection, which every
+later step reads; the copy needs room for the whole result in DuckDB's
+memory or its temporary folder.
+}
+
+The temporary tables are dropped when the call ends, also after an error.
+The key and the partitions are checked in DuckDB, and the rows are
+fetched in batches of \code{getOption("rcs.duckdb_batch_rows")} rows (default
+\code{5e5}), so that R holds about one batch at a time; a progress bar shows
+the batches unless \code{options(rcs.quiet = TRUE)}. For the duration of the
+call the connection runs with \code{preserve_insertion_order = true}, so that
+the rows reach R in the order the write asks for; the caller's setting is
+restored when the call ends, also after an error. DuckDB never uploads:
+the files are staged and land in every location as for any other write.
+Staged files need free room equal to the output in
+\code{getOption("rcs.staging_dir")} (default \code{\link[=tempdir]{tempdir()}}); setting it to a
+folder on the store's drive avoids copying them across drives. The files
+equal those written from the same rows collected into R, so both give the
+same version.
 \itemize{
 \item Modes \code{"create"} and \code{"replace"} only; \code{"update"} aborts (collect the
 rows and update from R, or write the whole dataset).
@@ -220,7 +242,10 @@ the whole dataset. A message lists every replaced partition with its old
 and new number of rows: rows of a replaced partition that are missing
 from \code{x} disappear. In this mode \code{key}, \code{partition}, \code{h3_res},
 \code{geocode} and \code{geocode_engine} come from the stored dataset; arguments
-that disagree abort.
+that disagree abort. \code{partition} may be left out; if given, it must be
+what was given on create: \code{"h3"}, or the column names. Partition columns
+given by the user, even ones named \verb{h3_p<r>}, are kept as given: never
+recomputed from the geometries.
 With \code{partition = "h3"}, an update that would need more than
 \code{max_files} files re-partitions the whole dataset at a coarser H3
 resolution.
