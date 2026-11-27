@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -40,6 +40,7 @@
 <li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -123,7 +124,8 @@ before.</p>
 <tbody>
 <tr class="odd">
 <td><code>cran</code></td>
-<td>Unit tests: no network, small data, a few seconds per file.</td>
+<td>Unit tests and small property tests (4 to 30 random cases each): no
+network, small data, a few seconds per file.</td>
 <td>
 <code>RCS_TEST_LEVEL</code> is unset and the tests run on CRAN or
 under <code>R CMD check</code>.</td>
@@ -150,7 +152,7 @@ against a Google Cloud Storage bucket.</td>
 <code class="sourceCode R"><span><span class="co"># default: the local integration suite and property tests</span></span>
 <span><span class="fu">devtools</span><span class="fu">::</span><span class="fu"><a href="https://devtools.r-lib.org/reference/test.html" class="external-link">test</a></span><span class="op">(</span><span class="op">)</span></span>
 <span></span>
-<span><span class="co"># cran: unit tests only</span></span>
+<span><span class="co"># cran: unit tests and small property tests</span></span>
 <span><span class="fu">withr</span><span class="fu">::</span><span class="fu"><a href="https://withr.r-lib.org/reference/with_envvar.html" class="external-link">with_envvar</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>RCS_TEST_LEVEL <span class="op">=</span> <span class="st">"cran"</span><span class="op">)</span>, <span class="fu">devtools</span><span class="fu">::</span><span class="fu"><a href="https://devtools.r-lib.org/reference/test.html" class="external-link">test</a></span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span>
 <span></span>
 <span><span class="co"># full: everything, including the random-operation test</span></span>
@@ -326,8 +328,11 @@ file, a truncated catalog, a wrong MD5 in the catalog and a manifest
 that disagrees with the catalog are each caught by
 <code><a href="../reference/store_check.html">store_check()</a></code>, with a message naming the file.</li>
 <li>
-<strong>Determinism:</strong> the same data written twice give the
-same version; changing one value changes it.</li>
+<strong>Determinism:</strong> the same data written twice, with the
+same name and metadata, give the same version; changing one value
+changes it. The files embed the dataset’s metadata (name, title, key,
+partition and more), so the same rows under another name or title give
+another version.</li>
 <li>
 <strong>Work counters:</strong> with
 <code>options(rcs.trace = TRUE)</code> the package counts backend calls,
@@ -427,7 +432,7 @@ are never called), and a file that stays small because views hold query
 text only.</li>
 <li>
 <code>test-duckdb-tbl.R</code>:
-<code>store_open(engine = "duckdb")</code>, whose <code>collect()</code>
+<code>store_open(engine = "duckdb")</code>, whose <code><a href="https://dplyr.tidyverse.org/reference/compute.html" class="external-link">collect()</a></code>
 restores the R types and returns the rows of the Arrow engine.</li>
 <li>
 <code>test-duckdb-intersects.R</code>:

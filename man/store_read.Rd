@@ -25,7 +25,8 @@ that is unique in the store.}
 \item{...}{Filter expressions, as in \code{\link[dplyr:filter]{dplyr::filter()}}.}
 
 \item{columns}{Columns to return, as in \code{\link[dplyr:select]{dplyr::select()}} (tidyselect);
-\code{NULL} for all. The geometry column is controlled by \code{geometry}.}
+\code{NULL} for all. The geometry column is controlled by \code{geometry}. A
+raster has no column selection.}
 
 \item{intersects}{\code{NULL}, or a query: an \code{sf}, \code{sfc} or \code{bbox} object
 with a coordinate reference system, or H3 cells of any resolution as
@@ -33,7 +34,8 @@ hex strings, \code{bit64::integer64} or \code{h3o} \code{H3} vectors. A plain nu
 aborts: it cannot hold an H3 cell. An \code{sf} or \code{sfc} query with an
 invalid geometry (for example a ring that crosses itself) aborts, with
 the reason and advice to use \code{\link[sf:st_make_valid]{sf::st_make_valid()}}; validity is read on
-the sphere or in the plane as in \code{\link[=store_intersects]{store_intersects()}}.}
+the sphere or in the plane as in \code{\link[=store_intersects]{store_intersects()}}. For a raster,
+the query's bounding box is the window that is read (see "Rasters").}
 
 \item{geometry}{\code{FALSE} drops the geometry before reading and returns a
 tibble.}
@@ -56,7 +58,8 @@ in the plane of that CRS. See \code{\link[=store_intersects]{store_intersects()}
 }
 \value{
 A tibble; an \code{sf} object for geospatial data read with geometry;
-a \code{terra::SpatRaster} for a raster.
+a \code{terra::SpatRaster} for a raster, with the categories and the
+colours recorded when it was written.
 }
 \description{
 Reads a table, a geospatial dataset or a raster from a store. Filters and
@@ -81,12 +84,46 @@ the columns the package adds, the row identifier \code{.rcs_id} is dropped
 \verb{h3_p<r>} are returned.
 \item A raster is returned as a \code{terra::SpatRaster} opened through GDAL, so
 only the tiles needed are read; \code{intersects} crops it to the query's
-bounding box. A categorical layer is returned with its categories (the
-codes and labels recorded when it was written), also after a crop; the
-data type and the NoData value are those of the file, so cells holding
-the NoData value are missing. Filters, \code{columns}, \code{geometry} and \code{exact}
-do not apply to rasters and abort.
+bounding box (see "Rasters"). Filters, \code{columns}, \code{geometry}, \code{exact}
+and \code{exact_engine} do not apply to rasters and abort.
 }
+}
+\section{Rasters}{
+
+A raster is returned as a \code{terra::SpatRaster} that points to the stored
+file: at the location itself for a local store, through GDAL's virtual
+file system for a bucket. No cell is read until it is needed, and the
+file is not downloaded.
+\itemize{
+\item \strong{The whole raster.} \code{store_read(st, "name")} returns every layer,
+with the layer names, the data type and the NoData value of the file.
+Cells that hold the NoData value are missing (\code{NA}).
+\item \strong{A window.} \code{intersects} returns only the part inside the bounding
+box of the query, in the raster's CRS, rounded outwards to whole
+cells; a point or a line gives the cells it touches. The cells of the
+window are read at once, straight from the bucket for a store in a
+bucket: this is the way to work with a map too large to read whole.
+The query takes the same forms as for geospatial data (an \code{sf}, \code{sfc}
+or \code{bbox} object in any CRS, or H3 cells). A query that does not
+overlap the raster aborts; one that crosses the antimeridian or holds
+a pole returns the raster uncropped.
+\item \strong{Legend.} A layer written with categories (see "Rasters" in
+\code{\link[=store_write]{store_write()}}) comes back categorical: \code{terra::levels()} gives the
+codes and labels recorded with the dataset, \code{terra::freq()} and
+\code{terra::plot()} use the labels, and
+\code{terra::extract(x, cells, raw = TRUE)} gives the codes. The label
+column is named as it was when the map was written; the code column
+is named \code{value} (\code{code} when the label column is itself called
+\code{value}).
+\item \strong{Colours.} A layer written with a colour table has it again:
+\code{terra::has.colors()} is \code{TRUE}, \code{terra::coltab()} gives the table,
+and \code{terra::plot()} draws with it.
+}
+
+The legend and the colours come from the catalog, not from the file,
+and nothing is written next to the file. A window and a subset of the
+layers (\code{x[["name"]]}) keep both. There is no \code{columns} for rasters:
+read the raster and take the layers from it.
 
 The location read from is, among the available locations that hold the
 dataset at the primary's version, a local one first, then the primary,
@@ -94,6 +131,7 @@ then the other secondaries. Reading from a secondary prints a line
 saying so (silenced by \code{options(rcs.quiet = TRUE)}). Reads use the
 catalogs held by the connection; \code{\link[=store_refresh]{store_refresh()}} reads them again.
 }
+
 \examples{
 location <- file.path(tempdir(), "rcs-example-read")
 st <- store_connect(location, create = TRUE)
@@ -114,6 +152,38 @@ area <- sf::st_as_sfc(sf::st_bbox(
 ))
 store_read(st, "polygons", intersects = area)
 store_read(st, "polygons", geometry = FALSE)
+
+# A class map: whole, and a window of it
+if (requireNamespace("terra", quietly = TRUE)) {
+  cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+  cover[1:2, ] <- 0L
+  levels(cover) <- data.frame(
+    value = 1:5,
+    label = c("water", "forest", "crop", "grass", "bare")
+  )
+  names(cover) <- "cover"
+  terra::coltab(cover) <- data.frame(
+    value = 1:5,
+    col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+  )
+  store_write(st, cover, "grids/cover",
+    title = "Land cover", description = "A simulated class map.",
+    nodata = 0
+  )
+
+  map <- store_read(st, "grids/cover")
+  print(map)
+  print(terra::levels(map)[[1]]) # the legend
+  print(terra::has.colors(map))
+  print(terra::coltab(map)[[1]]) # the colours
+  print(map[1, 1]) # a cell holding the NoData value is missing
+
+  # Only the cells inside the box of `area`, with legend and colours
+  window <- store_read(st, "grids/cover", intersects = area)
+  print(dim(window))
+  print(terra::freq(window))
+  rm(map, window)
+}
 unlink(location, recursive = TRUE)
 }
 \seealso{

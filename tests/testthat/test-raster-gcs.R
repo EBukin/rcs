@@ -563,3 +563,92 @@ test_that("a class map written to a local primary lands in a bucket secondary wi
   expect_identical(again$uploaded, c(0, 0))
   expect_identical(raster_version(st, "grids/cover"), version)
 })
+
+# Plan 0006, part C: legend colours ---------------------------------------------
+
+# The colours of a layer as `#RRGGBBAA` (upper case), named by code; read with
+# terra alone. A colour table set in the session has a row per code given, one
+# read from a file 256 rows, so colours are compared per code.
+bucket_color_hex <- function(x, layer = 1L) {
+  table <- terra::coltab(x)[[layer]]
+  if (is.null(table)) {
+    return(NULL)
+  }
+  hex <- toupper(grDevices::rgb(
+    table[[2]], table[[3]], table[[4]], table[[5]],
+    maxColorValue = 255
+  ))
+  stats::setNames(hex, table[[1]])
+}
+
+expect_bucket_colors <- function(got, codes = 1:5, colors = sim_landcover_colors) {
+  expect_true(all(terra::has.colors(got)))
+  expect_identical(unname(bucket_color_hex(got)[as.character(codes)]), colors)
+}
+
+test_that("a coloured class map written to the bucket reads back through /vsigs/ with its colours and legend, also as a window", {
+  # Plan 0006, part C (D-C1 to D-C4). Red before part C: the manifest has no
+  # `color_values` and no `colors`, so the raster read has no colours.
+  skip_below_level("full")
+  be <- local_raster_bucket()
+  st <- store_connect(be$uri, create = TRUE)
+  x <- sim_landcover(
+    file = withr::local_tempfile(fileext = ".tif"), legend = TRUE, colors = TRUE
+  )
+  out <- write_cover(st, x, nodata = 0)
+  expect_identical(out$status, "written")
+  expect_identical(out$uploaded, 1)
+  version <- raster_version(st, "grids/cover")
+  path <- raster_path(st, "grids/cover")
+
+  # the object in the bucket: codes only, no colour table, no side file
+  info <- bucket_info(be, path)
+  expect_info(info, "Type=Byte")
+  expect_info(info, "NoData Value=0")
+  expect_false(any(grepl("Color Table|ColorInterp=Palette", info)))
+  expect_identical(
+    sort(be_list(be, "grids/")$path),
+    sort(c(manifest_path("grids/cover", version), path))
+  )
+  # the same file as the map without its colours
+  plain <- raster_stage(
+    sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE), "grids/cover",
+    title = "Cover", description = "Simulated class map.",
+    dir = withr::local_tempdir(), nodata = 0
+  )
+  expect_identical(be_md5(be, path), plain$files$md5)
+  expect_identical(version, plain$entry$version)
+
+  # the manifest, as it is in the bucket
+  layer <- bucket_manifest_layers(be, "grids/cover", version)[[1]]
+  expect_identical(layer$name, "cover")
+  expect_equal(unlist(layer$r_type$values), 1:5)
+  expect_identical(unlist(layer$r_type$levels), sim_landcover_labels)
+  expect_equal(unlist(layer$r_type$color_values), 1:5)
+  expect_identical(unlist(layer$r_type$colors), sim_landcover_colors)
+
+  # a connection that has only the bucket reads through /vsigs/
+  only <- store_connect(be$uri)
+  got <- store_read(only, "grids/cover")
+  expect_match(terra::sources(got), "^/vsigs/")
+  expect_identical(names(got), "cover")
+  expect_identical(terra::datatype(got), "INT1U")
+  expect_legend(got)
+  expect_bucket_colors(got)
+  expect_codes(got, codes_of(x))
+
+  # a window: the extent, the values of the same crop, the legend, the colours
+  box <- query_box()
+  part <- store_read(only, "grids/cover", intersects = box)
+  expect_identical(names(part), "cover")
+  expect_legend(part)
+  expect_bucket_colors(part)
+  expect_window(part, codes_raster(x), box)
+
+  # reading left nothing in the bucket, and the check sees no mismatch
+  expect_identical(
+    sort(be_list(be, "grids/")$path),
+    sort(c(manifest_path("grids/cover", version), path))
+  )
+  expect_identical(store_check(st, "grids/cover", x = x, n = terra::ncell(x))$status, "ok")
+})

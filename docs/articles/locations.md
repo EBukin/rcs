@@ -69,9 +69,9 @@ store_write(st, rcs_sim_table(200, seed = 1), "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
-#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  27.8 kB  0.2s
-#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  27.8 kB  0.2s
-#> ✔ secondary  <tempdir>/locations/copy-2   2/2 files sent  27.8 kB  0.2s
+#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  27.9 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  27.9 kB  0.1s
+#> ✔ secondary  <tempdir>/locations/copy-2   2/2 files sent  27.9 kB  0.1s
 #> ✔ MD5 identical for 2 files in 3 locations. Catalogs updated.
 ```
 
@@ -91,7 +91,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.8 kB      2  2026-11-22 15:55  =  =
+#>     daily  table   200  27.9 kB      2  2026-11-27 18:58  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -150,7 +150,7 @@ st_env
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.8 kB      2  2026-11-22 15:55  =  =
+#>     daily  table   200  27.9 kB      2  2026-11-27 18:58  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -174,14 +174,27 @@ withr::with_envvar(c(STORE_PRIMARY = NA), store_connect())
 
 A primary that cannot be reached stops
 [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md):
-nothing can be read or written without the truth. A secondary that
-cannot be reached only gives a warning; it is marked unavailable and
-skipped by reads and writes.
+nothing can be read or written without the truth. For a secondary, it
+depends on what goes wrong:
+
+- The secondary cannot be reached (a network or credential error):
+  [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md)
+  gives a warning, marks it unavailable, and reads and writes skip it.
+- The secondary answers but holds no catalogs (a local folder that does
+  not exist, say):
+  [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md)
+  stops with an error of class `rcs_error_no_catalog`, as for a primary.
+  With `create = TRUE` it sets the location up as a new, empty store
+  instead.
+- [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
+  reads the catalogs of a connection again. There, a secondary that
+  cannot be reached or holds no catalogs only gives a warning and is
+  marked unavailable.
 
 To show this, the folder of the second copy is moved away, as if a drive
 had been disconnected.
 [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
-reads the catalogs of all locations again and notices.
+reads the catalogs of all locations again, notices, and warns.
 
 ``` r
 
@@ -206,8 +219,8 @@ store_write(st, rcs_sim_table(300, seed = 2), "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  31.2 kB  0.1s
-#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  31.2 kB  0.1s
+#> ✔ primary    <tempdir>/locations/primary  2/2 files sent  31.3 kB  0.1s
+#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  31.3 kB  0.2s
 #> ! secondary  <tempdir>/locations/copy-2   unavailable, skipped
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 #> ! 1 secondary location is behind; run `store_sync()` to bring it up to date.
@@ -239,7 +252,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   300  31.2 kB      2  2026-11-22 15:55  =  ≠
+#>     daily  table   300  31.3 kB      2  2026-11-27 18:58  =  ≠
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -278,9 +291,9 @@ store_status(st)
 #> # A tibble: 4 × 8
 #>   dataset      location status  newer  primary_version  location_version
 #>   <chr>        <chr>    <chr>   <chr>  <chr>            <chr>           
-#> 1 sales/daily  [1]      same    NA     9a645b5061657398 9a645b5061657398
+#> 1 sales/daily  [1]      same    NA     0f1993a2e5855aa8 0f1993a2e5855aa8
 #> 2 sales/weekly [1]      missing NA     72f66b800c3fa743 NA              
-#> 3 sales/daily  [2]      differs source 9a645b5061657398 e39540d1414c4708
+#> 3 sales/daily  [2]      differs source 0f1993a2e5855aa8 41ec22ed5b5602ce
 #> 4 sales/weekly [2]      missing NA     72f66b800c3fa743 NA              
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 ```
@@ -326,7 +339,7 @@ store_sync(st, dry_run = TRUE)
 #>   locations.
 #> • secondary  <tempdir>/locations/copy-1   would copy 1 dataset, 1 file (11.7 kB):
 #>   "sales/weekly"
-#> • secondary  <tempdir>/locations/copy-2   would copy 2 datasets, 3 files (42.9 kB):
+#> • secondary  <tempdir>/locations/copy-2   would copy 2 datasets, 3 files (43.0 kB):
 #>   "sales/daily", "sales/weekly"
 ```
 
@@ -338,11 +351,11 @@ only the second copy is brought up to date:
 store_sync(st, to = copy_2)
 #> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary to 1 secondary
 #>   location.
-#> ✔ secondary  <tempdir>/locations/copy-2   2 datasets, 3/3 files sent  42.9 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-2   2 datasets, 3/3 files sent  43.0 kB  0.2s
 #> ✔ MD5 identical for 3 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
-#> • '<tempdir>/locations/copy-2': "sales/daily" version e39540d1414c4708 (updated
-#>   2026-11-22 15:55:00) replaced by version 9a645b5061657398 (updated 2026-11-22 15:55:02).
+#> • '<tempdir>/locations/copy-2': "sales/daily" version 41ec22ed5b5602ce (updated
+#>   2026-11-27 18:58:50) replaced by version 0f1993a2e5855aa8 (updated 2026-11-27 18:58:52).
 ```
 
 [`store_copy()`](https://ebukin.github.io/rcs/reference/store_copy.md)
@@ -370,6 +383,11 @@ store_status(st)[c("dataset", "location", "status")]
 #> 3 sales/daily  [2]      same  
 #> 4 sales/weekly [2]      same
 ```
+
+To check that a copy is sound, `store_check(st, dataset)` checks the
+dataset’s files in every available location. `locations` limits the
+check to some of them, for example
+`store_check(st, "sales/daily", locations = copy_2)`.
 
 Two more functions maintain locations.
 [`store_delete()`](https://ebukin.github.io/rcs/reference/store_delete.md)
@@ -419,7 +437,7 @@ them as before.
 store_refresh(st)
 store_sync(st, from = copy_1)
 #> ℹ Syncing 2 datasets from the secondary <tempdir>/locations/copy-1 to 2 locations.
-#> ✔ primary    <tempdir>/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.2s
+#> ✔ primary    <tempdir>/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.1s
 #> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 1/1 files sent  13.1 kB  0.1s
 #> ✔ MD5 identical for 2 files sent to 2 locations. Catalogs updated.
 st
@@ -432,8 +450,8 @@ st
 #> Datasets: 2
 #>   name       kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily    table   300  31.2 kB      2  2026-11-22 15:55  =  =
-#>     monthly  table    80  13.1 kB      1  2026-11-22 15:55  =  =
+#>     daily    table   300  31.3 kB      2  2026-11-27 18:58  =  =
+#>     monthly  table    80  13.1 kB      1  2026-11-27 18:58  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -453,7 +471,7 @@ store_write(only_primary, rcs_sim_table(120, seed = 5), "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 120 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/locations/primary  2/2 files sent  24.6 kB  0.2s
+#> ✔ primary  <tempdir>/locations/primary  2/2 files sent  24.7 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 Sys.sleep(1)
 store_write(offline, rcs_sim_table(140, seed = 6), "sales/daily",
@@ -464,7 +482,7 @@ store_write(offline, rcs_sim_table(140, seed = 6), "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 140 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/locations/copy-1  2/2 files sent  25.7 kB  0.1s
+#> ✔ primary  <tempdir>/locations/copy-1  2/2 files sent  25.8 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_refresh(st)
 ```
@@ -484,15 +502,15 @@ store_sync(st)
 #> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary to 2 secondary
 #>   locations.
 #> ✖ secondary  <tempdir>/locations/copy-1   1 conflict, newer here: "sales/daily"
-#> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 2/2 files sent  24.6 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 2/2 files sent  24.7 kB  0.2s
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
-#> • '<tempdir>/locations/copy-2': "sales/daily" version 9a645b5061657398 (updated
-#>   2026-11-22 15:55:02) replaced by version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+#> • '<tempdir>/locations/copy-2': "sales/daily" version 0f1993a2e5855aa8 (updated
+#>   2026-11-27 18:58:52) replaced by version 98d066b5654644d4 (updated 2026-11-27 18:58:57).
 #> Error in `store_sync()`:
 #> ! 1 dataset was not copied: the target holds a newer version.
-#> ✖ '<tempdir>/locations/copy-1': "sales/daily" version 18f5b5dad2633fac (updated
-#>   2026-11-22 15:55:09) is newer than the source's version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+#> ✖ '<tempdir>/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated
+#>   2026-11-27 18:58:58) is newer than the source's version 98d066b5654644d4 (updated 2026-11-27 18:58:57).
 #> ℹ The other copies and deletions were made.
 #> ℹ Run with `force = TRUE` to copy the source over it, or sync from the location that holds the newer version.
 ```
@@ -508,12 +526,12 @@ To keep the copy’s, sync from the copy instead.
 store_sync(st, force = TRUE)
 #> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary to 2 secondary
 #>   locations.
-#> ✔ secondary  <tempdir>/locations/copy-1   1 dataset, 2/2 files sent  24.6 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-1   1 dataset, 2/2 files sent  24.7 kB  0.2s
 #> ✔ secondary  <tempdir>/locations/copy-2   up to date
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
-#> • '<tempdir>/locations/copy-1': "sales/daily" version 18f5b5dad2633fac (updated
-#>   2026-11-22 15:55:09) replaced by version 9bb753690d7be143 (updated 2026-11-22 15:55:07).
+#> • '<tempdir>/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated
+#>   2026-11-27 18:58:58) replaced by version 98d066b5654644d4 (updated 2026-11-27 18:58:57).
 ```
 
 When the source is the newer side, the copy goes ahead without `force`;
@@ -569,7 +587,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   120  24.6 kB      2  2026-11-22 15:55  =  =
+#>     daily  table   120  24.7 kB      2  2026-11-27 18:58  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -741,7 +759,8 @@ When a location cannot be reached, the error names the credential in use
 and how to pass another one with `auth`. A primary that cannot be
 reached stops
 [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md);
-a secondary gives a warning.
+a secondary that cannot be reached gives a warning and is skipped (see
+“A secondary that cannot be reached”).
 
 ## History per connection
 
@@ -764,6 +783,6 @@ st_keep
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1
 #>   sales/
-#>     daily  table   120  24.6 kB      2  2026-11-22 15:55  =
+#>     daily  table   120  24.7 kB      2  2026-11-27 18:58  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```

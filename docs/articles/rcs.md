@@ -39,7 +39,10 @@ library(rcs)
   It is stored as one file, or as one file per *partition* (for example
   one per year).
 - A **version** is a 16-character code computed from the content of a
-  dataset’s files. The same data always give the same version.
+  dataset’s files. Each file also embeds the dataset’s metadata: its
+  name, title, description, key, partition and column types, among
+  others. So the same rows give the same version only with the same name
+  and the same metadata; a change of title alone gives a new version.
 
 ## Create a store
 
@@ -109,7 +112,7 @@ store_write(st, sales, "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/my-store  2/2 files sent  31.3 kB  0.2s
+#> ✔ primary  <tempdir>/my-store  2/2 files sent  31.4 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -120,10 +123,11 @@ checksum (MD5) of every file in the store is compared with the staged
 one. Only then is the catalog switched to the new version, so a reader
 never sees a half-written dataset.
 
-Writing the same data again changes nothing. The version is computed
-from the content, so the package sees that the store already holds it. A
-dataset that exists can only be written again with `mode = "replace"` or
-`mode = "update"`:
+A dataset that exists is written again only with `mode = "replace"` or
+`mode = "update"`. With the default `mode = "create"`, the write stops
+with an error (class `rcs_error_dataset_exists`). If the new data and
+metadata give the version the store already holds, nothing is uploaded
+and the summary says the dataset is unchanged. That is the case here:
 
 ``` r
 
@@ -134,7 +138,7 @@ store_write(st, sales, "sales/daily",
   partition = "year",
   mode = "replace"
 )
-#> ℹ "sales/daily" is unchanged (version b74a078c7191e5d3): 300 rows in 2 files (partition year).
+#> ℹ "sales/daily" is unchanged (version 66bd1cd34236c66b): 300 rows in 2 files (partition year).
 #> ✔ primary  <tempdir>/my-store  unchanged
 ```
 
@@ -153,7 +157,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   300  31.3 kB      2  2026-11-22 15:55
+#>     daily  table   300  31.4 kB      2  2026-11-27 18:59
 ```
 
 [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md)
@@ -166,7 +170,7 @@ datasets
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   300 31289       2 <chr [1]> b74a07… 2026-11-22 15:55:19
+#> 1 sales/d… table Dail…   300 31399       2 <chr [1]> 66bd1c… 2026-11-27 18:59:07
 datasets$title
 #> [1] "Daily sales"
 ```
@@ -184,19 +188,19 @@ store_describe(st, "sales/daily")
 #> Simulated daily sales by shop and product.
 #> 
 #> Kind        table
-#> Version     b74a078c7191e5d3
+#> Version     66bd1cd34236c66b
 #> Rows        300
 #> Files       2
-#> Size        31.3 kB
+#> Size        31.4 kB
 #> Key         shop_id, date, product
 #> Partition   year
 #> Sorted by   shop_id, date, product
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-22 15:55:18 UTC
-#> Updated     2026-11-22 15:55:19 UTC
-#> Written by  R 4.6.2, rcs 0.0.0.9000
+#> Created     2026-11-27 18:59:07 UTC
+#> Updated     2026-11-27 18:59:07 UTC
+#> Written by  R 4.6.2, rcs 0.0.0.9006
 #> 
 #> Locations:
 #>   primary    <tempdir>/my-store
@@ -221,8 +225,8 @@ store_describe(st, "sales/daily")
 #> 
 #> Files (2):
 #>   path                                                 partition      rows     size
-#>   sales/daily/year=2023/part-b74a078c7191e5d3.parquet  {"year":2023}   156  15.9 kB
-#>   sales/daily/year=2024/part-b74a078c7191e5d3.parquet  {"year":2024}   144  15.4 kB
+#>   sales/daily/year=2023/part-66bd1cd34236c66b.parquet  {"year":2023}   156  15.9 kB
+#>   sales/daily/year=2024/part-66bd1cd34236c66b.parquet  {"year":2024}   144  15.5 kB
 ```
 
 These three functions read only the catalog that the connection holds.
@@ -245,7 +249,7 @@ q <- store_open(st, "daily")
 q
 #> # Dataset:  sales/daily [300 x 15] (table)
 #> # Location: primary (local)
-#> # Version:  b74a078c (current)
+#> # Version:  66bd1cd3 (current)
 #> # Files:    2 of 2
 #>    shop_id date        year product   qty price promo grade delivered      big
 #>      <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
@@ -284,7 +288,7 @@ the option `rcs.print_rows` changes the default.
 print(q, n = 3)
 #> # Dataset:  sales/daily [300 x 15] (table)
 #> # Location: primary (local)
-#> # Version:  b74a078c (current)
+#> # Version:  66bd1cd3 (current)
 #> # Files:    2 of 2
 #>   shop_id date        year product   qty price promo grade delivered      big
 #>     <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
@@ -311,7 +315,7 @@ q24 <- q |>
 q24
 #> # Dataset:  sales/daily [?? x 4] (table)
 #> # Location: primary (local)
-#> # Version:  b74a078c (current)
+#> # Version:  66bd1cd3 (current)
 #> # Files:    1 of 2 (pruned)
 #> # Filter:   ((year == 2024) and (qty > 45))
 #>   shop_id date       product   qty
@@ -367,13 +371,16 @@ rcs_trace()[c("counter", "detail", "n")]
 #>   counter          detail                                                  n
 #>   <chr>            <chr>                                               <dbl>
 #> 1 backend_call     be_arrow_fs                                             1
-#> 2 file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1
+#> 2 file_open        sales/daily/year=2023/part-66bd1cd34236c66b.parquet     1
 #> 3 row_groups_total NA                                                      1
 #> 4 rows_returned    NA                                                    156
 options(rcs.trace = FALSE)
 ```
 
-One of the two files was opened.
+One of the two files was opened. The records are kept until the next
+call of a package function;
+[`rcs_trace_reset()`](https://ebukin.github.io/rcs/reference/rcs_trace.md)
+clears them.
 
 ## Read in one call
 
@@ -433,7 +440,7 @@ store_glimpse(st, "daily")
 #> Dataset:   sales/daily (table)
 #> Rows:      300
 #> Files:     2
-#> Version:   b74a078c7191e5d3
+#> Version:   66bd1cd34236c66b
 #> Key:       shop_id, date, product
 #> Partition: year
 #> 
@@ -470,10 +477,11 @@ store_sample(st, "daily", n = 5, qty > 40, columns = c(shop_id, date, qty),
 ## Update some partitions
 
 With `mode = "update"`, only the partitions whose values occur in the
-new data are replaced; the other partitions stay as they are. Here the
-rows of 2024 are written again with corrected quantities. The key, the
-partition columns and the column types come from the stored dataset and
-must match.
+new data are replaced; the other partitions stay as they are. It works
+only on a partitioned dataset: a dataset stored as one file must be
+written with `mode = "replace"`. Here the rows of 2024 are written again
+with corrected quantities. The key, the partition columns and the column
+types come from the stored dataset and must match.
 
 ``` r
 
@@ -491,8 +499,8 @@ store_write(st, fix, "sales/daily",
 #> ℹ They are no longer named by the catalogs; `store_prune()` removes them later.
 #> Caused by error in `be_delete()`:
 #> ! Cannot delete 1 file in <tempdir>/my-store:
-#>   <tempdir>/my-store/sales/daily/year=2024/part-b74a078c7191e5d3.parquet.
-#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.4 kB  0.2s
+#>   <tempdir>/my-store/sales/daily/year=2024/part-66bd1cd34236c66b.parquet.
+#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.5 kB  0.3s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -524,7 +532,7 @@ store_write(sth, sales, "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/store-with-history  2/2 files sent  31.3 kB  0.1s
+#> ✔ primary  <tempdir>/store-with-history  2/2 files sent  31.4 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_write(sth, fix, "sales/daily",
   title = "Daily sales",
@@ -534,7 +542,7 @@ store_write(sth, fix, "sales/daily",
 #> ℹ Updating "sales/daily": 1 partition replaced, 0 added, 1 kept.
 #> • year = 2024: 144 rows -> 144 rows
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/store-with-history  1/2 files sent  15.4 kB  0.2s
+#> ✔ primary  <tempdir>/store-with-history  1/2 files sent  15.5 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -548,8 +556,8 @@ versions[c("version", "current", "n_files", "rows", "complete")]
 #> # A tibble: 2 × 5
 #>   version          current n_files  rows complete
 #>   <chr>            <lgl>     <int> <dbl> <lgl>   
-#> 1 e0ce507f7ddb7d09 TRUE          2   300 TRUE    
-#> 2 b74a078c7191e5d3 FALSE         2   300 TRUE
+#> 1 e8b87a3368049afd TRUE          2   300 TRUE    
+#> 2 66bd1cd34236c66b FALSE         2   300 TRUE
 ```
 
 An earlier version is read by its code:
@@ -573,7 +581,9 @@ Old versions stay until
 [`store_prune()`](https://ebukin.github.io/rcs/reference/store_prune.md)
 removes them. `keep` is the number of earlier versions to keep;
 `dry_run = TRUE` only reports. Files that the current version still uses
-are never deleted.
+are never deleted. The count of files covers data files and the manifest
+of each removed version. Here the update replaced one partition, so the
+old version leaves one data file and one manifest.
 
 ``` r
 
@@ -590,7 +600,9 @@ store_prune(sth, keep = 0)
 without data checks the integrity of a stored dataset: every file exists
 with the checksum and the number of rows its catalog records, and the
 catalog agrees with itself. Given the data the dataset was written from,
-it compares a sample of stored rows with them.
+it compares a sample of stored rows with them. In a store with several
+locations, `locations` limits the check to some of them (see
+[`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)).
 
 ``` r
 

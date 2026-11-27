@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -40,6 +40,7 @@
 <li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -122,7 +123,10 @@ are never searched for files.</li>
 <code>sales/daily</code>. It is stored as one file, or as one file per
 <em>partition</em> (for example one per year).</li>
 <li>A <strong>version</strong> is a 16-character code computed from the
-content of a dataset’s files. The same data always give the same
+content of a dataset’s files. Each file also embeds the dataset’s
+metadata: its name, title, description, key, partition and column types,
+among others. So the same rows give the same version only with the same
+name and the same metadata; a change of title alone gives a new
 version.</li>
 </ul>
 </div>
@@ -186,7 +190,7 @@ of the named columns.</p>
 <span>  partition <span class="op">=</span> <span class="st">"year"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  2/2 files sent  31.3 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  2/2 files sent  31.4 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The summary says what was written and where. Before anything is
 copied to the store, the files are written to a local staging folder and
@@ -194,10 +198,13 @@ a sample of their rows is compared with <code>sales</code>. After the
 copy, the checksum (MD5) of every file in the store is compared with the
 staged one. Only then is the catalog switched to the new version, so a
 reader never sees a half-written dataset.</p>
-<p>Writing the same data again changes nothing. The version is computed
-from the content, so the package sees that the store already holds it. A
-dataset that exists can only be written again with
-<code>mode = "replace"</code> or <code>mode = "update"</code>:</p>
+<p>A dataset that exists is written again only with
+<code>mode = "replace"</code> or <code>mode = "update"</code>. With the
+default <code>mode = "create"</code>, the write stops with an error
+(class <code>rcs_error_dataset_exists</code>). If the new data and
+metadata give the version the store already holds, nothing is uploaded
+and the summary says the dataset is unchanged. That is the case
+here:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">sales</span>, <span class="st">"sales/daily"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Daily sales"</span>,</span>
@@ -206,7 +213,7 @@ dataset that exists can only be written again with
 <span>  partition <span class="op">=</span> <span class="st">"year"</span>,</span>
 <span>  mode <span class="op">=</span> <span class="st">"replace"</span></span>
 <span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">"sales/daily"</span> is unchanged (version b74a078c7191e5d3): 300 rows in 2 files (partition year).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">"sales/daily"</span> is unchanged (version 66bd1cd34236c66b): 300 rows in 2 files (partition year).</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  unchanged</span></span></code></pre></div>
 </div>
 <div class="section level2">
@@ -223,7 +230,7 @@ by folder.</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   300  31.3 kB      2  2026-11-22 15:55</span></span></code></pre></div>
+<span><span class="co">#&gt;     daily  table   300  31.4 kB      2  2026-11-27 18:59</span></span></code></pre></div>
 <p><code><a href="../reference/store_datasets.html">store_datasets()</a></code> returns the same list as a tibble, one
 row per dataset.</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
@@ -232,7 +239,7 @@ row per dataset.</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 9</span></span></span>
 <span><span class="co">#&gt;   dataset  kind  title  rows bytes n_files partition version updated            </span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;list&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dttm&gt;</span>             </span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>289       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> b74a07… 2026-11-22 <span style="color: #949494;">15:55:19</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>399       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> 66bd1c… 2026-11-27 <span style="color: #949494;">18:59:07</span></span></span>
 <span><span class="va">datasets</span><span class="op">$</span><span class="va">title</span></span>
 <span><span class="co">#&gt; [1] "Daily sales"</span></span></code></pre></div>
 <p><code><a href="../reference/store_describe.html">store_describe()</a></code> shows everything the catalog knows
@@ -245,19 +252,19 @@ their types, and the files of the current version.</p>
 <span><span class="co">#&gt; Simulated daily sales by shop and product.</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; Kind        table</span></span>
-<span><span class="co">#&gt; Version     b74a078c7191e5d3</span></span>
+<span><span class="co">#&gt; Version     66bd1cd34236c66b</span></span>
 <span><span class="co">#&gt; Rows        300</span></span>
 <span><span class="co">#&gt; Files       2</span></span>
-<span><span class="co">#&gt; Size        31.3 kB</span></span>
+<span><span class="co">#&gt; Size        31.4 kB</span></span>
 <span><span class="co">#&gt; Key         shop_id, date, product</span></span>
 <span><span class="co">#&gt; Partition   year</span></span>
 <span><span class="co">#&gt; Sorted by   shop_id, date, product</span></span>
 <span><span class="co">#&gt; Source      –</span></span>
 <span><span class="co">#&gt; Inputs      –</span></span>
 <span><span class="co">#&gt; History     not set (the connection's setting applies)</span></span>
-<span><span class="co">#&gt; Created     2026-11-22 15:55:18 UTC</span></span>
-<span><span class="co">#&gt; Updated     2026-11-22 15:55:19 UTC</span></span>
-<span><span class="co">#&gt; Written by  R 4.6.2, rcs 0.0.0.9000</span></span>
+<span><span class="co">#&gt; Created     2026-11-27 18:59:07 UTC</span></span>
+<span><span class="co">#&gt; Updated     2026-11-27 18:59:07 UTC</span></span>
+<span><span class="co">#&gt; Written by  R 4.6.2, rcs 0.0.0.9006</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; Locations:</span></span>
 <span><span class="co">#&gt;   primary    &lt;tempdir&gt;/my-store</span></span>
@@ -282,8 +289,8 @@ their types, and the files of the current version.</p>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; Files (2):</span></span>
 <span><span class="co">#&gt;   path                                                 partition      rows     size</span></span>
-<span><span class="co">#&gt;   sales/daily/year=2023/part-b74a078c7191e5d3.parquet  {"year":2023}   156  15.9 kB</span></span>
-<span><span class="co">#&gt;   sales/daily/year=2024/part-b74a078c7191e5d3.parquet  {"year":2024}   144  15.4 kB</span></span></code></pre></div>
+<span><span class="co">#&gt;   sales/daily/year=2023/part-66bd1cd34236c66b.parquet  {"year":2023}   156  15.9 kB</span></span>
+<span><span class="co">#&gt;   sales/daily/year=2024/part-66bd1cd34236c66b.parquet  {"year":2024}   144  15.5 kB</span></span></code></pre></div>
 <p>These three functions read only the catalog that the connection
 holds. They open no data file, so they are fast also for a store in a
 cloud bucket.</p>
@@ -302,7 +309,7 @@ it shows a header and the first rows.</p>
 <span><span class="va">q</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [300 x 15] (table)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  66bd1cd3 (current)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Files:    2 of 2</span></span></span>
 <span><span class="co">#&gt;    shop_id date        year product   qty price promo grade delivered      big</span></span>
 <span><span class="co">#&gt;      <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span></span>
@@ -344,7 +351,7 @@ default.</p>
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">q</span>, n <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [300 x 15] (table)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  66bd1cd3 (current)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Files:    2 of 2</span></span></span>
 <span><span class="co">#&gt;   shop_id date        year product   qty price promo grade delivered      big</span></span>
 <span><span class="co">#&gt;     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span></span>
@@ -366,7 +373,7 @@ Each verb returns a new query; still nothing is read.</p>
 <span><span class="va">q24</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Dataset:  sales/daily [?? x 4] (table)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Location: primary (local)</span></span></span>
-<span><span class="co">#&gt; <span style="color: #949494;"># Version:  b74a078c (current)</span></span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># Version:  66bd1cd3 (current)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Files:    1 of 2 (pruned)</span></span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># Filter:   ((year == 2024) and (qty &gt; 45))</span></span></span>
 <span><span class="co">#&gt;   shop_id date       product   qty</span></span>
@@ -413,11 +420,13 @@ counters show it: with <code>options(rcs.trace = TRUE)</code>,
 <span><span class="co">#&gt;   counter          detail                                                  n</span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                               <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> backend_call     be_arrow_fs                                             1</span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> file_open        sales/daily/year=2023/part-b74a078c7191e5d3.parquet     1</span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> file_open        sales/daily/year=2023/part-66bd1cd34236c66b.parquet     1</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">3</span> row_groups_total <span style="color: #BB0000;">NA</span>                                                      1</span></span>
 <span><span class="co">#&gt; <span style="color: #BCBCBC;">4</span> rows_returned    <span style="color: #BB0000;">NA</span>                                                    156</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/options.html" class="external-link">options</a></span><span class="op">(</span>rcs.trace <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span></code></pre></div>
-<p>One of the two files was opened.</p>
+<p>One of the two files was opened. The records are kept until the next
+call of a package function; <code><a href="../reference/rcs_trace.html">rcs_trace_reset()</a></code> clears
+them.</p>
 </div>
 <div class="section level2">
 <h2 id="read-in-one-call">Read in one call<a class="anchor" aria-label="anchor" href="#read-in-one-call"></a>
@@ -464,7 +473,7 @@ stored sorted.</p>
 <span><span class="co">#&gt; Dataset:   sales/daily (table)</span></span>
 <span><span class="co">#&gt; Rows:      300</span></span>
 <span><span class="co">#&gt; Files:     2</span></span>
-<span><span class="co">#&gt; Version:   b74a078c7191e5d3</span></span>
+<span><span class="co">#&gt; Version:   66bd1cd34236c66b</span></span>
 <span><span class="co">#&gt; Key:       shop_id, date, product</span></span>
 <span><span class="co">#&gt; Partition: year</span></span>
 <span><span class="co">#&gt; </span></span>
@@ -502,9 +511,11 @@ stored sorted.</p>
 </h2>
 <p>With <code>mode = "update"</code>, only the partitions whose values
 occur in the new data are replaced; the other partitions stay as they
-are. Here the rows of 2024 are written again with corrected quantities.
-The key, the partition columns and the column types come from the stored
-dataset and must match.</p>
+are. It works only on a partitioned dataset: a dataset stored as one
+file must be written with <code>mode = "replace"</code>. Here the rows
+of 2024 are written again with corrected quantities. The key, the
+partition columns and the column types come from the stored dataset and
+must match.</p>
 <div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">fix</span> <span class="op">&lt;-</span> <span class="va">sales</span><span class="op">[</span><span class="va">sales</span><span class="op">$</span><span class="va">year</span> <span class="op">==</span> <span class="fl">2024</span>, <span class="op">]</span></span>
 <span><span class="va">fix</span><span class="op">$</span><span class="va">qty</span> <span class="op">&lt;-</span> <span class="va">fix</span><span class="op">$</span><span class="va">qty</span> <span class="op">+</span> <span class="fl">1L</span></span>
@@ -520,8 +531,8 @@ dataset and must match.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> They are no longer named by the catalogs; `store_prune()` removes them later.</span></span>
 <span><span class="co">#&gt; Caused by error in `be_delete()`:</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> Cannot delete 1 file in <span style="color: #0000BB;">&lt;tempdir&gt;/my-store</span>:</span></span>
-<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/my-store/sales/daily/year=2024/part-b74a078c7191e5d3.parquet</span>.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.4 kB  0.2s</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/my-store/sales/daily/year=2024/part-66bd1cd34236c66b.parquet</span>.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.5 kB  0.3s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The message lists every replaced partition with its old and new
 number of rows. Check it: a row of a replaced partition that is missing
@@ -551,7 +562,7 @@ the connection’s, and the connection’s over the store’s.</p>
 <span>  partition <span class="op">=</span> <span class="st">"year"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  2/2 files sent  31.3 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  2/2 files sent  31.4 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span>
 <span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">sth</span>, <span class="va">fix</span>, <span class="st">"sales/daily"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Daily sales"</span>,</span>
@@ -561,7 +572,7 @@ the connection’s, and the connection’s over the store’s.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> year = 2024: 144 rows -&gt; 144 rows</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  1/2 files sent  15.4 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  1/2 files sent  15.5 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p><code><a href="../reference/store_history.html">store_history()</a></code> lists the versions, the current one
 first.</p>
@@ -571,8 +582,8 @@ first.</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 2 × 5</span></span></span>
 <span><span class="co">#&gt;   version          current n_files  rows complete</span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>            <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span>   </span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> e0ce507f7ddb7d09 TRUE          2   300 TRUE    </span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> b74a078c7191e5d3 FALSE         2   300 TRUE</span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> e8b87a3368049afd TRUE          2   300 TRUE    </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">2</span> 66bd1cd34236c66b FALSE         2   300 TRUE</span></span></code></pre></div>
 <p>An earlier version is read by its code:</p>
 <div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">first</span> <span class="op">&lt;-</span> <span class="va">versions</span><span class="op">$</span><span class="va">version</span><span class="op">[</span><span class="op">!</span><span class="va">versions</span><span class="op">$</span><span class="va">current</span><span class="op">]</span><span class="op">[</span><span class="fl">1</span><span class="op">]</span></span>
@@ -589,7 +600,9 @@ first.</p>
 <p>Old versions stay until <code><a href="../reference/store_prune.html">store_prune()</a></code> removes them.
 <code>keep</code> is the number of earlier versions to keep;
 <code>dry_run = TRUE</code> only reports. Files that the current version
-still uses are never deleted.</p>
+still uses are never deleted. The count of files covers data files and
+the manifest of each removed version. Here the update replaced one
+partition, so the old version leaves one data file and one manifest.</p>
 <div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_prune.html">store_prune</a></span><span class="op">(</span><span class="va">sth</span>, keep <span class="op">=</span> <span class="fl">0</span>, dry_run <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> Would remove 1 history version and 2 files (18.3 kB) in 1</span></span>
@@ -604,7 +617,9 @@ still uses are never deleted.</p>
 stored dataset: every file exists with the checksum and the number of
 rows its catalog records, and the catalog agrees with itself. Given the
 data the dataset was written from, it compares a sample of stored rows
-with them.</p>
+with them. In a store with several locations, <code>locations</code>
+limits the check to some of them (see
+<code><a href="../articles/locations.html">vignette("locations")</a></code>).</p>
 <div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_check.html">store_check</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> 2 files checked in 1 location: no problem found.</span></span>

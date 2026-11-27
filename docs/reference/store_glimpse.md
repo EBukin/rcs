@@ -2,7 +2,12 @@
 
 Prints what the catalog says about a dataset (kind, rows, files,
 version, key, partition, coordinate reference system) and the first rows
-of its first file, read from one row group. Opens one file.
+of its first file, read from one row group. Opens one file. For a
+raster, the
+[`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
+is printed instead, with its categories and colours as
+[`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
+returns them.
 
 ## Usage
 
@@ -45,13 +50,13 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-glimpse  2/2
-#>   files sent  38.1 kB  0.2s
+#>   files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_glimpse(st, "daily")
 #> Dataset:   sales/daily (table)
 #> Rows:      500
 #> Files:     2
-#> Version:   9401e5a1f05ad19e
+#> Version:   a6caa62a5c54abbd
 #> Key:       shop_id, date, product
 #> Partition: year
 #> 

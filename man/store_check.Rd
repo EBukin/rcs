@@ -53,12 +53,8 @@ normalisation (a tibble and a data frame are alike, geometries are
 compared as WKB, times as instants). Geospatial data without key and
 without a column \code{.rcs_id} are geocoded again to find the row
 identifiers, which matches only a dataset written in one call (not
-after an \code{update}). For a raster, \code{n} random cells are compared as a
-read returns them: a categorical layer by its codes, cells of \code{x} that
-hold the dataset's NoData value as missing, and a layer stored in
-single precision (\code{FLT4S}) within a relative difference of \code{1e-6}.
-\code{\link[=store_write]{store_write()}} runs this check on the staged files before it uploads
-them.
+after an \code{update}). For a raster, see "Rasters". \code{\link[=store_write]{store_write()}} runs
+this check on the staged files before it uploads them.
 \item Without \code{x}, an integrity check of each location: every file of the
 current version exists with the MD5 its catalog records (read from the
 backend's metadata, so no data file is downloaded where the backend
@@ -71,6 +67,26 @@ table is checked with it.
 The catalogs of the checked locations are read again first, and the
 connection is updated with them.
 }
+\section{Rasters}{
+
+\itemize{
+\item With \code{x}, a \code{terra::SpatRaster}: the stored file must have the layer
+names and the number of cells of \code{x}, and \code{n} random cells are
+compared, layer by layer, as a read returns them. A categorical layer
+is compared by its codes, not its labels. Cells of \code{x} that hold the
+dataset's NoData value count as missing, as they are in the file
+(after \code{store_write(nodata = 0)}, a \code{0} in \code{x} equals a missing cell
+of the file). A layer stored in single precision (\code{FLT4S}) may differ
+from \code{x} by a relative \code{1e-6}; every other type must be equal. The
+legend and the colours are not compared: they are in the catalog, not
+in the file. The file is opened through GDAL and only the sampled
+cells are read.
+\item Without \code{x}: the file exists with the MD5 its catalog records, the
+version and the totals match, and the manifest agrees with the
+catalog. The checks of Parquet footers do not apply to a raster.
+}
+}
+
 \examples{
 root <- file.path(tempdir(), "rcs-example-check")
 st <- store_connect(file.path(root, "primary"), create = TRUE)
@@ -81,6 +97,24 @@ store_write(st, sales, "sales/daily",
 )
 store_check(st, "sales/daily")
 store_check(st, "sales/daily", x = sales)
+
+# A class map written with `nodata = 0`: the cells of `x` that hold 0
+# equal the missing cells of the file, and codes are compared with codes
+if (requireNamespace("terra", quietly = TRUE)) {
+  cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+  cover[1:2, ] <- 0L
+  levels(cover) <- data.frame(
+    value = 1:5,
+    label = c("water", "forest", "crop", "grass", "bare")
+  )
+  names(cover) <- "cover"
+  store_write(st, cover, "grids/cover",
+    title = "Land cover", description = "A simulated class map.",
+    nodata = 0
+  )
+  store_check(st, "grids/cover")
+  store_check(st, "grids/cover", x = cover, n = 500)
+}
 unlink(root, recursive = TRUE)
 }
 \seealso{

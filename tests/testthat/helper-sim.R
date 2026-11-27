@@ -55,9 +55,15 @@ sim_raster <- function() {
 #     writes a tag, so the tag is removed by a second step.
 #   * `legend = TRUE`: the classes 1-5 get labels. `levels<-` renames the
 #     layer to the label column, so the name is set again afterwards.
+#   * `colors = TRUE` (plan 0006, part C): the classes 1-5 get a colour table,
+#     set in the session with `terra::coltab<-` after the file is written, so
+#     a file given with `file` holds no colour table itself. The last colour
+#     is not opaque.
 sim_landcover_labels <- c("water", "forest", "crop", "grass", "bare")
+sim_landcover_colors <- c("#1F78B4FF", "#33A02CFF", "#FFD92FFF", "#B2DF8AFF", "#A6761DC0")
 
-sim_landcover <- function(nrow = 60, ncol = 80, seed = 1, file = NULL, legend = FALSE) {
+sim_landcover <- function(nrow = 60, ncol = 80, seed = 1, file = NULL, legend = FALSE,
+                          colors = FALSE) {
   testthat::skip_if_not_installed("terra")
   x <- terra::as.int(rcs_sim_raster(seed = seed, nrow = nrow, ncol = ncol)[["cover"]])
   v <- matrix(as.integer(terra::values(x)), nrow = nrow, byrow = TRUE)
@@ -76,6 +82,10 @@ sim_landcover <- function(nrow = 60, ncol = 80, seed = 1, file = NULL, legend = 
   }
   if (legend) {
     levels(x) <- data.frame(value = 1:5, label = sim_landcover_labels)
+    names(x) <- "cover"
+  }
+  if (colors) {
+    terra::coltab(x, layer = 1) <- data.frame(value = 1:5, col = sim_landcover_colors)
     names(x) <- "cover"
   }
   x

@@ -439,16 +439,17 @@ knitr::kable(wide[order(wide$case, wide$location), ], row.names = FALSE)
   file, so it grows with the number of files.
 - Four workers against one: 76.6 s against 59.8 s for 1,000,000 polygons
   (geocode 67 s against 50.3 s, a factor of 1.3). At 1e5 rows four
-  workers cannot help: the rows form one chunk of `rcs.chunk_size`
-  (1e5), and only chunks are shared out. The gain stays well below four
-  because the rows that are costly to geocode, those crossing cell
-  edges, all lie in the first chunks of the simulated data, and the
-  machine has four physical cores. In a separate check on 2e5 polygons
-  with four workers, chunks of 5e4 rows took 6.3 to 8.1 s against 8.5 to
-  9.1 s for 1e5 (one run each, three for the pair), chunks of 2.5e4 no
-  less, and spreading the rows over the chunks in turn did not help;
-  with one worker, the default, the chunk size made no difference. The
-  evidence is too thin to change `rcs.chunk_size`, which stays at 1e5.
+  workers cannot help: the rows form one chunk of `rcs.chunk_size` (1e5
+  when this was measured), and only chunks are shared out. The gain
+  stays well below four because the rows that are costly to geocode,
+  those crossing cell edges, all lie in the first chunks of the
+  simulated data, and the machine has four physical cores. In a separate
+  check on 2e5 polygons with four workers, chunks of 5e4 rows took 6.3
+  to 8.1 s against 8.5 to 9.1 s for 1e5 (one run each, three for the
+  pair), chunks of 2.5e4 no less, and spreading the rows over the chunks
+  in turn did not help; with one worker, the default, the chunk size
+  made no difference. The default `rcs.chunk_size` is now 1e4, so that
+  geocoding can show progress over the chunks; the runs above used 1e5.
 - The cloud bucket adds the upload: 19.7 s against 9.28 s for 1e5
   polygons, 3.21 s against 0.531 s for 1e5 table rows. MD5 verification
   reads object metadata and costs 0.85 s per write, small next to the

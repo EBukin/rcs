@@ -161,7 +161,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-duckdb  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 con <- store_duckdb(st)
 #> ✔ DuckDB view (native mode, nothing read yet): `sales.daily`.
@@ -173,7 +173,7 @@ store_tables(con, st)
 #> # A tibble: 1 × 6
 #>   schema name  type  dataset     version          current
 #> * <chr>  <chr> <chr> <chr>       <chr>            <lgl>  
-#> 1 sales  daily view  sales/daily bf16efd1aebea856 TRUE   
+#> 1 sales  daily view  sales/daily 0f9e01793cbea58a TRUE   
 DBI::dbDisconnect(con, shutdown = TRUE)
 unlink(root, recursive = TRUE)
 ```

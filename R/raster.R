@@ -32,12 +32,23 @@
 #     again from there. The file is written from a copy without levels, so no
 #     side file (`.aux.xml`) is ever written and the same cells with and
 #     without a legend give the same file.
+#   * The colour table of a layer (`terra::coltab()`) is stored the same way
+#     (plan 0006, part C): `raster_colors()` reads it, the layer's `r_type`
+#     holds it as `color_values` (codes, sorted) and `colors` (`#RRGGBBAA`,
+#     upper case), and `raster_open()` sets it again after the legend. With a
+#     legend only the colours of the legend's codes are kept; without one,
+#     every row of the table (256 rows for a table read from a file). The
+#     file never holds a colour table: it is written from a copy without one
+#     (`raster_drop_colors()`), and a source file that holds one is copied by
+#     way of a VRT without it, so the same cells with and without colours
+#     give the same file.
 #   * The time and units of layers (`terra::time()`, `terra::units()`) are
 #     not stored (plan 0006, AM10): the file is written from a copy without
 #     them, so they change neither its bytes nor the version, and terra
 #     writes no side file for them (`.aux.json`). Side files are removed
 #     after the write in any case. Only what GDAL copies of the metadata of a
-#     source file on the translate path stays in the TIFF.
+#     source file on the translate path stays in the TIFF (never a colour
+#     table).
 #   * Two ways to write (`raster_write()`): an unchanged view of one file
 #     (same cells, names, CRS and NoData value; no scale or offset) is copied
 #     by GDAL (`gdal_translate`), which needs no intermediate file; everything
@@ -408,13 +419,15 @@ raster_marked_nodata <- function(x, call = caller_env()) {
 #     name; `""` when the band has none (terra then names the layer after
 #     the file);
 #   * `scale`, `offset`: 1 and 0 when the band has none. They are the file's
-#     own, also when `x` was opened with `raw = TRUE`.
-# A layer in memory, or of a file GDAL cannot describe, has `NA`, `""`, 1, 0.
+#     own, also when `x` was opened with `raw = TRUE`;
+#   * `colors`: `TRUE` when the band holds a colour table of its own.
+# A layer in memory, or of a file GDAL cannot describe, has `NA`, `""`, 1, 0,
+# `FALSE`.
 raster_source_bands <- function(x) {
   src <- terra::sources(x, bands = TRUE)
   out <- data.frame(
     nodata = rep(NA_real_, nrow(src)), description = "", scale = 1, offset = 0,
-    stringsAsFactors = FALSE
+    colors = FALSE, stringsAsFactors = FALSE
   )
   number <- function(value, default) {
     value <- if (is.null(value)) default else suppressWarnings(as.numeric(value))
@@ -438,6 +451,7 @@ raster_source_bands <- function(x) {
       out$description[[row]] <- as.character(band[["description"]] %||% "")
       out$scale[[row]] <- number(band[["scale"]], 1)
       out$offset[[row]] <- number(band[["offset"]], 0)
+      out$colors[[row]] <- !is.null(band[["colorTable"]])
     }
   }
   out
@@ -630,6 +644,104 @@ raster_set_legend <- function(r, columns) {
   r
 }
 
+# Colour tables ------------------------------------------------------------------
+
+# The colour table of each layer of `x` (plan 0006, part C, D-C1): `NULL`
+# when no layer has one, else a list with one element per layer, `NULL` for a
+# layer without colours and otherwise a list of
+#   * `color_values`: the codes, sorted;
+#   * `colors`: their colours as `#RRGGBBAA` in upper case, in that order.
+# Every row of the table is given: a table read from a file has a row for
+# each of the codes 0-255, the codes without a colour black and the source
+# file's NoData code transparent.
+raster_colors <- function(x) {
+  colored <- terra::has.colors(x)
+  if (!any(colored)) {
+    return(NULL)
+  }
+  tables <- terra::coltab(x)
+  lapply(seq_along(colored), function(i) {
+    table <- if (colored[[i]]) tables[[i]]
+    if (is.null(table) || nrow(table) == 0) {
+      return(NULL)
+    }
+    table <- table[!is.na(table[[1]]) & !duplicated(table[[1]]), , drop = FALSE]
+    table <- table[order(table[[1]]), , drop = FALSE]
+    channel <- function(j) {
+      value <- if (j <= ncol(table)) as.integer(round(table[[j]])) else rep(255L, nrow(table))
+      value[is.na(value)] <- 255L
+      pmin(pmax(value, 0L), 255L)
+    }
+    list(
+      color_values = as.double(table[[1]]),
+      colors = sprintf("#%02X%02X%02X%02X", channel(2), channel(3), channel(4), channel(5))
+    )
+  })
+}
+
+# The colours to record for each layer (D-C2): with a legend, only those of
+# the legend's codes; without one, the whole table. `colors` and `legend`
+# are the results of `raster_colors()` and `raster_legend()`. A list with one
+# element per layer: `NULL`, or `list(color_values, colors)`.
+raster_legend_colors <- function(colors, legend, n) {
+  lapply(seq_len(n), function(i) {
+    color <- colors[[i]]
+    codes <- legend[[i]]$values
+    if (is.null(color) || is.null(codes)) {
+      return(color)
+    }
+    keep <- color$color_values %in% codes
+    if (!any(keep)) {
+      return(NULL)
+    }
+    lapply(color, function(field) field[keep])
+  })
+}
+
+# A copy of `x` without colour tables (D-C3). `coltab<-` works on a copy,
+# reads no cells and clears one layer at a time, so every coloured layer is
+# cleared; `x` and its source stay as they are.
+raster_drop_colors <- function(x) {
+  colored <- which(terra::has.colors(x))
+  if (length(colored) == 0) {
+    return(x)
+  }
+  out <- x
+  for (i in colored) {
+    terra::coltab(out, layer = i) <- NULL
+  }
+  if (!identical(names(out), names(x))) {
+    names(out) <- names(x)
+  }
+  out
+}
+
+# Sets the colours recorded in `columns` (a columns specification, or `NULL`)
+# on the layers of an opened raster (D-C4). `coltab<-` writes nothing next to
+# the file and keeps the categories; the names are set again after it.
+raster_set_colors <- function(r, columns) {
+  if (is.null(columns)) {
+    return(r)
+  }
+  layers <- names(r)
+  for (i in seq_len(nrow(columns))) {
+    r_type <- columns$r_type[[i]]
+    layer <- match(columns$name[[i]], layers)
+    if (length(r_type[["color_values"]]) == 0 || is.na(layer)) {
+      next
+    }
+    terra::coltab(r, layer = layer) <- data.frame(
+      value = as.numeric(r_type[["color_values"]]),
+      col = as.character(r_type[["colors"]]),
+      stringsAsFactors = FALSE
+    )
+  }
+  if (!identical(names(r), layers)) {
+    names(r) <- layers
+  }
+  r
+}
+
 # Writing the file -------------------------------------------------------------
 
 # `TRUE` when `x` is an unchanged view of one file: one source file for all
@@ -665,7 +777,9 @@ raster_is_file_view <- function(x) {
 #     file, and the copy would be named after the staged file; such a source
 #     is copied by way of a VRT that describes each band by its layer name
 #     (`raster_named_vrt()`), in the subfolder `vrt/` next to `file`, removed
-#     on exit. When that VRT cannot be made, terra writes the file.
+#     on exit. A source that holds a colour table goes the same way: the VRT
+#     has none, so the copy has none (part C, AM-C3). When that VRT cannot be
+#     made, terra writes the file.
 #   * Otherwise terra writes it. Its temp folder is then the subfolder
 #     `terra/` next to `file`, so that its intermediate file lies below the
 #     staging folder; the option is restored and the subfolder removed on
@@ -679,7 +793,7 @@ raster_write <- function(x, file, datatype, nodata, options) {
     translate <- if (is.null(nodata)) length(markers) == 0 else all(markers == nodata)
   }
   source <- if (translate) unique(terra::sources(x))
-  if (translate && !identical(bands$description, names(x))) {
+  if (translate && (!identical(bands$description, names(x)) || any(bands$colors))) {
     vrt_dir <- file.path(dirname(file), "vrt")
     dir.create(vrt_dir, recursive = TRUE, showWarnings = FALSE)
     on.exit(unlink(vrt_dir, recursive = TRUE), add = TRUE)
@@ -708,7 +822,8 @@ raster_write <- function(x, file, datatype, nodata, options) {
 # one per band: a few lines of XML that point to `source`, no cells. GDAL
 # writes the VRT; the `<Description>` of each band is then set (replaced when
 # there is one), with the names escaped for XML. Only the data bands count,
-# those with a `band=` attribute: the band inside `<MaskBand>` has none.
+# those with a `band=` attribute: the band inside `<MaskBand>` has none. A
+# colour table of the source is left out (`vrt_drop_color_tables()`).
 # Returns `vrt`, or `NULL` when GDAL writes no VRT or its data bands are not
 # one per name; the caller then leaves the file to terra.
 raster_named_vrt <- function(source, vrt, names) {
@@ -718,6 +833,7 @@ raster_named_vrt <- function(source, vrt, names) {
   }
   lines <- readLines(vrt, warn = FALSE, encoding = "UTF-8")
   lines <- lines[!grepl("^\\s*<Description>.*</Description>\\s*$", lines)]
+  lines <- vrt_drop_color_tables(lines)
   bands <- grep("<VRTRasterBand\\s[^>]*\\bband\\s*=", lines, perl = TRUE)
   if (length(bands) != length(names)) {
     return(NULL)
@@ -735,6 +851,29 @@ raster_named_vrt <- function(source, vrt, names) {
   on.exit(close(con), add = TRUE)
   writeLines(enc2utf8(unlist(described, use.names = FALSE)), con, useBytes = TRUE)
   vrt
+}
+
+# The lines of a VRT without its `<ColorTable>` blocks, and with the colour
+# interpretation `Palette`, which needs a table, turned into `Gray`: what
+# GDAL writes for the same cells without a colour table.
+vrt_drop_color_tables <- function(lines) {
+  starts <- grep("<ColorTable\\b", lines, perl = TRUE)
+  drop <- integer()
+  for (start in starts) {
+    closed <- grepl("/>\\s*$", lines[[start]]) || grepl("</ColorTable>", lines[[start]], fixed = TRUE)
+    end <- if (closed) {
+      start
+    } else {
+      ends <- grep("</ColorTable>", lines, fixed = TRUE)
+      ends <- ends[ends > start]
+      if (length(ends) == 0) start else ends[[1]]
+    }
+    drop <- c(drop, start:end)
+  }
+  if (length(drop) > 0) {
+    lines <- lines[-drop]
+  }
+  sub("<ColorInterp>Palette</ColorInterp>", "<ColorInterp>Gray</ColorInterp>", lines, fixed = TRUE)
 }
 
 # The COG `file` copied from the file `source` by `gdal_translate`, which
@@ -827,7 +966,8 @@ raster_check_space <- function(x, dir) {
 #' is written follow the rules in the header of this file. Categorical layers
 #' are written as codes; `x` itself is never changed. Columns of a category
 #' table other than the codes and the active labels are dropped, with one
-#' message for the whole raster. No manifest is written: the caller sets
+#' message for the whole raster. A colour table of a layer is recorded in
+#' the entry and never written into the file. No manifest is written: the caller sets
 #' `created` and `updated` of the entry and then builds the manifest from
 #' `entry` and `files` (`new_manifest()`).
 #'
@@ -852,7 +992,10 @@ raster_check_space <- function(x, dir) {
 #'     followed by `nodata` (a number) when the file has a NoData value, and
 #'     for a categorical layer by `values` (the codes), `levels` (their
 #'     labels, in the order of the codes) and `levels_name` (the name of the
-#'     label column); `created` and `updated` are set by the caller;
+#'     label column), and for a layer with a colour table by `color_values`
+#'     (the codes, sorted) and `colors` (`#RRGGBBAA`, upper case, in that
+#'     order; with a legend only those of the legend's codes); `created` and
+#'     `updated` are set by the caller;
 #'   * `files`: its file row, made by `new_file_rows()`, with
 #'     `path = data_file_path(dataset, version, ext = "tif")`,
 #'     `partition_values = "{}"`, the `bbox` and no cells;
@@ -903,6 +1046,7 @@ raster_stage <- function(x, dataset, title, description,
   check_raster_arguments(datatype, nodata, gdal)
 
   legend <- raster_legend(x)
+  colors <- raster_legend_colors(raster_colors(x), legend, length(layers))
   datatype <- raster_datatype(x, datatype, nodata)
   nodata <- raster_nodata(x, datatype, nodata)
   datatype <- as.vector(datatype)
@@ -918,7 +1062,8 @@ raster_stage <- function(x, dataset, title, description,
   dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
   on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
   tmp <- file.path(tmp_dir, "part.tif")
-  raster_write(raster_drop_time_units(raster_drop_levels(x)), tmp, datatype, nodata, options)
+  bare <- raster_drop_colors(raster_drop_time_units(raster_drop_levels(x)))
+  raster_write(bare, tmp, datatype, nodata, options)
   left <- list.files(tmp_dir, all.files = TRUE, no.. = TRUE, recursive = TRUE)
   if (!identical(left, basename(tmp))) {
     cli::cli_abort(
@@ -948,7 +1093,7 @@ raster_stage <- function(x, dataset, title, description,
     r_type$nodata <- as.double(nodata)
   }
   r_types <- lapply(seq_along(layers), function(i) {
-    c(r_type, legend[[i]][c("values", "levels", "levels_name")])
+    c(r_type, legend[[i]][c("values", "levels", "levels_name")], colors[[i]])
   })
   description_of <- if (!is.null(columns)) unname(columns[layers])
   spec <- columns_spec(
@@ -991,8 +1136,10 @@ raster_stage <- function(x, dataset, title, description,
 #' @param columns `NULL`, or the columns specification of the entry
 #'   (`columns_from_json(entry$columns)`). Each layer whose `r_type` holds a
 #'   legend (`values`, `levels`, `levels_name`) gets its categories back,
-#'   before any crop; without it the raster holds the codes. Nothing is
-#'   written next to the file.
+#'   before any crop; without it the raster holds the codes. Each layer
+#'   whose `r_type` holds colours (`color_values`, `colors`) then gets its
+#'   colour table back; a crop keeps both. Nothing is written next to the
+#'   file.
 #' @return A `terra::SpatRaster` opened through `be_gdal_path(be, path)`, so
 #'   that only the tiles needed are read; its data type and NoData value are
 #'   those of the file. Aborts with class
@@ -1030,7 +1177,7 @@ raster_open <- function(be, path, intersects = NULL, columns = NULL) {
     }
   )
   trace_count("file_open", 1, location = be$uri, detail = path)
-  r <- raster_set_legend(r, columns)
+  r <- raster_set_colors(raster_set_legend(r, columns), columns)
   if (is.null(intersects)) {
     return(r)
   }

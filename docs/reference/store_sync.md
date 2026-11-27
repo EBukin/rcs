@@ -132,7 +132,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-sync/primary  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 
 # A connection with a secondary location that missed the write
@@ -145,7 +145,7 @@ store_status(st)
 #> # A tibble: 1 × 8
 #>   dataset     location status  newer primary_version  location_version
 #>   <chr>       <chr>    <chr>   <chr> <chr>            <chr>           
-#> 1 sales/daily [1]      missing NA    bf16efd1aebea856 NA              
+#> 1 sales/daily [1]      missing NA    0f9e01793cbea58a NA              
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 store_sync(st, dry_run = TRUE)
 #> ℹ Dry run: nothing is changed.
@@ -153,13 +153,13 @@ store_sync(st, dry_run = TRUE)
 #>   /tmp/Rtmp/rcs-example-sync/primary to 1
 #>   secondary location.
 #> • secondary  /tmp/Rtmp/rcs-example-sync/copy     would
-#>   copy 1 dataset, 2 files (23.7 kB): "sales/daily"
+#>   copy 1 dataset, 2 files (23.8 kB): "sales/daily"
 store_sync(st)
 #> ℹ Syncing 1 dataset from the primary
 #>   /tmp/Rtmp/rcs-example-sync/primary to 1
 #>   secondary location.
 #> ✔ secondary  /tmp/Rtmp/rcs-example-sync/copy     1
-#>   dataset, 2/2 files sent  23.7 kB  0.2s
+#>   dataset, 2/2 files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 
 # Work done on the secondary alone, brought back to the primary
@@ -184,7 +184,7 @@ store_status(st)
 #> # A tibble: 2 × 8
 #>   dataset      location status newer primary_version  location_version
 #>   <chr>        <chr>    <chr>  <chr> <chr>            <chr>           
-#> 1 sales/daily  [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> 1 sales/daily  [1]      same   NA    0f9e01793cbea58a 0f9e01793cbea58a
 #> 2 sales/weekly [1]      same   NA    e8bcbde15b3cbebc e8bcbde15b3cbebc
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 unlink(root, recursive = TRUE)

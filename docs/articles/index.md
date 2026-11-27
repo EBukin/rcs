@@ -10,6 +10,8 @@
   locations](https://ebukin.github.io/rcs/articles/locations.md):
 - [Geospatial
   data](https://ebukin.github.io/rcs/articles/geospatial.md):
+- [Regions and households: a worked
+  example](https://ebukin.github.io/rcs/articles/regions-and-households.md):
 
 ### Performance
 

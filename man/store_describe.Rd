@@ -28,7 +28,15 @@ with
 \item \code{entry}: the catalog entry, a one-row tibble;
 \item \code{columns}: a tibble \code{name}, \code{type} (Arrow type), \code{r_type} (the R type
 the package restores on read, as text, \code{NA} when Arrow restores it by
-itself), \code{description};
+itself), \code{description}. For a raster there is one row per layer:
+\code{type} is the data type of the file (e.g. \code{INT1U}) and \code{r_type}
+reads, for example,
+\verb{raster layer (60 x 80 cells, nodata 0, 5 classes)}: rows and
+columns, then the NoData value and the number of classes of the
+legend when the dataset has them. The full record of
+a layer (resolution, legend \code{values}, \code{levels}, \code{levels_name},
+colours \code{color_values}, \code{colors}) is the JSON text in
+\code{entry$columns}, which \code{jsonlite::fromJSON()} parses;
 \item \code{files}: a tibble of the files of the current version: \code{path},
 \code{partition_values}, \code{rows}, \code{bytes}, \code{md5}, \code{created};
 \item \code{locations}: a tibble \code{location}, \code{role} and \code{status} (as in

@@ -47,7 +47,15 @@ An object of class `rcs_description`, printed as a summary: a list with
 
 - `columns`: a tibble `name`, `type` (Arrow type), `r_type` (the R type
   the package restores on read, as text, `NA` when Arrow restores it by
-  itself), `description`;
+  itself), `description`. For a raster there is one row per layer:
+  `type` is the data type of the file (e.g. `INT1U`) and `r_type` reads,
+  for example, `raster layer (60 x 80 cells, nodata 0, 5 classes)`: rows
+  and columns, then the NoData value and the number of classes of the
+  legend when the dataset has them. The full record of a layer
+  (resolution, legend `values`, `levels`, `levels_name`, colours
+  `color_values`, `colors`) is the JSON text in `entry$columns`, which
+  [`jsonlite::fromJSON()`](https://rdrr.io/pkg/jsonlite/man/fromJSON.html)
+  parses;
 
 - `files`: a tibble of the files of the current version: `path`,
   `partition_values`, `rows`, `bytes`, `md5`, `created`;
@@ -73,7 +81,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-describe/primary  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_describe(st, "sales/daily")
 #> ── sales/daily ─────────────────────────────────────────────────────────────────
@@ -81,19 +89,19 @@ store_describe(st, "sales/daily")
 #> Simulated daily sales.
 #> 
 #> Kind        table
-#> Version     bf16efd1aebea856
+#> Version     0f9e01793cbea58a
 #> Rows        100
 #> Files       2
-#> Size        23.7 kB
+#> Size        23.8 kB
 #> Key         shop_id, date, product
 #> Partition   year
 #> Sorted by   shop_id, date, product
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-22 10:52:01 EST
-#> Updated     2026-11-22 10:52:01 EST
-#> Written by  R 4.6.2, rcs 0.0.0.9000
+#> Created     2026-11-27 13:56:24 EST
+#> Updated     2026-11-27 13:56:24 EST
+#> Written by  R 4.6.2, rcs 0.0.0.9006
 #> 
 #> Locations:
 #>   primary    /tmp/Rtmp/rcs-example-describe/primary
@@ -118,7 +126,7 @@ store_describe(st, "sales/daily")
 #> 
 #> Files (2):
 #>   path                                                 partition      rows     size
-#>   sales/daily/year=2023/part-bf16efd1aebea856.parquet  {"year":2023}    55  12.0 kB
-#>   sales/daily/year=2024/part-bf16efd1aebea856.parquet  {"year":2024}    45  11.7 kB
+#>   sales/daily/year=2023/part-0f9e01793cbea58a.parquet  {"year":2023}    55  12.1 kB
+#>   sales/daily/year=2024/part-0f9e01793cbea58a.parquet  {"year":2024}    45  11.7 kB
 unlink(root, recursive = TRUE)
 ```

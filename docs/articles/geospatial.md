@@ -55,7 +55,9 @@ polys
 
 An `sf` object is written like a table. The dataset’s kind becomes
 `geospatial`, and its coordinate reference system (CRS) is kept in the
-catalog. Any CRS can be used.
+catalog. Any CRS can be used. The data are stored in their own CRS; only
+the H3 cells are computed on a copy in EPSG:4326 (see “Geocoding
+engines” below).
 
 ``` r
 
@@ -94,8 +96,16 @@ reader applies before it reads any geometry.
 
 A geometry that crosses the edge of its cell also lies in other cells.
 The *index table* `<dataset>__h3` lists every such row with every cell
-it touches. It is written, replaced and deleted with its dataset, and is
-hidden unless asked for:
+it touches. It does not store the data twice: it holds no geometry and
+no attributes, only `.rcs_id`, the cells and the share of the row in
+each. It exists so that a query by cells finds a row in any cell it
+touches, not only in its main cell; this matters for thin or long
+queries, whose bounding box is much larger than the query.
+[`store_duckdb()`](https://ebukin.github.io/rcs/reference/store_duckdb.md)
+exposes it as the view `<schema>.<name>__h3` (see
+[`vignette("duckdb")`](https://ebukin.github.io/rcs/articles/duckdb.md)),
+and a write with `geocode = FALSE` makes none. It is written, replaced
+and deleted with its dataset, and is hidden unless asked for:
 
 ``` r
 
@@ -107,8 +117,8 @@ print(st, index = TRUE)
 #> Datasets: 2
 #>   name            kind        rows     size  files  updated
 #>   shapes/
-#>     polygons      geospatial   500  62.6 kB      1  2026-11-22 15:54
-#>     polygons__h3  table        533  10.2 kB      1  2026-11-22 15:54
+#>     polygons      geospatial   500  62.6 kB      1  2026-11-27 18:58
+#>     polygons__h3  table        533  10.2 kB      1  2026-11-27 18:58
 ```
 
 `h3` and `bbox` come back with the data.
@@ -382,7 +392,7 @@ store_write(st, polys, "shapes/polygons_by_cell",
   max_files = 10
 )
 #> ℹ Writing "shapes/polygons_by_cell": 500 rows in 7 files (partition h3_p2), and its index table in 1 file.
-#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.2 kB  0.3s
+#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.5 kB  0.2s
 #> ✔ MD5 identical for 8 files in 1 location. Catalogs updated.
 ```
 
@@ -402,7 +412,7 @@ trace[trace$counter == "file_open", c("detail", "n")]
 #> # A tibble: 1 × 2
 #>   detail                                                                       n
 #>   <chr>                                                                    <dbl>
-#> 1 shapes/polygons_by_cell/h3_p2=587654880185810943/part-b331e5c7b2facfa8.…     1
+#> 1 shapes/polygons_by_cell/h3_p2=587654880185810943/part-ec840f50f56b6b5e.…     1
 ```
 
 One data file of seven was opened. The query is a compact box, so the
@@ -425,7 +435,7 @@ store_write(st, polys, "shapes/polygons_boxes",
   geocode = FALSE
 )
 #> ℹ Writing "shapes/polygons_boxes": 500 rows in 1 file.
-#> ✔ primary  <tempdir>/geo-store  1/1 files sent  61.1 kB  0.2s
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  61.1 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 nrow(store_read(st, "polygons_boxes", intersects = query))
 #> [1] 89
@@ -599,8 +609,9 @@ store_write(st, mixed, "shapes/mixed",
   key = "id"
 )
 #> Warning: Geocoding "shapes/mixed": 2 rows are invalid on the sphere.
-#> ℹ 2 rebuilt by s2, 0 geocoded in the plane after a failed rebuild check.
-#> • Rebuilt: id = 501; id = 502.
+#> ℹ 1 rebuilt by s2, 1 geocoded in the plane after a failed rebuild check.
+#> • Rebuilt: id = 501.
+#> • In the plane: id = 502.
 #> ℹ Writing "shapes/mixed": 502 rows in 1 file, and its index table in 1 file.
 #> ✔ primary  <tempdir>/geo-store  2/2 files sent  73.3 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
@@ -624,9 +635,12 @@ and
 chooses where the exact test runs. By default (`NULL`) it follows the
 dataset’s engine: `"s2"` on the sphere, `"planar"` in the plane, and
 `"auto"` on the sphere for candidate rows valid there and in the plane
-for the others, so that an invalid row never makes s2 fail. Datasets
-without a recorded engine (written before engines were recorded, or with
-`geocode = FALSE`) follow the session’s
+for the others, so that an invalid row never makes s2 fail. On the
+sphere (dataset engine `"s2"`, or `exact_engine = "s2"`), a row that is
+invalid there is first rebuilt by s2, as a write with engine `"s2"`
+does, and then tested. Datasets without a recorded engine (written
+before engines were recorded, or with `geocode = FALSE`) follow the
+session’s
 [`sf::sf_use_s2()`](https://r-spatial.github.io/sf/reference/s2.html).
 `"s2"`, `"planar"` and `"session"` override it. Data in a projected CRS
 are always tested in the plane of their CRS.
@@ -666,7 +680,7 @@ store_write(st, grid, "grids/simulated",
   description = "A simulated three-layer raster in open ocean."
 )
 #> ℹ Writing "grids/simulated": 40,000 cells in 1 file.
-#> ✔ primary  <tempdir>/geo-store  1/1 files sent  686.5 kB  0.2s
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  701.1 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 ```
 
@@ -687,7 +701,7 @@ store_read(st, "grids/simulated", intersects = area)
 #> extent      : -28.02, -27, 6.99, 8.01  (xmin, xmax, ymin, ymax)
 #> coord. ref. : lon/lat WGS 84 (EPSG:4326)
 #> source(s)   : memory
-#> varname     : part-a2f2827357463723
+#> varname     : part-457765626da59c3a
 #> names       :      height, cover, moisture
 #> min values  : -101.836024,     1,   0.0011
 #> max values  :  103.103297,     5,   0.9989
@@ -700,6 +714,308 @@ rasters, and
 and
 [`store_sample()`](https://ebukin.github.io/rcs/reference/store_sample.md)
 refuse them.
+
+### Class maps: legend, colours and nodata
+
+A class map holds whole numbers that stand for classes, such as land
+cover. Three things belong to it besides the cells: the *legend* (which
+label each code has), the *colours* of the classes, and the value that
+means “no data”. The package stores the codes in the file and the rest
+in the catalog, and a read puts them together again. The steps below go
+from a map to a read of one window of it.
+
+**1. Build or open the map.** The layer `cover` of the simulated raster
+serves as one here: five classes, with a band of `0` around the edge for
+“outside the map”.
+[`terra::as.int()`](https://rspatial.github.io/terra/reference/is.bool.html)
+makes the cells integers; doubles would be stored as doubles (`FLT8S`).
+A map of your own is opened with `terra::rast("landcover.tif")` instead
+(see “Large maps” below).
+
+``` r
+
+codes <- terra::as.int(grid[["cover"]])
+codes[c(1:2, 199:200), ] <- 0L
+codes[, c(1:2, 199:200)] <- 0L
+```
+
+**2. Set the legend and the colours.** The legend is a data frame with
+the codes in the first column and the labels in the second, given with
+`levels<-`. That call renames the layer to the label column, so the name
+is set again after it. The colours are a data frame of codes and
+colours, given with `terra::coltab<-`.
+
+``` r
+
+cover_legend <- data.frame(
+  value = 1:5,
+  label = c("water", "forest", "crop", "grass", "bare")
+)
+cover_colours <- data.frame(
+  value = 1:5,
+  col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+)
+cover <- codes
+levels(cover) <- cover_legend
+names(cover) <- "cover"
+terra::coltab(cover) <- cover_colours
+```
+
+**3. Write it.** `nodata = 0` declares that `0` is not a class: cells
+that hold it are missing when the map is read.
+
+``` r
+
+store_write(st, cover, "grids/cover",
+  title = "Land cover",
+  description = "A simulated class map in open ocean.",
+  nodata = 0
+)
+#> ℹ Writing "grids/cover": 40,000 cells in 1 file.
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  4.7 kB  0.1s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+```
+
+**4. Look at what was recorded.**
+[`store_describe()`](https://ebukin.github.io/rcs/reference/store_describe.md)
+shows one row per layer: the data type of the file (`INT1U`, one byte
+per cell), the size, the nodata value and the number of classes.
+
+``` r
+
+described <- store_describe(st, "grids/cover")
+described$columns
+#> # A tibble: 1 × 4
+#>   name  type  r_type                                              description
+#>   <chr> <chr> <chr>                                               <chr>      
+#> 1 cover INT1U raster layer (200 x 200 cells, nodata 0, 5 classes) NA
+```
+
+The full record of the layer is in the catalog entry, as JSON: the
+resolution and the dimensions, the nodata value, the legend (`values`,
+`levels`, `levels_name`) and the colours (`color_values`, `colors`). The
+same text is in the dataset’s manifest, the JSON file next to the data
+(field `columns` of its `entry`), so other tools can read the legend
+without R.
+
+``` r
+
+record <- jsonlite::fromJSON(described$entry$columns, simplifyDataFrame = FALSE)
+str(record[[1]]$r_type)
+#> List of 9
+#>  $ class       : chr "SpatRaster"
+#>  $ resolution  : num [1:2] 0.03 0.015
+#>  $ dim         : int [1:2] 200 200
+#>  $ nodata      : int 0
+#>  $ values      : int [1:5] 1 2 3 4 5
+#>  $ levels      : chr [1:5] "water" "forest" "crop" "grass" ...
+#>  $ levels_name : chr "label"
+#>  $ color_values: int [1:5] 1 2 3 4 5
+#>  $ colors      : chr [1:5] "#1F78B4FF" "#33A02CFF" "#FFD92FFF" "#B2DF8AFF" ...
+```
+
+**5. Read the whole map.**
+[`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
+returns a `SpatRaster` that points to the stored file, with its
+categories and its colour table set again. The edge cells are missing.
+
+``` r
+
+map <- store_read(st, "grids/cover")
+map
+#> class       : SpatRaster
+#> size        : 200, 200, 1  (nrow, ncol, nlyr)
+#> resolution  : 0.03, 0.015  (x, y)
+#> extent      : -30, -24, 6, 9  (xmin, xmax, ymin, ymax)
+#> coord. ref. : lon/lat WGS 84 (EPSG:4326)
+#> source      : part-12e566b97094f119.tif
+#> color table : 1
+#> categories  : label
+#> name        : cover
+#> min value   : water
+#> max value   :  bare
+terra::levels(map)[[1]]
+#>   value  label
+#> 1     1  water
+#> 2     2 forest
+#> 3     3   crop
+#> 4     4  grass
+#> 5     5   bare
+terra::coltab(map)[[1]]
+#>   values red green blue alpha
+#> 1      1  31   120  180   255
+#> 2      2  51   160   44   255
+#> 3      3 255   217   47   255
+#> 4      4 178   223  138   255
+#> 5      5 177    89   40   255
+map[1, 1]
+#>   cover
+#> 1  <NA>
+```
+
+**6. Read a window.** `intersects` reads only the cells inside the
+query’s bounding box, rounded outwards to whole cells. From a bucket
+they are read through GDAL, and the file is not downloaded as a whole.
+The window keeps the legend and the colours, so counts come with labels
+and a plot with the colours of the classes.
+
+``` r
+
+window <- store_read(st, "grids/cover", intersects = area)
+dim(window)
+#> [1] 68 34  1
+terra::freq(window)
+#>   layer  value count
+#> 1     1  water   394
+#> 2     1 forest   429
+#> 3     1   crop   649
+#> 4     1  grass   441
+#> 5     1   bare   399
+terra::plot(window)
+```
+
+![A map of the window: cells in five colours, with a legend naming the
+classes water, forest, crop, grass and
+bare.](geospatial_files/figure-html/unnamed-chunk-35-1.png)
+
+The rules behind these steps:
+
+**Data type.** All layers of a raster get one data type. A raster read
+from a file keeps the type of that file: a Byte map stays `INT1U`, with
+no pass over its cells. The exception is a layer with a scale or an
+offset, whose values are not the stored numbers: its type comes from the
+values, like that of a raster in memory. Other whole numbers get the
+smallest integer type that holds the values and the nodata value, which
+is why the class map above takes one byte per cell. Anything else is
+stored as `FLT8S`; doubles are narrowed to single precision only when
+`datatype = "FLT4S"` asks for it. `datatype` sets the type directly, and
+the write stops when the values do not fit.
+
+**Nodata.** The value that marks missing cells is, in this order: the
+argument `nodata`; a flag set in the session with `terra::NAflag(x) <-`
+on a raster read from a file (a raster in memory keeps no flag; the
+cells are simply missing); the NoData tag of the source file; and
+otherwise the default of the integer type (`255` for `INT1U`). That
+default is written when the type was chosen from the values; for a type
+kept from the file or given with `datatype`, only when cells are
+missing. So a Byte file without a tag whose `0` means “outside the map”
+gets no nodata value unless `nodata = 0` is given. The float types get
+none: their missing cells are `NaN`. Cells that hold the nodata value
+read back as missing, as the edge above does.
+
+**Legend and colours.** Codes must be whole numbers and every code needs
+a label; otherwise the write stops. When the legend has more columns
+than codes and labels, the labels in use
+([`terra::activeCat()`](https://rspatial.github.io/terra/reference/activeCat.html))
+are stored and a message names the columns left out. With a legend, the
+colours of the legend’s codes are stored. A colour table without a
+legend is stored whole; one that comes from a file has 256 rows, one for
+each code from 0 to 255 (a code without a colour is black, or
+transparent when it is the file’s NoData value), so set the legend to
+keep only the classes. The legend and the colours do not change the
+file: the same cells with and without them give the same version.
+Writing the same cells with another legend or other colours keeps the
+version, sends no file and replaces the legend and the colours recorded
+for that version; the earlier ones are not kept.
+
+**File options.** Only Cloud Optimized GeoTIFFs are written, with
+options that suit reads from a bucket: `COMPRESS=DEFLATE`, `PREDICTOR=2`
+for the integer types and `PREDICTOR=3` for the float types,
+`BLOCKSIZE=512`, `BIGTIFF=IF_SAFER`, and overviews built anew
+(`OVERVIEWS=IGNORE_EXISTING`) with `OVERVIEW_RESAMPLING=NEAREST` for the
+integer types and `AVERAGE` for the float types. `gdal` replaces a
+default of the same key and adds other options of GDAL’s COG driver,
+here ZSTD compression:
+
+``` r
+
+store_write(st, grid, "grids/simulated_zstd",
+  title = "Simulated raster, ZSTD",
+  description = "A simulated three-layer raster in open ocean.",
+  gdal = c("COMPRESS=ZSTD", "LEVEL=9")
+)
+#> ℹ Writing "grids/simulated_zstd": 40,000 cells in 1 file.
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  673.7 kB  0.2s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+```
+
+### Large maps
+
+Write a large map straight from its file. A raster opened with
+`terra::rast(file)` and not changed is copied by GDAL from that file:
+its cells never pass through R, and the data type of the file is kept.
+The legend and the colours can still be set, because they do not touch
+the cells. A small file stands in for a national map here; it marks `0`
+as NoData itself.
+
+``` r
+
+file <- file.path(tempdir(), "geo-landcover.tif")
+terra::writeRaster(codes, file, datatype = "INT1U", NAflag = 0, overwrite = TRUE)
+
+big <- terra::rast(file)
+levels(big) <- cover_legend
+names(big) <- "cover"
+terra::coltab(big) <- cover_colours
+store_write(st, big, "grids/cover_from_file",
+  title = "Land cover, from a file",
+  description = "A simulated class map in open ocean, written from a GeoTIFF."
+)
+#> ℹ Writing "grids/cover_from_file": 40,000 cells in 1 file.
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  4.7 kB  0.2s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+terra::datatype(store_read(st, "grids/cover_from_file"))
+#> [1] "INT1U"
+```
+
+- **Give `nodata` when the file has no NoData tag.** Many class maps
+  hold `0` for “outside” without saying so; `nodata = 0` says it. A tag
+  the file has is kept when `nodata` is not given, as above.
+- **Keep the raster as `terra::rast(file)` returns it.** GDAL copies the
+  file only when the raster is all the layers of one file, with the
+  file’s layer names, extent and CRS, and when the file’s own NoData
+  tag, if it has one, is the value written. A crop, a calculation, other
+  layer names, a subset of the layers, several files, or a scale or an
+  offset in the file make terra write the map instead. The result is
+  right either way; the difference is time and room on disk.
+- **Do not load a large map into memory.** A map in memory needs RAM for
+  all its cells, which terra holds as doubles (eight bytes per cell,
+  whatever the type of the file), and it is written by terra.
+- **Room on disk.** The file is first written on the local disk, below
+  `getOption("rcs.staging_dir")` (default
+  [`tempdir()`](https://rdrr.io/r/base/tempfile.html)), and then
+  uploaded. On a simulated map of 25,000 × 25,000 cells of one byte, the
+  staging folder held at most about 1.4 times the size of the output
+  when GDAL copied the file, and about 3.6 times when terra wrote it,
+  because terra first writes an intermediate file for a raster too large
+  for memory. For a raster read from files, the write warns when that
+  drive has less free room than twice the size of the source files; it
+  never stops the write. Point `options(rcs.staging_dir = )` to a larger
+  drive when needed.
+- **Read windows.** `store_read(st, "name", intersects = area)` reads
+  the part of the map you need; `store_read(st, "name")` only opens the
+  file, and cells are read when a calculation asks for them.
+- **Every location gets the map.** A write lands in the primary and in
+  every secondary location of the connection. A dataset cannot yet be
+  kept in the primary only.
+
+### What is not stored
+
+- A style file next to the map, such as a QGIS `.qml`: colours are taken
+  only from the raster’s colour table
+  ([`terra::coltab()`](https://rspatial.github.io/terra/reference/colors.html)).
+- The columns of a category table other than the codes and the labels in
+  use. A message names them.
+- The time and the units of layers
+  ([`terra::time()`](https://rspatial.github.io/terra/reference/time.html),
+  [`terra::units()`](https://rspatial.github.io/terra/reference/units.html)).
+- Side files (`.aux.xml`, `.aux.json`): a raster dataset is one `.tif`
+  file and its manifest.
+- The creation options: they are in the file, not in the catalog.
+
+A raster written with a version of the package before 0.0.0.9005 gets a
+new version when it is written again, even with unchanged cells, because
+the bytes of the file differ.
 
 ## Shapes across the antimeridian or around a pole
 

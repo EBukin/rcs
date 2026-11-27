@@ -24,12 +24,8 @@
 #'   compared as WKB, times as instants). Geospatial data without key and
 #'   without a column `.rcs_id` are geocoded again to find the row
 #'   identifiers, which matches only a dataset written in one call (not
-#'   after an `update`). For a raster, `n` random cells are compared as a
-#'   read returns them: a categorical layer by its codes, cells of `x` that
-#'   hold the dataset's NoData value as missing, and a layer stored in
-#'   single precision (`FLT4S`) within a relative difference of `1e-6`.
-#'   [store_write()] runs this check on the staged files before it uploads
-#'   them.
+#'   after an `update`). For a raster, see "Rasters". [store_write()] runs
+#'   this check on the staged files before it uploads them.
 #' * Without `x`, an integrity check of each location: every file of the
 #'   current version exists with the MD5 its catalog records (read from the
 #'   backend's metadata, so no data file is downloaded where the backend
@@ -40,6 +36,22 @@
 #'
 #' The catalogs of the checked locations are read again first, and the
 #' connection is updated with them.
+#'
+#' @section Rasters:
+#' * With `x`, a `terra::SpatRaster`: the stored file must have the layer
+#'   names and the number of cells of `x`, and `n` random cells are
+#'   compared, layer by layer, as a read returns them. A categorical layer
+#'   is compared by its codes, not its labels. Cells of `x` that hold the
+#'   dataset's NoData value count as missing, as they are in the file
+#'   (after `store_write(nodata = 0)`, a `0` in `x` equals a missing cell
+#'   of the file). A layer stored in single precision (`FLT4S`) may differ
+#'   from `x` by a relative `1e-6`; every other type must be equal. The
+#'   legend and the colours are not compared: they are in the catalog, not
+#'   in the file. The file is opened through GDAL and only the sampled
+#'   cells are read.
+#' * Without `x`: the file exists with the MD5 its catalog records, the
+#'   version and the totals match, and the manifest agrees with the
+#'   catalog. The checks of Parquet footers do not apply to a raster.
 #'
 #' @param st A store connection made by [store_connect()].
 #' @param dataset The dataset's full name, or its last part when that is
@@ -69,6 +81,24 @@
 #' )
 #' store_check(st, "sales/daily")
 #' store_check(st, "sales/daily", x = sales)
+#'
+#' # A class map written with `nodata = 0`: the cells of `x` that hold 0
+#' # equal the missing cells of the file, and codes are compared with codes
+#' if (requireNamespace("terra", quietly = TRUE)) {
+#'   cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+#'   cover[1:2, ] <- 0L
+#'   levels(cover) <- data.frame(
+#'     value = 1:5,
+#'     label = c("water", "forest", "crop", "grass", "bare")
+#'   )
+#'   names(cover) <- "cover"
+#'   store_write(st, cover, "grids/cover",
+#'     title = "Land cover", description = "A simulated class map.",
+#'     nodata = 0
+#'   )
+#'   store_check(st, "grids/cover")
+#'   store_check(st, "grids/cover", x = cover, n = 500)
+#' }
 #' unlink(root, recursive = TRUE)
 store_check <- function(st, dataset, x = NULL, n = 20, columns = NULL,
                         locations = "all", error = TRUE) {

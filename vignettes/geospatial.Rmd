@@ -514,27 +514,51 @@ A raster has one file: it cannot be partitioned or updated, only replaced.
 Filters, `columns`, `geometry` and `exact` do not apply to rasters, and
 `store_open()` and `store_sample()` refuse them.
 
-### Class maps: categories and nodata
+### Class maps: legend, colours and nodata
 
 A class map holds whole numbers that stand for classes, such as land cover.
-The layer `cover` of the simulated raster serves as one here: five classes,
-and a band of `0` around the edge for "outside the map". `levels<-` gives
-the codes their labels; it also renames the layer, so the name is set after
-it.
+Three things belong to it besides the cells: the *legend* (which label each
+code has), the *colours* of the classes, and the value that means "no
+data". The package stores the codes in the file and the rest in the
+catalog, and a read puts them together again. The steps below go from a
+map to a read of one window of it.
+
+**1. Build or open the map.** The layer `cover` of the simulated raster
+serves as one here: five classes, with a band of `0` around the edge for
+"outside the map". `terra::as.int()` makes the cells integers; doubles
+would be stored as doubles (`FLT8S`). A map of your own is
+opened with `terra::rast("landcover.tif")` instead (see "Large maps"
+below).
 
 ```{r, eval = has_terra}
-cover <- terra::as.int(grid[["cover"]])
-cover[c(1:2, 199:200), ] <- 0L
-cover[, c(1:2, 199:200)] <- 0L
-levels(cover) <- data.frame(
+codes <- terra::as.int(grid[["cover"]])
+codes[c(1:2, 199:200), ] <- 0L
+codes[, c(1:2, 199:200)] <- 0L
+```
+
+**2. Set the legend and the colours.** The legend is a data frame with the
+codes in the first column and the labels in the second, given with
+`levels<-`. That call renames the layer to the label column, so the name is
+set again after it. The colours are a data frame of codes and colours,
+given with `terra::coltab<-`.
+
+```{r, eval = has_terra}
+cover_legend <- data.frame(
   value = 1:5,
   label = c("water", "forest", "crop", "grass", "bare")
 )
+cover_colours <- data.frame(
+  value = 1:5,
+  col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+)
+cover <- codes
+levels(cover) <- cover_legend
 names(cover) <- "cover"
+terra::coltab(cover) <- cover_colours
 ```
 
-`nodata = 0` declares that `0` is not a class. The codes go into the file,
-and the legend is recorded in the catalog, so it travels with the dataset.
+**3. Write it.** `nodata = 0` declares that `0` is not a class: cells that
+hold it are missing when the map is read.
 
 ```{r, eval = has_terra}
 store_write(st, cover, "grids/cover",
@@ -544,40 +568,88 @@ store_write(st, cover, "grids/cover",
 )
 ```
 
-A read returns the layer with its categories. The file holds one byte per
-cell (`INT1U`), and the cells of the edge are missing:
+**4. Look at what was recorded.** `store_describe()` shows one row per
+layer: the data type of the file (`INT1U`, one byte per cell), the size,
+the nodata value and the number of classes.
 
 ```{r, eval = has_terra}
-classes <- store_read(st, "grids/cover")
-terra::datatype(classes)
-terra::levels(classes)[[1]]
-classes[1, 1]
+described <- store_describe(st, "grids/cover")
+described$columns
 ```
 
-A read with `intersects` keeps the categories:
+The full record of the layer is in the catalog entry, as JSON: the
+resolution and the dimensions, the nodata value, the legend (`values`,
+`levels`, `levels_name`) and the colours (`color_values`, `colors`). The
+same text is in the dataset's manifest, the JSON file next to the data
+(field `columns` of its `entry`), so other tools can read the legend
+without R.
 
 ```{r, eval = has_terra}
-terra::freq(store_read(st, "grids/cover", intersects = area))
+record <- jsonlite::fromJSON(described$entry$columns, simplifyDataFrame = FALSE)
+str(record[[1]]$r_type)
 ```
+
+**5. Read the whole map.** `store_read()` returns a `SpatRaster` that
+points to the stored file, with its categories and its colour table set
+again. The edge cells are missing.
+
+```{r, eval = has_terra}
+map <- store_read(st, "grids/cover")
+map
+terra::levels(map)[[1]]
+terra::coltab(map)[[1]]
+map[1, 1]
+```
+
+**6. Read a window.** `intersects` reads only the cells inside the query's
+bounding box, rounded outwards to whole cells. From a bucket they are read
+through GDAL, and the file is not downloaded as a whole. The window keeps
+the legend and the colours, so counts come with labels and a plot with the
+colours of the classes.
+
+```{r, eval = has_terra, fig.width = 6, fig.height = 4, fig.alt = "A map of the window: cells in five colours, with a legend naming the classes water, forest, crop, grass and bare."}
+window <- store_read(st, "grids/cover", intersects = area)
+dim(window)
+terra::freq(window)
+terra::plot(window)
+```
+
+The rules behind these steps:
 
 **Data type.** All layers of a raster get one data type. A raster read from
 a file keeps the type of that file: a Byte map stays `INT1U`, with no pass
 over its cells. The exception is a layer with a scale or an offset, whose
 values are not the stored numbers: its type comes from the values, like
-that of a raster in memory. Other whole numbers get the smallest integer type that holds
-the values and the nodata value, which is why the class map above takes one
-byte per cell. Anything else is stored as `FLT8S`; doubles are narrowed to
-single precision only when `datatype = "FLT4S"` asks for it. `datatype`
-sets the type directly, and the write stops when the values do not fit.
+that of a raster in memory. Other whole numbers get the smallest integer
+type that holds the values and the nodata value, which is why the class map
+above takes one byte per cell. Anything else is stored as `FLT8S`; doubles
+are narrowed to single precision only when `datatype = "FLT4S"` asks for
+it. `datatype` sets the type directly, and the write stops when the values
+do not fit.
 
 **Nodata.** The value that marks missing cells is, in this order: the
-argument `nodata`; a flag set in the session with `terra::NAflag(x) <-`;
-the NoData tag of the source file; and otherwise the default of the integer
+argument `nodata`; a flag set in the session with `terra::NAflag(x) <-` on
+a raster read from a file (a raster in memory keeps no flag; the cells are
+simply missing); the NoData tag of the source file; and otherwise the default of the integer
 type (`255` for `INT1U`). That default is written when the type was chosen
 from the values; for a type kept from the file or given with `datatype`,
-only when cells are missing. The float types get none: their missing cells
-are `NaN`. Cells that hold the nodata value read back as missing, as the
-edge above does.
+only when cells are missing. So a Byte file without a tag whose `0` means
+"outside the map" gets no nodata value unless `nodata = 0` is given. The
+float types get none: their missing cells are `NaN`. Cells that hold the
+nodata value read back as missing, as the edge above does.
+
+**Legend and colours.** Codes must be whole numbers and every code needs a
+label; otherwise the write stops. When the legend has more columns than
+codes and labels, the labels in use (`terra::activeCat()`) are stored and a
+message names the columns left out. With a legend, the colours of the
+legend's codes are stored. A colour table without a legend is stored whole;
+one that comes from a file has 256 rows, one for each code from 0 to 255
+(a code without a colour is black, or transparent when it is the file's
+NoData value), so set the legend to keep only the classes. The legend and
+the colours do not change the file: the same cells with and without them
+give the same version. Writing the same cells with another legend or other
+colours keeps the version, sends no file and replaces the legend and the
+colours recorded for that version; the earlier ones are not kept.
 
 **File options.** Only Cloud Optimized GeoTIFFs are written, with options
 that suit reads from a bucket: `COMPRESS=DEFLATE`, `PREDICTOR=2` for the
@@ -595,23 +667,73 @@ store_write(st, grid, "grids/simulated_zstd",
 )
 ```
 
-**Room for staging.** The file is first written on the local disk, below
-`getOption("rcs.staging_dir")` (default `tempdir()`), and then uploaded. A
-raster that is an unchanged view of one file without a scale or an offset,
-as `terra::rast(file)` returns it, is copied by GDAL and needs free room of
-about one and a half times the output. Any other raster (in memory,
-computed, cropped, renamed, with a scale or an offset) is written by terra,
-which first writes an intermediate file when the raster
-is too large for memory, and then needs about four times the output. For a
-raster read from files, the write warns when that drive has less free room
-than twice the size of the source files; it never stops the write. Point
-`options(rcs.staging_dir = )` to a larger drive when needed. Write a large
-raster straight from its file (`terra::rast(file)`), not from memory: a
-raster held in memory needs RAM for all its cells. The time and
-the units of layers (`terra::time()`, `terra::units()`) are not stored. A
-raster written with an earlier version of the package gets a new version
-when it is written again, even with unchanged cells, because the bytes of
-the file differ.
+### Large maps
+
+Write a large map straight from its file. A raster opened with
+`terra::rast(file)` and not changed is copied by GDAL from that file: its
+cells never pass through R, and the data type of the file is kept. The
+legend and the colours can still be set, because they do not touch the
+cells. A small file stands in for a national map here; it marks `0` as
+NoData itself.
+
+```{r, eval = has_terra}
+file <- file.path(tempdir(), "geo-landcover.tif")
+terra::writeRaster(codes, file, datatype = "INT1U", NAflag = 0, overwrite = TRUE)
+
+big <- terra::rast(file)
+levels(big) <- cover_legend
+names(big) <- "cover"
+terra::coltab(big) <- cover_colours
+store_write(st, big, "grids/cover_from_file",
+  title = "Land cover, from a file",
+  description = "A simulated class map in open ocean, written from a GeoTIFF."
+)
+terra::datatype(store_read(st, "grids/cover_from_file"))
+```
+
+- **Give `nodata` when the file has no NoData tag.** Many class maps hold
+  `0` for "outside" without saying so; `nodata = 0` says it. A tag the file
+  has is kept when `nodata` is not given, as above.
+- **Keep the raster as `terra::rast(file)` returns it.** GDAL copies the
+  file only when the raster is all the layers of one file, with the file's
+  layer names, extent and CRS, and when the file's own NoData tag, if it
+  has one, is the value written. A crop, a calculation, other layer names,
+  a subset of the layers, several files, or a scale or an offset in the
+  file make terra write the map instead. The result is right either way;
+  the difference is time and room on disk.
+- **Do not load a large map into memory.** A map in memory needs RAM for
+  all its cells, which terra holds as doubles (eight bytes per cell,
+  whatever the type of the file), and it is written by terra.
+- **Room on disk.** The file is first written on the local disk, below
+  `getOption("rcs.staging_dir")` (default `tempdir()`), and then uploaded.
+  On a simulated map of 25,000 × 25,000 cells of one byte, the staging
+  folder held at most about 1.4 times the size of the output when GDAL
+  copied the file, and about 3.6 times when terra wrote it, because terra
+  first writes an intermediate file for a raster too large for memory. For
+  a raster read from files, the write warns when that drive has less free
+  room than twice the size of the source files; it never stops the write.
+  Point `options(rcs.staging_dir = )` to a larger drive when needed.
+- **Read windows.** `store_read(st, "name", intersects = area)` reads the
+  part of the map you need; `store_read(st, "name")` only opens the file,
+  and cells are read when a calculation asks for them.
+- **Every location gets the map.** A write lands in the primary and in
+  every secondary location of the connection. A dataset cannot yet be kept
+  in the primary only.
+
+### What is not stored
+
+- A style file next to the map, such as a QGIS `.qml`: colours are taken
+  only from the raster's colour table (`terra::coltab()`).
+- The columns of a category table other than the codes and the labels in
+  use. A message names them.
+- The time and the units of layers (`terra::time()`, `terra::units()`).
+- Side files (`.aux.xml`, `.aux.json`): a raster dataset is one `.tif`
+  file and its manifest.
+- The creation options: they are in the file, not in the catalog.
+
+A raster written with a version of the package before 0.0.0.9005 gets a
+new version when it is written again, even with unchanged cells, because
+the bytes of the file differ.
 
 ## Shapes across the antimeridian or around a pole
 
@@ -627,6 +749,8 @@ rule with `sf::sf_use_s2(FALSE)`) is not guaranteed to find them.
 for trying this out.
 
 ```{r, include = FALSE}
+if (has_terra) rm(map, window, big)
+unlink(file.path(tempdir(), "geo-landcover.tif"))
 unlink(file.path(tempdir(), "geo-store"), recursive = TRUE)
 options(old_options)
 if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)

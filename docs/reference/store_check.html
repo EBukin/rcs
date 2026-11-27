@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -129,9 +129,8 @@ normalisation (a tibble and a data frame are alike, geometries are
 compared as WKB, times as instants). Geospatial data without key and
 without a column <code>.rcs_id</code> are geocoded again to find the row
 identifiers, which matches only a dataset written in one call (not
-after an <code>update</code>). For a raster, <code>n</code> random cells are compared.
-<code><a href="store_write.html">store_write()</a></code> runs this check on the staged files before it uploads
-them.</p></li>
+after an <code>update</code>). For a raster, see "Rasters". <code><a href="store_write.html">store_write()</a></code> runs
+this check on the staged files before it uploads them.</p></li>
 <li><p>Without <code>x</code>, an integrity check of each location: every file of the
 current version exists with the MD5 its catalog records (read from the
 backend's metadata, so no data file is downloaded where the backend
@@ -142,6 +141,25 @@ table is checked with it.</p></li>
 </ul><p>The catalogs of the checked locations are read again first, and the
 connection is updated with them.</p>
     </div>
+    <div class="section level2">
+    <h2 id="rasters">Rasters<a class="anchor" aria-label="anchor" href="#rasters"></a></h2>
+
+
+<ul><li><p>With <code>x</code>, a <code><a href="https://rspatial.github.io/terra/reference/SpatRaster-class.html" class="external-link">terra::SpatRaster</a></code>: the stored file must have the layer
+names and the number of cells of <code>x</code>, and <code>n</code> random cells are
+compared, layer by layer, as a read returns them. A categorical layer
+is compared by its codes, not its labels. Cells of <code>x</code> that hold the
+dataset's NoData value count as missing, as they are in the file
+(after <code>store_write(nodata = 0)</code>, a <code>0</code> in <code>x</code> equals a missing cell
+of the file). A layer stored in single precision (<code>FLT4S</code>) may differ
+from <code>x</code> by a relative <code>1e-6</code>; every other type must be equal. The
+legend and the colours are not compared: they are in the catalog, not
+in the file. The file is opened through GDAL and only the sampled
+cells are read.</p></li>
+<li><p>Without <code>x</code>: the file exists with the MD5 its catalog records, the
+version and the totals match, and the manifest agrees with the
+catalog. The checks of Parquet footers do not apply to a raster.</p></li>
+</ul></div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="store_write.html">store_write()</a></code>.</p></div>
@@ -157,13 +175,37 @@ connection is updated with them.</p>
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 100 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-check/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.7 kB  0.3s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-check/primary  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.8 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_check</span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2 files checked in 1 location: no problem found.</span>
 <span class="r-in"><span><span class="fu">store_check</span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, x <span class="op">=</span> <span class="va">sales</span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 2 files checked in 1 location: no problem found.</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># A class map written with `nodata = 0`: the cells of `x` that hold 0</span></span></span>
+<span class="r-in"><span><span class="co"># equal the missing cells of the file, and codes are compared with codes</span></span></span>
+<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"terra"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="va">cover</span> <span class="op">&lt;-</span> <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">as.int</a></span><span class="op">(</span><span class="fu"><a href="rcs_sim_polygons.html">rcs_sim_raster</a></span><span class="op">(</span>nrow <span class="op">=</span> <span class="fl">60</span>, ncol <span class="op">=</span> <span class="fl">80</span><span class="op">)</span><span class="op">[[</span><span class="st">"cover"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">cover</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span>, <span class="op">]</span> <span class="op">&lt;-</span> <span class="fl">0L</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/levels.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span></span>
+<span class="r-in"><span>    value <span class="op">=</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span>,</span></span>
+<span class="r-in"><span>    label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"water"</span>, <span class="st">"forest"</span>, <span class="st">"crop"</span>, <span class="st">"grass"</span>, <span class="st">"bare"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="st">"cover"</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">cover</span>, <span class="st">"grids/cover"</span>,</span></span>
+<span class="r-in"><span>    title <span class="op">=</span> <span class="st">"Land cover"</span>, description <span class="op">=</span> <span class="st">"A simulated class map."</span>,</span></span>
+<span class="r-in"><span>    nodata <span class="op">=</span> <span class="fl">0</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu">store_check</span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu">store_check</span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span>, x <span class="op">=</span> <span class="va">cover</span>, n <span class="op">=</span> <span class="fl">500</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 4,800 cells in 1 file.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-check/primary  1/1</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 1 file checked in 1 location: no problem found.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> 1 file checked in 1 location: no problem found.</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

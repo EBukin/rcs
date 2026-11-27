@@ -314,7 +314,15 @@ Files: `R/write.R`, `R/schema.R`, the entry builders WP6 listed, `R/inspect.R`, 
 Not blocking. The orchestrator records any new ones here for the owner.
 
 - The national maps themselves (11.8e9 cells, read from `gs://`) cannot be tested in the package, which holds no raw data. After Part A, the owner writes one map from the downstream project and checks the output size, `Type=Byte`, `NoData Value=0`, and a windowed `store_read(intersects = )`.
-- Colours of a legend (the QGIS `.qml` palette) are not stored. They could go next to `levels` in `r_type` later.
+- ~~Colours of a legend (the QGIS `.qml` palette) are not stored. They could go next to `levels` in `r_type` later.~~ Done in Part C: colours of the raster's colour table are stored; a `.qml` file is still not read.
+- (Part C) A legend or colours written again for the same cells replace the earlier ones under the same version; the earlier ones are not kept, also not for `store_read(version = )`. Should the manifest keep a history of them?
+- (Part C) `store_describe()` shows no mark that a layer has colours.
+- (Part C) A raster cropped or computed from a tagged file is in memory and loses the file's NoData tag (it gets 255, not the tag); `terra::window()` keeps it. The help does not say this yet.
+- (Part C) A multi-band VRT source with colour tables gives another MD5 than its twin without them (AM-C4).
+- (Part C) `nodata = Inf` aborts with the message "must be `NULL` or one finite number, not a number".
+- (Part C) The `docs/` folder committed before this part (built at 0.0.0.9001) held local temp-folder paths and `docs/CLAUDE.html`. The rebuild removed them from the tree; they stay in the git history. Rewriting history is the owner's decision.
+- (Part C) `source("pkgdown/deploy.R")` builds nothing when sourced inside `callr`; `site_build()` has to be called there.
+- (Part C) Plan 0005 names version `0.0.0.9005`; it now needs `0.0.0.9007`.
 - Reading a `.qml` legend into a data frame is left to the downstream project.
 - Time series (a multi-band stack or a cube format) are out of scope (note 0004).
 - A translate path for rasters that are a renamed or subset view of one file would cut the terra path's peak (about 3.6 times the output). Not in this plan.
@@ -595,9 +603,93 @@ Simulated `INT1U` raster, 25,000 × 25,000 cells (625e6), EPSG:32636 at 10 m, st
 - **Owner's instruction (2026-11-27):** commit Part A and push.
 - Not covered by a GCS test (verified by hand in round 5): no cache clear on a successful first open; a missing bucket object after the retry; the stale listing through a second connection. "Only the needed tiles fetched" cannot be measured with `rcs_trace()`.
 
+### Part C. Legend colours, user documentation, version 0.0.0.9006 (owner, 2026-11-27; note 0005)
+
+Added after the release of Part A (`1ab08c9`), on the owner's instruction recorded in note 0005. The rules of this plan hold (own R sessions, never the whole suite, writers and verifiers apart, tests never weakened).
+
+Decisions (final; a fact that contradicts one is decided by the orchestrator and recorded here):
+
+- **D-C1.** The colour table of a layer (`terra::has.colors()`, `terra::coltab()`) is stored in the layer's `r_type`, next to the legend: `color_values` (the codes, numbers, sorted) and `colors` (character, `#RRGGBBAA` upper case, in the order of `color_values`). Both are JSON arrays also with one value (as `values` and `levels` in `R/schema.R`).
+- **D-C2.** Which rows are stored: for a layer with a legend, the rows of the legend's codes that the colour table has; for a layer without a legend, every row of the colour table. A layer without a colour table gets neither field.
+- **D-C3.** The file never holds a colour table: it is written from a copy without one (`raster_drop_colors()`), so the same cells with and without colours give the same MD5 and version. A source file that holds a colour table of its own must give that same file too; the code writer keeps the GDAL copy path for it when a colour-free copy is possible there (for example through the VRT), and falls back to the terra path otherwise. The path taken is recorded below.
+- **D-C4.** `raster_open()` sets the colours again (`raster_set_colors(r, columns)`, after `raster_set_legend()`), with no side file; a window read (`intersects =`) and a `columns =` selection keep them. Layers without the fields are untouched; a manifest written before this part reads as before.
+- **D-C5.** Named helpers in `R/raster.R`: `raster_colors(x)` (per layer, `NULL` or `list(color_values, colors)`), `raster_drop_colors(x)`, `raster_set_colors(r, columns)`.
+- **D-C6.** Colours come from the raster only (`terra::coltab<-`). A `.qml` file is not parsed. Time and units stay unstored.
+- **D-C7.** `store_check()` and the inspect output treat the two fields like the legend fields (no false mismatch; the schema table in `R/schema.R` documents them).
+- **D-C8.** No measurement of the bytes a windowed read fetches (owner: "do not make a window measures, it's fine").
+
+Steps:
+
+- [x] **WP10 (note).** Note 0005 with the owner's instruction, verbatim.
+- [x] **WP11 (red tests).** Probe terra's behaviour first (colour table in memory and from a file, on both write paths, effect on the bytes, `coltab<-` on an opened `/vsi` file, side files). Tests in `tests/testthat/test-raster.R` (section "Plan 0006, part C"), `test-raster-gcs.R` (one level-`full` test), `helper-sim.R` (`sim_landcover(colors = TRUE)`): round trip with legend and colours; colours without a legend; same MD5 with and without colours, in memory and file-backed with a colour table in the file; window read and `columns =` keep the colours; one-colour layer survives the JSON; no side file; an old manifest without the fields still opens.
+- [x] **WP12 (code).** Make them pass; nothing else changes.
+- [x] **WP12-V (verification).** Independent run of the raster, read, write, check and inspect filters; mutation of each new helper is caught; D-C1 to D-C7 hold.
+- [x] **WP13 (documentation).** Function help of `store_write()`, `store_read()`, `store_check()` (every raster argument, runnable examples on `rcs_sim_*()` data), the vignette section on class maps (file to windowed read with legend and colours, advice for large maps, what is not stored), `R/schema.R` table, plan 0001 addition marked "(changed in plan 0006)".
+- [x] **WP13-V (verification of the documentation).** Every statement checked against the code; examples and the vignette run.
+- [x] **WP14 (release).** Version `0.0.0.9006`, `devtools::document()`, filters at default level and at level `full` on `gs://rcs-test`, the website rebuilt into `docs/` with `source("pkgdown/deploy.R")` (owner, 2026-11-27: "Do you also update the website?"; the site was last built at 0.0.0.9001), commit with explicit paths, push.
+
+Results of Part C:
+
+**WP10 (2026-11-27).** Note `.docs/notes/0005-raster-legend-colours-and-docs.md` written.
+
+**WP11 (2026-11-27), probe and red tests.** `^raster$`: 64 tests = 49 old (48 pass, 1 skip) + 15 new (14 red, 1 guard passes); `raster-gcs` parses, 7 skip. Files: `test-raster.R` (section "Plan 0006, part C: legend colours"), `test-raster-gcs.R` (one level-`full` test), `helper-sim.R` (`sim_landcover(colors = )`, `sim_landcover_colors`).
+
+Facts (terra 1.9.50, GDAL 3.12.1):
+
+- `terra::coltab(x)` is a list with one data frame per layer (`NULL` without colours), columns code, `red`, `green`, `blue`, `alpha` (0–255). In memory: the rows given, first column `values`. From a file: always 256 rows (codes 0–255, unset codes black `0,0,0,255`), first column `value`.
+- `coltab(x) <- NULL` clears layer 1 only; every layer needs `coltab(x, layer = i) <- NULL`. It works on a copy, reads no cells, keeps levels and names; `levels(x) <- NULL` keeps colours.
+- Before this part the colour table went into the TIFF on both paths (`ColorInterp=Palette`), so colours changed the MD5. A multi-band file loses the table anyway.
+- Translate path: a VRT of the source with the `<ColorTable>` block removed gives exactly the MD5 of the same cells from a file without a colour table (`ColorInterp` Gray, Undefined or absent: the same). `-colorinterp_1 gray` and `-colorinterp undefined` do not.
+- On an opened file, `set.cats()` and `coltab<-` coexist in either order, write no side file and keep the raster file-backed; `crop()`, `window<-`, `r[[name]]` and `c()` keep the colours.
+- A TIFF colour table is opaque: alpha survives only through the manifest. Colours read from a source file have alpha `FF`.
+
+Amendments of Part C (orchestrator, owner's rule "take the default decision"):
+
+- **AM-C1 (D-C4).** `store_read()` aborts for a raster when `columns =` is given, so there is no layer selection to keep colours through. D-C4 reads: a window read and a subset of the layers (`r[[name]]`) keep the colours; `raster_open(columns = <spec>)` sets the colours of the layers the specification names. No `columns =` for rasters in this part.
+- **AM-C2 (D-C2).** A layer without a legend that comes from a file with a colour table stores all 256 rows, padding included: padding cannot be told from a real black. Documented; with a legend only the legend's codes are stored.
+**WP12 (2026-11-27), code.** Only `R/raster.R` and `R/schema.R` changed. New helpers: `raster_colors()`, `raster_drop_colors()`, `raster_set_colors()`, and two the plan did not name, `raster_legend_colors(colors, legend, n)` (D-C2) and `vrt_drop_color_tables(lines)`; `raster_source_bands()` has a column `colors`; `r_type_array_fields` in `R/schema.R`. A source file with a colour table stays on the GDAL copy path through `vrt/source.vrt`. Writer's counts: `^raster$` 63 pass, 1 skip; `^read$` 24; `^write$` 57; `check` 15; `inspect` 25; `schema` 24; `hooks` 2; `raster-gcs` 7 skip. No snapshot changed.
+
+**WP12-V (2026-11-27): PASS, first round.** Filters, no failure, no snapshot changed: `^raster$` 64 tests (1 GCS skip), `^read$` 24, `^write$` 57, `check` 15, `inspect` 25, `schema` 24, `hooks` 2; `raster-gcs` 7 skip. 17 kinds of coloured source file give the file of their twin without colours, with AM3, AM7, AM9 and AM10 intact. 13 of 14 mutations caught; the one not caught is the name-restoring branch of `raster_set_colors()`, unreachable in terra 1.9.50 (`coltab<-` does not rename). Facts: alpha round-trips; the same cells with other colours keep the version, send no file and rewrite the manifest in place (as a legend change does); a colour for the nodata code is stored.
+
+- **AM-C4 (accepted limit of D-C3).** A multi-band source that holds colour tables (possible only as a VRT, not as a GeoTIFF) gives another MD5 than its twin without them (`ColorInterp` Gray against Undefined). Not fixed; listed in "Open questions".
+- **WP13 (2026-11-27), documentation.** Help of `store_write()`, `store_read()`, `store_check()`, `store_describe()`, `store_glimpse()`, `store_sample()`; vignette subsection "Class maps: legend, colours and nodata" with "Large maps" and "What is not stored"; `r_type` table; plan 0001. Examples and vignette ran. Facts found: `terra::writeRaster(datatype = "INT1U")` tags a file with NoData 255, so `nodata = 0` for such a file takes the terra path; `store_describe()` shows no mark for colours.
+
+**WP13-V (2026-11-27): PASS in round 3.**
+
+- Round 1 FAIL: the `nodata` argument text said an integer type always gets its default (a type kept from the file or given with `datatype` gets it only when cells are missing); the legend's code column is `code`, not `value`, when the label column is itself called `value`. Fixed, with four smaller points (when another argument gives another version; an example comment; the transparent NoData row of a file's colour table; re-writing with another legend or other colours).
+- Round 2 FAIL: a flag set with `terra::NAflag(x) <-` is used only for a raster read from files; on a raster in memory terra applies it at once and keeps none. Fixed in three places.
+- Round 3 PASS: about 60 writes through `store_write()` confirm every NoData statement; examples, `checkRd` and the vignette run; `man/` matches the roxygen.
+- Facts for users, now in the help: a Byte file without a tag gets no NoData value unless `nodata = 0` is given; the same cells with another legend or other colours keep the version and replace what is recorded, also for `store_read(version = )`; alpha survives; an H3 cell works as `intersects` for a raster.
+- Not changed, left as observations: a raster cropped or computed from a tagged file is in memory and loses the tag (NoData 255, not the tag); an integer raster holding `4294967295` or `-2147483648` becomes `FLT8S`; a flag the kept type cannot hold aborts; `nodata = Inf` aborts with an odd message ("not a number").
+
+- **AM-C3 (D-C3).** A source file with a colour table stays on the GDAL copy path, through a VRT without the `<ColorTable>` block (with `raster_named_vrt()` or beside it); `raster_drop_colors()` clears layer by layer.
+
+**WP14 (2026-11-27), release `0.0.0.9006`.** Committed and pushed with this entry, on the owner's instruction ("finish it all, commit, push, and make sure the website also updates").
+
+Tests (tests passed / skipped; none failed, no snapshot changed):
+
+| Filter | Default level | Level `full`, `gs://rcs-test` |
+|---|---|---|
+| `raster-gcs` | 0 / 7 | 7 / 0 |
+| `^raster$` | 63 / 1 | 64 / 0 |
+| `backend-gcs` | not run | 22 / 0 |
+| `^read$` | 24 / 0 | 24 / 0 |
+| `^write$` | 57 / 0 | 57 / 0 |
+| `check` | 15 / 0 | 15 / 0 |
+| `inspect` | 25 / 0 | 25 / 0 |
+| `schema` | 24 / 0 | not run |
+| `hooks` | 2 / 0 | not run |
+| `^sync$` | 27 / 1 | 28 / 0 |
+
+The bucket holds only `demo/` afterwards.
+
+Website: rebuilt into `docs/` with `site_build()` of `pkgdown/deploy.R` (the first rebuild since 0.0.0.9001): 12 articles and vignettes, no error; 86 files changed, `docs/CLAUDE.html` removed, the article `regions-and-households` new; version 0.0.0.9006 on every page; the "Rasters" sections and "Class maps: legend, colours and nodata" are on the site. No local user name, home path or temp path in the pages; the only email address is the one of `DESCRIPTION`, in the same three files as before.
+
 ## Outcome
 
 **Part A is done and released as `0.0.0.9005` (2026-11-27). Part B waits for plan 0005 (`draft`); this plan stays `active`.**
+
+**Part C is done and released as `0.0.0.9006` (2026-11-27):** the colours of a layer's colour table are stored in the manifest next to the legend (`color_values`, `colors`) and restored by `store_read()`, without changing the file or its version; the help of `store_write()`, `store_read()` and `store_check()` and the vignette explain rasters for a user; the website is rebuilt. Corrections to the lines below, found while verifying the documentation: a session flag counts only for a raster read from files, and an integer type kept from the file or given with `datatype` gets a default NoData value only when cells are missing.
 
 What `store_write()` of a `SpatRaster` does now:
 

@@ -63,7 +63,7 @@ store_tables(st)
 #> # A tibble: 1 × 10
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 13733       1 <chr [0]> 9eda87… 2026-11-22 10:52:31
+#> 1 sales/d… table Dail…   100 13733       1 <chr [0]> 9eda87… 2026-11-27 13:56:52
 #> # ℹ 1 more variable: duckdb_view <chr>
 con <- store_duckdb(st)
 #> ✔ DuckDB view (native mode, nothing read yet): `sales.daily`.

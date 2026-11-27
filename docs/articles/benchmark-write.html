@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -40,6 +40,7 @@
 <li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -941,16 +942,17 @@ file, so it grows with the number of files.</li>
 <li>Four workers against one: 76.6 s against 59.8 s for 1,000,000
 polygons (geocode 67 s against 50.3 s, a factor of 1.3). At 1e5 rows
 four workers cannot help: the rows form one chunk of
-<code>rcs.chunk_size</code> (1e5), and only chunks are shared out. The
-gain stays well below four because the rows that are costly to geocode,
-those crossing cell edges, all lie in the first chunks of the simulated
-data, and the machine has four physical cores. In a separate check on
-2e5 polygons with four workers, chunks of 5e4 rows took 6.3 to 8.1 s
-against 8.5 to 9.1 s for 1e5 (one run each, three for the pair), chunks
-of 2.5e4 no less, and spreading the rows over the chunks in turn did not
-help; with one worker, the default, the chunk size made no difference.
-The evidence is too thin to change <code>rcs.chunk_size</code>, which
-stays at 1e5.</li>
+<code>rcs.chunk_size</code> (1e5 when this was measured), and only
+chunks are shared out. The gain stays well below four because the rows
+that are costly to geocode, those crossing cell edges, all lie in the
+first chunks of the simulated data, and the machine has four physical
+cores. In a separate check on 2e5 polygons with four workers, chunks of
+5e4 rows took 6.3 to 8.1 s against 8.5 to 9.1 s for 1e5 (one run each,
+three for the pair), chunks of 2.5e4 no less, and spreading the rows
+over the chunks in turn did not help; with one worker, the default, the
+chunk size made no difference. The default <code>rcs.chunk_size</code>
+is now 1e4, so that geocoding can show progress over the chunks; the
+runs above used 1e5.</li>
 <li>The cloud bucket adds the upload: 19.7 s against 9.28 s for 1e5
 polygons, 3.21 s against 0.531 s for 1e5 table rows. MD5 verification
 reads object metadata and costs 0.85 s per write, small next to the

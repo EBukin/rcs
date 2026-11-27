@@ -1569,3 +1569,612 @@ test_that("the overviews of the source are not copied", {
   expect_identical(out$files$md5, reference$files$md5)
   expect_identical(out$entry$version, reference$entry$version)
 })
+
+# Plan 0006, part C: legend colours ---------------------------------------------
+#
+# Decisions D-C1 to D-C7. Each test states why it fails before the code of
+# part C exists ("Red"); expectations that hold already are marked "guard".
+# Facts these tests rest on (terra 1.9.50, GDAL 3.12.1):
+#   * a colour table set in the session has one row per code given; one read
+#     from a GeoTIFF has 256 rows (codes 0-255, the codes without a colour
+#     black), so colours are compared per code, never as whole tables;
+#   * `terra::coltab(x) <- NULL` removes the colours of the first layer only.
+
+# The colours of a layer as `#RRGGBBAA` (upper case), named by code and sorted
+# by code; `NULL` for a layer without a colour table. Read with terra alone,
+# so that the tests do not depend on the package's own reader.
+color_hex <- function(x, layer = 1L) {
+  table <- terra::coltab(x)[[layer]]
+  if (is.null(table)) {
+    return(NULL)
+  }
+  hex <- toupper(grDevices::rgb(
+    table[[2]], table[[3]], table[[4]], table[[5]],
+    maxColorValue = 255
+  ))
+  stats::setNames(hex, table[[1]])[order(table[[1]])]
+}
+
+expect_colors <- function(r, codes = 1:5, colors = sim_landcover_colors, layer = 1L) {
+  expect_true(terra::has.colors(r)[[layer]])
+  expect_identical(unname(color_hex(r, layer)[as.character(codes)]), colors)
+}
+
+# `TRUE` when GDAL reports a colour table in a file.
+has_color_table <- function(file) {
+  any(grepl("Color Table|ColorInterp=Palette", gdal_info(file)))
+}
+
+# A small class map as a plain stripped LZW `INT1U` GeoTIFF without a NoData
+# tag, as `sim_landcover(file = )` writes it, whose file itself holds a colour
+# table for the classes 1-5 (`colors = TRUE`) or none. A TIFF colour table has
+# no transparency: every colour reads back opaque.
+write_color_source <- function(file, colors = TRUE) {
+  tmp <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(
+    sim_landcover(nrow = 12, ncol = 16, colors = colors), tmp,
+    datatype = "INT1U", gdal = "COMPRESS=LZW"
+  )
+  sf::gdal_utils(
+    "translate", tmp, file,
+    options = c("-a_nodata", "none", "-co", "COMPRESS=LZW"), quiet = TRUE
+  )
+  terra::rast(file)
+}
+
+test_that("sim_landcover(colors = TRUE) sets a colour table and changes nothing else", {
+  # Guard for the helper: the tests below rest on it.
+  skip_if_not_installed("terra")
+  plain <- sim_landcover(nrow = 12, ncol = 16)
+  x <- sim_landcover(nrow = 12, ncol = 16, colors = TRUE)
+  expect_false(terra::has.colors(plain))
+  expect_true(terra::has.colors(x))
+  expect_false(terra::is.factor(x))
+  expect_identical(names(x), "cover")
+  expect_true(values_equal(x, plain))
+  expect_identical(color_hex(x), stats::setNames(sim_landcover_colors, 1:5))
+  both <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE)
+  expect_true(terra::is.factor(both))
+  expect_identical(as.character(terra::cats(both)[[1]]$label), sim_landcover_labels)
+  expect_identical(names(both), "cover")
+  expect_colors(both)
+  # with `file`, the colours are set in the session: the file holds none
+  file <- withr::local_tempfile(fileext = ".tif")
+  backed <- sim_landcover(nrow = 12, ncol = 16, file = file, legend = TRUE, colors = TRUE)
+  expect_false(any(terra::inMemory(backed)))
+  expect_colors(backed)
+  expect_true(terra::is.factor(backed))
+  expect_false(has_color_table(file))
+  expect_false(terra::has.colors(terra::rast(file)))
+})
+
+test_that("raster_colors() gives the colour table of each layer as sorted codes and upper-case hex", {
+  # D-C1, D-C5. Red: could not find function "raster_colors".
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16)
+  # rows given in another order, colours in lower case
+  terra::coltab(x, layer = 1) <- data.frame(value = 5:1, col = tolower(rev(sim_landcover_colors)))
+  got <- raster_colors(x)
+  expect_length(got, 1L)
+  expect_named(got[[1]], c("color_values", "colors"))
+  expect_true(is.numeric(got[[1]]$color_values))
+  expect_equal(got[[1]]$color_values, 1:5)
+  expect_type(got[[1]]$colors, "character")
+  expect_identical(got[[1]]$colors, sim_landcover_colors)
+
+  # a layer without a colour table has `NULL`
+  expect_null(raster_colors(sim_landcover(nrow = 12, ncol = 16))[[1]])
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  several <- c(other[["height"]], sim_landcover(nrow = 12, ncol = 16, colors = TRUE), other[["moisture"]])
+  expect_identical(terra::has.colors(several), c(FALSE, TRUE, FALSE))
+  got <- raster_colors(several)
+  expect_null(got[[1]])
+  expect_equal(got[[2]]$color_values, 1:5)
+  expect_identical(got[[2]]$colors, sim_landcover_colors)
+  expect_null(got[[3]])
+})
+
+test_that("raster_drop_colors() gives a copy without colours and leaves x, its levels and names alone", {
+  # D-C3, D-C5. Red: could not find function "raster_drop_colors".
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE)
+  out <- raster_drop_colors(x)
+  expect_false(terra::has.colors(out))
+  expect_true(terra::is.factor(out))
+  expect_identical(as.character(terra::cats(out)[[1]]$label), sim_landcover_labels)
+  expect_identical(names(out), "cover")
+  expect_true(codes_equal(out, x))
+  # the caller's raster keeps its colours
+  expect_colors(x)
+
+  # every layer, not only the first (`coltab(x) <- NULL` clears layer 1 only)
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  several <- c(other[["height"]], sim_landcover(nrow = 12, ncol = 16, colors = TRUE), other[["moisture"]])
+  out <- raster_drop_colors(several)
+  expect_identical(terra::has.colors(out), c(FALSE, FALSE, FALSE))
+  expect_identical(names(out), names(several))
+  expect_identical(terra::has.colors(several), c(FALSE, TRUE, FALSE))
+
+  # file-backed: no cells are read, the source file stays as it is
+  folder <- withr::local_tempdir()
+  file <- file.path(folder, "map.tif")
+  backed <- write_color_source(file)
+  expect_true(terra::has.colors(backed))
+  md5 <- md5_file(file)
+  out <- raster_drop_colors(backed)
+  expect_false(terra::has.colors(out))
+  expect_false(any(terra::inMemory(out)))
+  expect_true(terra::has.colors(backed))
+  expect_identical(list.files(folder, all.files = TRUE, no.. = TRUE), "map.tif")
+  expect_identical(md5_file(file), md5)
+
+  # a raster without colours comes back as it is
+  plain <- sim_landcover(nrow = 12, ncol = 16)
+  expect_true(values_equal(raster_drop_colors(plain), plain))
+})
+
+test_that("a class map with a legend and colours round-trips through stage and open", {
+  # D-C1, D-C2, D-C4. Red: the entry's `r_type` has no `color_values` and no
+  # `colors`; the staged TIFF holds a colour table (`ColorInterp=Palette`),
+  # so the raster opened without the columns has colours.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  # one file: no side file (`.aux.xml`, `.aux.json`), no temp file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_false(has_color_table(out$staged))
+
+  r_type <- staged_r_type(out)
+  expect_equal(r_type$values, 1:5)
+  expect_identical(r_type$levels, sim_landcover_labels)
+  expect_true(is.numeric(r_type$color_values))
+  expect_equal(r_type$color_values, 1:5)
+  expect_type(r_type$colors, "character")
+  expect_identical(r_type$colors, sim_landcover_colors)
+  expect_true(all(grepl("^#[0-9A-F]{8}$", r_type$colors)))
+  # the fields survive the JSON of the entry with their types
+  spec <- columns_from_json(out$entry$columns)
+  expect_identical(columns_from_json(columns_to_json(spec))$r_type, spec$r_type)
+
+  be <- be_new(dir)
+  r <- raster_open(be, out$files$path, columns = spec)
+  expect_identical(names(r), "cover")
+  expect_true(terra::is.factor(r))
+  legend <- terra::cats(r)[[1]]
+  expect_equal(legend$value, 1:5)
+  expect_identical(as.character(legend$label), sim_landcover_labels)
+  expect_colors(r)
+  expect_identical(terra::datatype(r), "INT1U")
+  expect_true(codes_equal(r, x))
+
+  # the colours come from the entry, not from the file
+  codes <- raster_open(be, out$files$path)
+  expect_false(terra::has.colors(codes))
+  expect_false(terra::is.factor(codes))
+  # opening writes nothing next to the file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+
+  # the caller's raster keeps its colours and categories
+  expect_colors(x)
+  expect_true(terra::is.factor(x))
+  expect_identical(names(x), "cover")
+})
+
+test_that("with a legend, only the colours of the legend's codes are stored", {
+  # D-C2. Red: `r_type` has no `color_values` and no `colors`.
+  skip_if_not_installed("terra")
+  # colours for two of the five classes
+  x <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE)
+  terra::coltab(x, layer = 1) <- data.frame(value = c(4, 2), col = sim_landcover_colors[c(4, 2)])
+  names(x) <- "cover"
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  r_type <- staged_r_type(out)
+  expect_equal(r_type$values, 1:5)
+  expect_equal(r_type$color_values, c(2, 4))
+  expect_identical(r_type$colors, sim_landcover_colors[c(2, 4)])
+  r <- raster_open(be_new(dir), out$files$path, columns = columns_from_json(out$entry$columns))
+  expect_colors(r, codes = c(2, 4), colors = sim_landcover_colors[c(2, 4)])
+  expect_identical(as.character(terra::cats(r)[[1]]$label), sim_landcover_labels)
+
+  # a colour table with more codes than the legend: that of a file, which has
+  # a row for each of the codes 0-255
+  file <- file.path(withr::local_tempdir(), "map.tif")
+  backed <- write_color_source(file)
+  levels(backed) <- data.frame(value = 1:5, label = sim_landcover_labels)
+  names(backed) <- "cover"
+  expect_true(terra::has.colors(backed))
+  expect_identical(nrow(terra::coltab(backed)[[1]]), 256L)
+  out <- stage_sim_raster(backed, nodata = 0)
+  r_type <- staged_r_type(out)
+  expect_equal(r_type$color_values, 1:5)
+  expect_identical(r_type$colors, unname(color_hex(backed)[as.character(1:5)]))
+  # a TIFF colour table is opaque
+  expect_identical(r_type$colors, paste0(substr(sim_landcover_colors, 1, 7), "FF"))
+})
+
+test_that("colours without a legend are stored for every row of the colour table and restored", {
+  # D-C2, D-C4. Red: `r_type` has no `color_values` and no `colors`; the
+  # staged TIFF holds the colour table.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16, colors = TRUE)
+  expect_false(terra::is.factor(x))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_false(has_color_table(out$staged))
+  r_type <- staged_r_type(out)
+  expect_null(r_type$values)
+  expect_null(r_type$levels)
+  expect_equal(r_type$color_values, 1:5)
+  expect_identical(r_type$colors, sim_landcover_colors)
+
+  spec <- columns_from_json(out$entry$columns)
+  r <- raster_open(be_new(dir), out$files$path, columns = spec)
+  expect_false(terra::is.factor(r))
+  expect_identical(names(r), "cover")
+  expect_colors(r)
+  expect_true(values_equal(r, x))
+  expect_false(terra::has.colors(raster_open(be_new(dir), out$files$path)))
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+})
+
+test_that("a layer without a colour table gets neither field; one coloured layer among several keeps its colours", {
+  # D-C2, D-C4. Guard: the plain raster has neither field. Red: layer 2 of
+  # the three-layer raster has no `color_values` and no `colors`, and the
+  # opened raster has no colours.
+  skip_if_not_installed("terra")
+  plain <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16, legend = TRUE))
+  expect_null(staged_r_type(plain)$color_values)
+  expect_null(staged_r_type(plain)$colors)
+  expect_no_match(plain$entry$columns, "color", fixed = TRUE)
+
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  x <- c(
+    other[["height"]],
+    sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE),
+    other[["moisture"]]
+  )
+  expect_identical(names(x), c("height", "cover", "moisture"))
+  expect_identical(terra::has.colors(x), c(FALSE, TRUE, FALSE))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_false(has_color_table(out$staged))
+  spec <- columns_from_json(out$entry$columns)
+  expect_null(spec$r_type[[1]]$color_values)
+  expect_null(spec$r_type[[1]]$colors)
+  expect_equal(spec$r_type[[2]]$color_values, 1:5)
+  expect_identical(spec$r_type[[2]]$colors, sim_landcover_colors)
+  expect_equal(spec$r_type[[2]]$values, 1:5)
+  expect_null(spec$r_type[[3]]$color_values)
+  expect_null(spec$r_type[[3]]$colors)
+
+  r <- raster_open(be_new(dir), out$files$path, columns = spec)
+  expect_identical(names(r), names(x))
+  expect_identical(terra::has.colors(r), c(FALSE, TRUE, FALSE))
+  expect_identical(terra::is.factor(r), c(FALSE, TRUE, FALSE))
+  expect_colors(r, layer = 2L)
+  expect_true(codes_equal(r, x))
+  # the same file as without the colours
+  bare <- c(other[["height"]], sim_landcover(nrow = 12, ncol = 16, legend = TRUE), other[["moisture"]])
+  expect_identical(out$files$md5, stage_sim_raster(bare)$files$md5)
+})
+
+test_that("in memory, the same cells with and without colours give the same file", {
+  # D-C3. Red: terra writes the colour table into the TIFF, so the MD5 and
+  # the version differ and gdalinfo shows `ColorInterp=Palette` and a
+  # "Color Table".
+  skip_if_not_installed("terra")
+  dir <- withr::local_tempdir()
+  colored <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16, colors = TRUE), dir = dir)
+  plain <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16))
+  expect_identical(colored$files$md5, plain$files$md5)
+  expect_identical(colored$entry$version, plain$entry$version)
+  expect_false(has_color_table(colored$staged))
+  expect_info(gdal_info(colored$staged), "ColorInterp=Gray")
+  # no side file in the staging folder
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), colored$files$path)
+  expect_length(list.files(dir, pattern = "\\.aux\\.(xml|json)$", recursive = TRUE, all.files = TRUE), 0L)
+  # only the entries differ
+  expect_false(identical(colored$entry$columns, plain$entry$columns))
+
+  # also with a legend, and whatever the colours are
+  both <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE))
+  expect_identical(both$files$md5, plain$files$md5)
+  other <- sim_landcover(nrow = 12, ncol = 16)
+  terra::coltab(other, layer = 1) <- data.frame(value = 1:5, col = rev(sim_landcover_colors))
+  names(other) <- "cover"
+  recolored <- stage_sim_raster(other)
+  expect_identical(recolored$files$md5, plain$files$md5)
+  expect_identical(staged_r_type(recolored)$colors, rev(sim_landcover_colors))
+})
+
+test_that("a source file with a colour table gives the same file as the same cells without one", {
+  # D-C3. Red: GDAL copies the colour table of the source (translate path),
+  # so the MD5 and the version differ from those of the file without one and
+  # the staged TIFF holds a "Color Table"; `r_type` has no `color_values`.
+  # The path taken (GDAL copy or terra) is not asserted: D-C3 leaves it to
+  # the code.
+  skip_if_not_installed("terra")
+  # the same cells under the same file name in two folders
+  with_table <- file.path(withr::local_tempdir(), "map.tif")
+  without <- file.path(withr::local_tempdir(), "map.tif")
+  x <- write_color_source(with_table)
+  y <- write_color_source(without, colors = FALSE)
+  expect_true(has_color_table(with_table))
+  expect_false(has_color_table(without))
+  expect_true(terra::has.colors(x))
+  expect_false(terra::has.colors(y))
+  expect_false(any(terra::inMemory(x)))
+  expect_true(values_equal(x, y))
+  source_md5 <- md5_file(with_table)
+  source_colors <- color_hex(x)
+
+  dir <- withr::local_tempdir()
+  colored <- stage_sim_raster(x, dir = dir, nodata = 0)
+  plain <- stage_sim_raster(y, nodata = 0)
+  expect_identical(colored$files$md5, plain$files$md5)
+  expect_identical(colored$entry$version, plain$entry$version)
+  expect_false(has_color_table(colored$staged))
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), colored$files$path)
+  expect_length(list.files(dir, pattern = "\\.aux\\.(xml|json)$", recursive = TRUE, all.files = TRUE), 0L)
+  expect_identical(staged_type(colored), "INT1U")
+  expect_identical(nodata_tag(colored$staged), 0)
+  # deterministic: the same file from another staging folder
+  expect_identical(stage_sim_raster(x, nodata = 0)$files$md5, colored$files$md5)
+
+  # without a legend, every row of the file's colour table is stored: the
+  # codes 0-255
+  r_type <- staged_r_type(colored)
+  expect_equal(r_type$color_values, 0:255)
+  expect_identical(r_type$colors, unname(source_colors))
+  expect_identical(r_type$colors[2:6], paste0(substr(sim_landcover_colors, 1, 7), "FF"))
+  expect_null(staged_r_type(plain)$color_values)
+
+  # read back: the values of the source, its colours from the entry
+  be <- be_new(dir)
+  r <- raster_open(be, colored$files$path, columns = columns_from_json(colored$entry$columns))
+  expect_true(values_equal(r, zero_as_missing(sim_landcover(nrow = 12, ncol = 16))))
+  expect_identical(names(r), "cover")
+  expect_identical(color_hex(r), source_colors)
+  expect_false(terra::has.colors(raster_open(be, colored$files$path)))
+
+  # the source is as it was
+  expect_identical(md5_file(with_table), source_md5)
+  expect_identical(list.files(dirname(with_table), all.files = TRUE, no.. = TRUE), "map.tif")
+  expect_true(terra::has.colors(x))
+})
+
+test_that("the colour fields of one colour stay arrays in the JSON of the entry", {
+  # D-C1. Red: `color_values` and `colors` of length one are written as
+  # scalars (`"color_values":7`), not as arrays: the two fields are not in
+  # the field lists of `columns_to_json()` / `columns_from_json()`.
+  one <- columns_spec(
+    name = "cover", type = "INT1U",
+    r_type = list(list(
+      class = "SpatRaster", resolution = c(1, 1), dim = c(2L, 2L),
+      values = 7, levels = "water", levels_name = "label",
+      color_values = 7, colors = "#1F78B4FF"
+    ))
+  )
+  json <- columns_to_json(one)
+  expect_match(json, '"color_values":[7]', fixed = TRUE)
+  expect_match(json, '"colors":["#1F78B4FF"]', fixed = TRUE)
+  back <- columns_from_json(json)$r_type[[1]]
+  expect_equal(back$color_values, 7)
+  expect_true(is.numeric(back$color_values))
+  expect_identical(back$colors, "#1F78B4FF")
+  expect_identical(columns_from_json(columns_to_json(columns_from_json(json)))$r_type[[1]], back)
+})
+
+test_that("a class map of one coloured class round-trips through the manifest entry", {
+  # D-C1, D-C4. Red: `r_type` has no `color_values` and no `colors`.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16)
+  x[x != 0] <- 3L
+  levels(x) <- data.frame(value = 3, label = "crop")
+  terra::coltab(x, layer = 1) <- data.frame(value = 3, col = sim_landcover_colors[[3]])
+  names(x) <- "cover"
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  expect_match(out$entry$columns, '"color_values":[3]', fixed = TRUE)
+  expect_match(out$entry$columns, paste0('"colors":["', sim_landcover_colors[[3]], '"]'), fixed = TRUE)
+  # the entry as the manifest holds it
+  manifest <- new_manifest(out$entry, out$files)
+  spec <- columns_from_json(manifest$entry$columns)
+  expect_equal(spec$r_type[[1]]$color_values, 3)
+  expect_identical(spec$r_type[[1]]$colors, sim_landcover_colors[[3]])
+  r <- raster_open(be_new(dir), out$files$path, columns = spec)
+  expect_colors(r, codes = 3, colors = sim_landcover_colors[[3]])
+  expect_identical(as.character(terra::cats(r)[[1]]$label), "crop")
+  expect_identical(names(r), "cover")
+})
+
+test_that("a window and a subset of the layers keep the colours and the layer names", {
+  # D-C4. Red: `r_type` has no colours, so the opened raster has none
+  # (file-backed source without a colour table of its own, colours set in
+  # the session).
+  skip_if_not_installed("terra")
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE, colors = TRUE)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  expect_false(has_color_table(out$staged))
+  spec <- columns_from_json(out$entry$columns)
+  be <- be_new(dir)
+  whole <- raster_open(be, out$files$path, columns = spec)
+  expect_colors(whole)
+
+  box <- sf::st_bbox(c(xmin = -27.1, ymin = 7.3, xmax = -26.5, ymax = 8.1), crs = sf::st_crs(4326))
+  window <- raster_open(be, out$files$path, intersects = box, columns = spec)
+  expect_lt(terra::ncell(window), terra::ncell(whole))
+  expect_identical(names(window), "cover")
+  expect_colors(window)
+  expect_true(terra::is.factor(window))
+  expect_identical(as.character(terra::cats(window)[[1]]$label), sim_landcover_labels)
+  expect_true(codes_equal(window, terra::crop(whole, terra::ext(window))))
+  # a query in another CRS
+  projected <- sf::st_transform(sf::st_as_sfc(box), 32626)
+  expect_colors(raster_open(be, out$files$path, intersects = projected, columns = spec))
+  # nothing is written next to the file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+
+  # several layers: the columns of all layers, then of the coloured one only
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  several <- c(
+    other[["height"]],
+    sim_landcover(nrow = 12, ncol = 16, legend = TRUE, colors = TRUE),
+    other[["moisture"]]
+  )
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(several, dir = dir)
+  spec <- columns_from_json(out$entry$columns)
+  be <- be_new(dir)
+  r <- raster_open(be, out$files$path, intersects = box, columns = spec)
+  expect_identical(names(r), c("height", "cover", "moisture"))
+  expect_identical(terra::has.colors(r), c(FALSE, TRUE, FALSE))
+  expect_colors(r, layer = 2L)
+  one <- raster_open(be, out$files$path, columns = spec[spec$name == "cover", ])
+  expect_identical(names(one), c("height", "cover", "moisture"))
+  expect_identical(terra::has.colors(one), c(FALSE, TRUE, FALSE))
+  expect_colors(one, layer = 2L)
+  # a layer taken from the opened raster keeps its colours and its name
+  cover <- raster_open(be, out$files$path, columns = spec)[["cover"]]
+  expect_identical(names(cover), "cover")
+  expect_colors(cover)
+  expect_true(terra::is.factor(cover))
+})
+
+test_that("raster_set_colors() sets the recorded colours and leaves other layers alone", {
+  # D-C4, D-C5. Red: could not find function "raster_set_colors".
+  skip_if_not_installed("terra")
+  dir <- withr::local_tempdir()
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  out <- stage_sim_raster(c(other[["height"]], sim_landcover(nrow = 12, ncol = 16)), dir = dir)
+  file <- file.path(dir, out$files$path)
+  layer_type <- function(...) {
+    c(list(class = "SpatRaster", resolution = c(1, 1), dim = c(12L, 16L)), list(...))
+  }
+  spec <- columns_spec(
+    name = c("height", "cover"), type = c("INT1U", "INT1U"),
+    r_type = list(
+      layer_type(),
+      layer_type(color_values = c(2, 4), colors = c("#33A02CFF", "#B2DF8A80"))
+    )
+  )
+  r <- raster_set_colors(terra::rast(file), spec)
+  expect_s4_class(r, "SpatRaster")
+  expect_identical(names(r), c("height", "cover"))
+  expect_identical(terra::has.colors(r), c(FALSE, TRUE))
+  expect_identical(unname(color_hex(r, 2L)[c("2", "4")]), c("#33A02CFF", "#B2DF8A80"))
+  expect_false(any(terra::inMemory(r)))
+  # nothing is written next to the file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+
+  # no columns, columns without the fields, and a layer the raster lacks
+  expect_identical(terra::has.colors(raster_set_colors(terra::rast(file), NULL)), c(FALSE, FALSE))
+  bare <- columns_spec(
+    name = c("height", "cover"), type = c("INT1U", "INT1U"),
+    r_type = list(layer_type(), layer_type())
+  )
+  expect_identical(terra::has.colors(raster_set_colors(terra::rast(file), bare)), c(FALSE, FALSE))
+  absent <- columns_spec(
+    name = "elsewhere", type = "INT1U",
+    r_type = list(layer_type(color_values = 1, colors = "#1F78B4FF"))
+  )
+  expect_identical(terra::has.colors(raster_set_colors(terra::rast(file), absent)), c(FALSE, FALSE))
+})
+
+test_that("an entry written before part C, without the colour fields, opens as before", {
+  # D-C4. The expectations on `raster_open()` are guards: they hold today
+  # and must keep holding. Red: could not find function "raster_set_colors"
+  # (the last expectation).
+  skip_if_not_installed("terra")
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  # the columns as a manifest of version 0.0.0.9005 holds them
+  spec <- columns_from_json(out$entry$columns)
+  expect_named(
+    spec$r_type[[1]],
+    c("class", "resolution", "dim", "nodata", "values", "levels", "levels_name")
+  )
+  be <- be_new(dir)
+  expect_no_error(r <- raster_open(be, out$files$path, columns = spec))
+  expect_false(terra::has.colors(r))
+  expect_true(terra::is.factor(r))
+  expect_identical(as.character(terra::cats(r)[[1]]$label), sim_landcover_labels)
+  expect_identical(names(r), "cover")
+  box <- sf::st_bbox(c(xmin = -27.1, ymin = 7.3, xmax = -26.5, ymax = 8.1), crs = sf::st_crs(4326))
+  expect_false(terra::has.colors(raster_open(be, out$files$path, intersects = box, columns = spec)))
+  expect_false(terra::has.colors(raster_open(be, out$files$path)))
+  expect_false(terra::has.colors(raster_set_colors(terra::rast(out$staged), spec)))
+})
+
+test_that("store_write() and store_read() carry the colours of a class map", {
+  # D-C1 to D-C4, D-C7, through the public functions. Red: the manifest has
+  # no `color_values` and no `colors`, so the raster read has no colours.
+  skip_below_level("default")
+  skip_if_not_installed("terra")
+  root <- withr::local_tempdir()
+  paths <- file.path(root, c("primary", "copy"))
+  st <- suppressMessages(store_connect(paths[[1]], secondary = paths[[2]], create = TRUE))
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE, colors = TRUE)
+  suppressMessages(store_write(
+    st, x, "grids/cover",
+    title = "Cover", description = "Simulated class map.", nodata = 0
+  ))
+  codes <- as.vector(terra::values(sim_landcover()))
+  codes[codes == 0] <- NA
+  box <- sf::st_as_sfc(sf::st_bbox(c(xmin = -28, ymin = 7, xmax = -27, ymax = 8), crs = sf::st_crs(4326)))
+
+  # the manifest on disk holds the colours next to the legend
+  version <- st$primary$catalog$version[st$primary$catalog$dataset == "grids/cover"]
+  manifest <- jsonlite::fromJSON(
+    file.path(paths[[1]], manifest_path("grids/cover", version)),
+    simplifyVector = FALSE
+  )
+  layer <- jsonlite::fromJSON(manifest$entry$columns, simplifyVector = FALSE)[[1]]
+  expect_equal(unlist(layer$r_type$values), 1:5)
+  expect_equal(unlist(layer$r_type$color_values), 1:5)
+  expect_identical(unlist(layer$r_type$colors), sim_landcover_colors)
+  # the data file holds no colour table
+  data_file <- file.path(paths[[1]], st$primary$files$path[st$primary$files$dataset == "grids/cover"])
+  expect_false(has_color_table(data_file))
+
+  # from the connection, from the primary alone and from the secondary alone
+  for (connection in list(st, store_connect(paths[[1]]), store_connect(paths[[2]]))) {
+    got <- suppressMessages(store_read(connection, "grids/cover"))
+    expect_s4_class(got, "SpatRaster")
+    expect_identical(names(got), "cover")
+    expect_colors(got)
+    expect_true(terra::is.factor(got))
+    expect_identical(as.character(terra::cats(got)[[1]]$label), sim_landcover_labels)
+    values <- as.vector(terra::values(got))
+    expect_identical(is.na(values), is.na(codes))
+    expect_equal(values, codes)
+
+    window <- suppressMessages(store_read(connection, "grids/cover", intersects = box))
+    expect_lt(terra::ncell(window), terra::ncell(got))
+    expect_identical(names(window), "cover")
+    expect_colors(window)
+    expect_identical(as.character(terra::cats(window)[[1]]$label), sim_landcover_labels)
+  }
+  # reading wrote nothing next to the files
+  expect_length(
+    list.files(paths, pattern = "\\.aux\\.(xml|json)$", recursive = TRUE, all.files = TRUE),
+    0L
+  )
+  # the check against the source sees no mismatch (D-C7)
+  checked <- suppressMessages(store_check(st, "grids/cover", x = x, n = terra::ncell(x)))
+  expect_identical(checked$status, c("ok", "ok"))
+
+  # the same map without its colours: the same version, nothing uploaded
+  again <- suppressMessages(store_write(
+    st, sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE), "grids/cover",
+    title = "Cover", description = "Simulated class map.", nodata = 0, mode = "replace"
+  ))
+  expect_identical(again$uploaded, c(0, 0))
+  expect_identical(st$primary$catalog$version[st$primary$catalog$dataset == "grids/cover"], version)
+})

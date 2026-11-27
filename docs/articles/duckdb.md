@@ -39,7 +39,7 @@ store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.2 kB  0.2s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_write(st, rcs_sim_polygons(300, seed = 3), "shapes/polygons",
   title = "Polygons",
@@ -47,7 +47,7 @@ store_write(st, rcs_sim_polygons(300, seed = 3), "shapes/polygons",
   key = "id"
 )
 #> ℹ Writing "shapes/polygons": 300 rows in 1 file, and its index table in 1 file.
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  51.9 kB  0.3s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  51.9 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -129,13 +129,14 @@ store_tables(con, st)
 #> # A tibble: 3 × 6
 #>   schema name         type  dataset             version          current
 #> * <chr>  <chr>        <chr> <chr>               <chr>            <lgl>  
-#> 1 sales  daily        view  sales/daily         b454e301a840470a TRUE   
+#> 1 sales  daily        view  sales/daily         99995a06f9e462f1 TRUE   
 #> 2 shapes polygons     view  shapes/polygons     7d045aaa53d8b240 TRUE   
 #> 3 shapes polygons__h3 view  shapes/polygons__h3 e72b28d7c379c808 TRUE
 ```
 
 Given a store, it lists the datasets with the name of the view each one
-gets:
+gets. Index tables are left out here, though the connection has views
+for them (`shapes.polygons__h3` above):
 
 ``` r
 
@@ -217,8 +218,19 @@ DBI::dbDisconnect(con_spatial, shutdown = TRUE)
 `store_open(engine = "duckdb")` returns a dbplyr table on a dataset’s
 view. With `con`, the view is made (or refreshed) on that connection;
 without it, on an in-memory connection the package keeps for the store
-until the end of the session. Every dbplyr verb works, and the table
-prints as any dbplyr table.
+until the end of the session. The table prints as any dbplyr table.
+
+The dplyr verbs that dbplyr translates to SQL
+([`filter()`](https://rdrr.io/r/stats/filter.html), `select()`,
+`mutate()`, `summarise()`, `arrange()`, joins,
+[`head()`](https://rdrr.io/r/utils/head.html) and others) stay lazy:
+they build a query that runs in DuckDB. Rows come into R only with
+`collect()`, or with verbs that collect, such as `pull()`. A verb or a
+function that dbplyr cannot translate, or that DuckDB does not know,
+gives an error, as for any dbplyr table. `compute()` returns a plain
+dbplyr table, whose `collect()` does not restore the R types described
+below. An earlier version cannot be opened this way: `version` must be
+`NULL` with `engine = "duckdb"`.
 
 ``` r
 
@@ -243,7 +255,8 @@ restores the R types from the catalog, as the Arrow engine does: factor
 levels, difftime units, 64-bit integers, and H3 cells as `rcs_h3`
 vectors printed as hex. A geospatial dataset comes back as an `sf`
 object with the catalog’s coordinate reference system, without the row
-identifier `.rcs_id`.
+identifier `.rcs_id`. A column computed in DuckDB keeps its DuckDB type:
+a count, for example, comes back as a 64-bit integer.
 
 ``` r
 
@@ -355,7 +368,7 @@ store_write(st, by_product, "sales/by_product",
   key = c("year", "product")
 )
 #> ℹ Writing "sales/by_product": 38 rows in 1 file.
-#> ✔ primary  <tempdir>/duckdb-store  1/1 files sent  3.2 kB  0.2s
+#> ✔ primary  <tempdir>/duckdb-store  1/1 files sent  3.2 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 ```
 
@@ -366,10 +379,10 @@ How it works:
   that copy, and it is dropped when the call ends, also after an error.
   It needs room in DuckDB’s memory or its temporary folder.
 - The key is checked and the partitions are listed in DuckDB. Then the
-  rows are fetched in batches of `getOption("rcs.duckdb_batch_rows")`
-  rows (`5e5` by default), sorted as the package sorts them, and
-  streamed into the Parquet files; R holds about one batch at a time. A
-  progress bar shows the batches of a long write.
+  rows are fetched in batches of as many rows as the option
+  `rcs.duckdb_batch_rows` says (`5e5` by default), sorted as the package
+  sorts them, and streamed into the Parquet files; R holds about one
+  batch at a time. A progress bar shows the batches of a long write.
 - The files are staged, checked and land in every location as for any
   other write; DuckDB never uploads. They are identical to those written
   from the same rows collected into R, so both give the same version.
@@ -454,7 +467,7 @@ store_tables(con, st)
 #> * <chr>  <chr>        <chr> <chr>               <chr>            <lgl>  
 #> 1 main   cell_counts  table NA                  NA               NA     
 #> 2 sales  by_product   view  sales/by_product    b5d62d115f8723b8 TRUE   
-#> 3 sales  daily        view  sales/daily         b454e301a840470a TRUE   
+#> 3 sales  daily        view  sales/daily         99995a06f9e462f1 TRUE   
 #> 4 shapes cat_a        view  shapes/cat_a        fa75cbab22985b29 TRUE   
 #> 5 shapes cat_a__h3    view  shapes/cat_a__h3    e8056628ad9ec1c5 TRUE   
 #> 6 shapes polygons     view  shapes/polygons     7d045aaa53d8b240 TRUE   
@@ -517,7 +530,7 @@ store_write(st, sales, "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.2 kB  0.2s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 

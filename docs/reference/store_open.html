@@ -25,7 +25,7 @@ store_open(), filter(), select() and collect() in one call."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -221,14 +221,14 @@ and reminds that <code>collect()</code> reads the rows into R. A table opened wi
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 500 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-open  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.1 kB  0.3s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-open  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu">store_open</span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">q</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Dataset:  sales/daily [500 x 15] (table)</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Location: primary (local)</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Version:  9401e5a1 (current)</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Version:  a6caa62a (current)</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Files:    2 of 2</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>    shop_id date        year product   qty price promo grade delivered      big</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>      <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span>
@@ -249,7 +249,7 @@ and reminds that <code>collect()</code> reads the rows into R. A table opened wi
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">q</span>, n <span class="op">=</span> <span class="fl">3</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Dataset:  sales/daily [500 x 15] (table)</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Location: primary (local)</span></span>
-<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Version:  9401e5a1 (current)</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Version:  a6caa62a (current)</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># Files:    2 of 2</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   shop_id date        year product   qty price promo grade delivered      big</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;fct&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;lgl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;ord&gt;</span> <span style="color: #949494; font-style: italic;">&lt;date&gt;</span>     <span style="color: #949494; font-style: italic;">&lt;int64&gt;</span></span>

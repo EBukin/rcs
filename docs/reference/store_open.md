@@ -167,13 +167,13 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-open  2/2
-#>   files sent  38.1 kB  0.2s
+#>   files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 q <- store_open(st, "daily")
 q
 #> # Dataset:  sales/daily [500 x 15] (table)
 #> # Location: primary (local)
-#> # Version:  9401e5a1 (current)
+#> # Version:  a6caa62a (current)
 #> # Files:    2 of 2
 #>    shop_id date        year product   qty price promo grade delivered      big
 #>      <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
@@ -194,7 +194,7 @@ q
 print(q, n = 3)
 #> # Dataset:  sales/daily [500 x 15] (table)
 #> # Location: primary (local)
-#> # Version:  9401e5a1 (current)
+#> # Version:  a6caa62a (current)
 #> # Files:    2 of 2
 #>   shop_id date        year product   qty price promo grade delivered      big
 #>     <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>

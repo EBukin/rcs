@@ -535,13 +535,26 @@ new_file_rows <- function(dataset, version, path, partition_values, rows, bytes,
 #' | ordered factor | the same with `ordered = TRUE` |
 #' | plain list column | `list(class = "list")` |
 #' | raster layer | `list(class = "SpatRaster", resolution = c(x, y), dim = c(nrow, ncol))` |
-#' | raster layer with a NoData value | the same, then `nodata = <number>` |
-#' | categorical raster layer | the same, then `values = <codes>, levels = <labels>, levels_name = "<label column>"` |
+#' | raster layer of a file with a NoData value | the same, then `nodata = <number>` |
+#' | categorical raster layer (a legend) | then `values = <codes>, levels = <labels>, levels_name = "<label column>"` |
+#' | raster layer with a colour table | then `color_values = <codes>, colors = <"#RRGGBBAA">` |
 #'
-#' The fields `levels`, `values`, `resolution` and `dim` are JSON arrays
-#' whatever their length. `nodata` is absent when the file has no NoData
-#' value; `values` (numbers, sorted) and `levels` (character) have one
-#' length and one order.
+#' The raster fields add up in this order: a class map with a NoData value,
+#' a legend and colours has all of them. The fields `levels`, `values`,
+#' `color_values`, `colors`, `resolution` and `dim` are JSON arrays whatever
+#' their length.
+#'
+#' * `nodata`: one number, the same for every layer of a raster; absent when
+#'   the file has no NoData value.
+#' * `values` (numbers, sorted) and `levels` (character): the codes of the
+#'   legend and their labels, of one length and in one order; `levels_name`
+#'   is the name the label column had.
+#' * `color_values` (numbers, sorted) and `colors` (character, `#RRGGBBAA`
+#'   in upper case): the codes that have a colour and their colours, of one
+#'   length and in one order. Both are absent for a layer without a colour
+#'   table. With a legend they hold only the codes of the legend; without
+#'   one, every row of the colour table (256 rows for a table read from a
+#'   file).
 #'
 #' `columns_spec()` builds the tibble, `columns_to_json()` serialises it and
 #' `columns_from_json()` parses the string of an entry. A round trip is
@@ -571,12 +584,15 @@ columns_spec <- function(name = character(), type = character(),
   )
 }
 
+# The fields of an `r_type` that are JSON arrays whatever their length.
+r_type_array_fields <- c("levels", "values", "color_values", "colors", "resolution", "dim")
+
 #' @noRd
 columns_to_json <- function(spec) {
   items <- lapply(seq_len(nrow(spec)), function(i) {
     r_type <- spec$r_type[[i]]
     if (!is.null(r_type)) {
-      for (field in intersect(names(r_type), c("levels", "values", "resolution", "dim"))) {
+      for (field in intersect(names(r_type), r_type_array_fields)) {
         r_type[[field]] <- I(r_type[[field]])
       }
     }
@@ -598,7 +614,7 @@ columns_from_json <- function(json) {
     if (is.null(r_type)) {
       return(NULL)
     }
-    for (field in intersect(names(r_type), c("levels", "values", "resolution", "dim"))) {
+    for (field in intersect(names(r_type), r_type_array_fields)) {
       r_type[[field]] <- unlist(r_type[[field]]) %||% character()
     }
     r_type

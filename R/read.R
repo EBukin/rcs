@@ -65,11 +65,43 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   `h3_p<r>` are returned.
 #' * A raster is returned as a `terra::SpatRaster` opened through GDAL, so
 #'   only the tiles needed are read; `intersects` crops it to the query's
-#'   bounding box. A categorical layer is returned with its categories (the
-#'   codes and labels recorded when it was written), also after a crop; the
-#'   data type and the NoData value are those of the file, so cells holding
-#'   the NoData value are missing. Filters, `columns`, `geometry` and `exact`
-#'   do not apply to rasters and abort.
+#'   bounding box (see "Rasters"). Filters, `columns`, `geometry`, `exact`
+#'   and `exact_engine` do not apply to rasters and abort.
+#'
+#' @section Rasters:
+#' A raster is returned as a `terra::SpatRaster` that points to the stored
+#' file: at the location itself for a local store, through GDAL's virtual
+#' file system for a bucket. No cell is read until it is needed, and the
+#' file is not downloaded.
+#'
+#' * **The whole raster.** `store_read(st, "name")` returns every layer,
+#'   with the layer names, the data type and the NoData value of the file.
+#'   Cells that hold the NoData value are missing (`NA`).
+#' * **A window.** `intersects` returns only the part inside the bounding
+#'   box of the query, in the raster's CRS, rounded outwards to whole
+#'   cells; a point or a line gives the cells it touches. The cells of the
+#'   window are read at once, straight from the bucket for a store in a
+#'   bucket: this is the way to work with a map too large to read whole.
+#'   The query takes the same forms as for geospatial data (an `sf`, `sfc`
+#'   or `bbox` object in any CRS, or H3 cells). A query that does not
+#'   overlap the raster aborts; one that crosses the antimeridian or holds
+#'   a pole returns the raster uncropped.
+#' * **Legend.** A layer written with categories (see "Rasters" in
+#'   [store_write()]) comes back categorical: `terra::levels()` gives the
+#'   codes and labels recorded with the dataset, `terra::freq()` and
+#'   `terra::plot()` use the labels, and
+#'   `terra::extract(x, cells, raw = TRUE)` gives the codes. The label
+#'   column is named as it was when the map was written; the code column
+#'   is named `value` (`code` when the label column is itself called
+#'   `value`).
+#' * **Colours.** A layer written with a colour table has it again:
+#'   `terra::has.colors()` is `TRUE`, `terra::coltab()` gives the table,
+#'   and `terra::plot()` draws with it.
+#'
+#' The legend and the colours come from the catalog, not from the file,
+#' and nothing is written next to the file. A window and a subset of the
+#' layers (`x[["name"]]`) keep both. There is no `columns` for rasters:
+#' read the raster and take the layers from it.
 #'
 #' The location read from is, among the available locations that hold the
 #' dataset at the primary's version, a local one first, then the primary,
@@ -82,14 +114,16 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   that is unique in the store.
 #' @param ... Filter expressions, as in [dplyr::filter()].
 #' @param columns Columns to return, as in [dplyr::select()] (tidyselect);
-#'   `NULL` for all. The geometry column is controlled by `geometry`.
+#'   `NULL` for all. The geometry column is controlled by `geometry`. A
+#'   raster has no column selection.
 #' @param intersects `NULL`, or a query: an `sf`, `sfc` or `bbox` object
 #'   with a coordinate reference system, or H3 cells of any resolution as
 #'   hex strings, `bit64::integer64` or `h3o` `H3` vectors. A plain number
 #'   aborts: it cannot hold an H3 cell. An `sf` or `sfc` query with an
 #'   invalid geometry (for example a ring that crosses itself) aborts, with
 #'   the reason and advice to use [sf::st_make_valid()]; validity is read on
-#'   the sphere or in the plane as in [store_intersects()].
+#'   the sphere or in the plane as in [store_intersects()]. For a raster,
+#'   the query's bounding box is the window that is read (see "Rasters").
 #' @param geometry `FALSE` drops the geometry before reading and returns a
 #'   tibble.
 #' @param version `NULL` for the current version, or the 16 hex characters of
@@ -106,7 +140,8 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   `"session"` override it. Data in a projected CRS are always tested
 #'   in the plane of that CRS. See [store_intersects()].
 #' @return A tibble; an `sf` object for geospatial data read with geometry;
-#'   a `terra::SpatRaster` for a raster.
+#'   a `terra::SpatRaster` for a raster, with the categories and the
+#'   colours recorded when it was written.
 #' @seealso [store_open()] for lazy queries, [store_sample()],
 #'   [store_glimpse()].
 #' @export
@@ -130,6 +165,38 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #' ))
 #' store_read(st, "polygons", intersects = area)
 #' store_read(st, "polygons", geometry = FALSE)
+#'
+#' # A class map: whole, and a window of it
+#' if (requireNamespace("terra", quietly = TRUE)) {
+#'   cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+#'   cover[1:2, ] <- 0L
+#'   levels(cover) <- data.frame(
+#'     value = 1:5,
+#'     label = c("water", "forest", "crop", "grass", "bare")
+#'   )
+#'   names(cover) <- "cover"
+#'   terra::coltab(cover) <- data.frame(
+#'     value = 1:5,
+#'     col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+#'   )
+#'   store_write(st, cover, "grids/cover",
+#'     title = "Land cover", description = "A simulated class map.",
+#'     nodata = 0
+#'   )
+#'
+#'   map <- store_read(st, "grids/cover")
+#'   print(map)
+#'   print(terra::levels(map)[[1]]) # the legend
+#'   print(terra::has.colors(map))
+#'   print(terra::coltab(map)[[1]]) # the colours
+#'   print(map[1, 1]) # a cell holding the NoData value is missing
+#'
+#'   # Only the cells inside the box of `area`, with legend and colours
+#'   window <- store_read(st, "grids/cover", intersects = area)
+#'   print(dim(window))
+#'   print(terra::freq(window))
+#'   rm(map, window)
+#' }
 #' unlink(location, recursive = TRUE)
 store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
                        geometry = TRUE, version = NULL, exact = TRUE,
@@ -326,7 +393,9 @@ sample_rows <- function(q, n, quos, selected) {
 #'
 #' Prints what the catalog says about a dataset (kind, rows, files, version,
 #' key, partition, coordinate reference system) and the first rows of its
-#' first file, read from one row group. Opens one file.
+#' first file, read from one row group. Opens one file. For a raster, the
+#' `terra::SpatRaster` is printed instead, with its categories and colours
+#' as [store_read()] returns them.
 #'
 #' @inheritParams store_read
 #' @return The rows shown (a tibble, or an `sf` object for geospatial data),

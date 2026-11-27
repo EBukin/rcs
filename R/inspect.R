@@ -460,7 +460,15 @@ text_table <- function(cols, align = rep("left", length(cols)), indent = 0) {
 #'   * `entry`: the catalog entry, a one-row tibble;
 #'   * `columns`: a tibble `name`, `type` (Arrow type), `r_type` (the R type
 #'     the package restores on read, as text, `NA` when Arrow restores it by
-#'     itself), `description`;
+#'     itself), `description`. For a raster there is one row per layer:
+#'     `type` is the data type of the file (e.g. `INT1U`) and `r_type`
+#'     reads, for example,
+#'     `raster layer (60 x 80 cells, nodata 0, 5 classes)`: rows and
+#'     columns, then the NoData value and the number of classes of the
+#'     legend when the dataset has them. The full record of
+#'     a layer (resolution, legend `values`, `levels`, `levels_name`,
+#'     colours `color_values`, `colors`) is the JSON text in
+#'     `entry$columns`, which `jsonlite::fromJSON()` parses;
 #'   * `files`: a tibble of the files of the current version: `path`,
 #'     `partition_values`, `rows`, `bytes`, `md5`, `created`;
 #'   * `locations`: a tibble `location`, `role` and `status` (as in

@@ -26,7 +26,8 @@ that is unique in the store.}
 \item{...}{Filter expressions, as in \code{\link[dplyr:filter]{dplyr::filter()}}.}
 
 \item{columns}{Columns to return, as in \code{\link[dplyr:select]{dplyr::select()}} (tidyselect);
-\code{NULL} for all. The geometry column is controlled by \code{geometry}.}
+\code{NULL} for all. The geometry column is controlled by \code{geometry}. A
+raster has no column selection.}
 
 \item{seed}{\code{NULL}, or a number that makes the sample reproducible. The
 global random stream is left as it was (\code{\link[withr:with_seed]{withr::with_seed()}}).}

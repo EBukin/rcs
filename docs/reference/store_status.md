@@ -96,9 +96,9 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary    /tmp/Rtmp/rcs-example-status/primary  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-status/copy     2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 store_status(st)
 #> Source: /tmp/Rtmp/rcs-example-status/primary
@@ -106,7 +106,7 @@ store_status(st)
 #> # A tibble: 1 × 8
 #>   dataset     location status newer primary_version  location_version
 #>   <chr>       <chr>    <chr>  <chr> <chr>            <chr>           
-#> 1 sales/daily [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> 1 sales/daily [1]      same   NA    0f9e01793cbea58a 0f9e01793cbea58a
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 store_status(st, from = file.path(root, "copy"))
 #> Source: /tmp/Rtmp/rcs-example-status/copy
@@ -114,7 +114,7 @@ store_status(st, from = file.path(root, "copy"))
 #> # A tibble: 1 × 8
 #>   dataset     location status newer primary_version  location_version
 #>   <chr>       <chr>    <chr>  <chr> <chr>            <chr>           
-#> 1 sales/daily [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> 1 sales/daily [1]      same   NA    0f9e01793cbea58a 0f9e01793cbea58a
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 unlink(root, recursive = TRUE)
 ```

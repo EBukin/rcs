@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9000</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -40,6 +40,7 @@
 <li><a class="dropdown-item" href="../articles/duckdb.html">Querying a store with DuckDB</a></li>
     <li><a class="dropdown-item" href="../articles/locations.html">Primary and secondary locations</a></li>
     <li><a class="dropdown-item" href="../articles/geospatial.html">Geospatial data</a></li>
+    <li><a class="dropdown-item" href="../articles/regions-and-households.html">Regions and households: a worked example</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Performance</h6></li>
     <li><a class="dropdown-item" href="../articles/benchmark-h3.html">Benchmark: H3 package and the cost of geocoding</a></li>
@@ -133,7 +134,9 @@ multipolygons and one empty geometry. <code><a href="../reference/rcs_sim_polygo
 <span><span class="co">#&gt; <span style="color: #949494;"># ℹ 490 more rows</span></span></span></code></pre></div>
 <p>An <code>sf</code> object is written like a table. The dataset’s kind
 becomes <code>geospatial</code>, and its coordinate reference system
-(CRS) is kept in the catalog. Any CRS can be used.</p>
+(CRS) is kept in the catalog. Any CRS can be used. The data are stored
+in their own CRS; only the H3 cells are computed on a copy in EPSG:4326
+(see “Geocoding engines” below).</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">polys</span>, <span class="st">"shapes/polygons"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Polygons"</span>,</span>
@@ -175,7 +178,15 @@ of plain numbers, which the Parquet reader applies before it reads any
 geometry.</p>
 <p>A geometry that crosses the edge of its cell also lies in other
 cells. The <em>index table</em> <code>&lt;dataset&gt;__h3</code> lists
-every such row with every cell it touches. It is written, replaced and
+every such row with every cell it touches. It does not store the data
+twice: it holds no geometry and no attributes, only
+<code>.rcs_id</code>, the cells and the share of the row in each. It
+exists so that a query by cells finds a row in any cell it touches, not
+only in its main cell; this matters for thin or long queries, whose
+bounding box is much larger than the query. <code><a href="../reference/store_duckdb.html">store_duckdb()</a></code>
+exposes it as the view <code>&lt;schema&gt;.&lt;name&gt;__h3</code> (see
+<code><a href="../articles/duckdb.html">vignette("duckdb")</a></code>), and a write with
+<code>geocode = FALSE</code> makes none. It is written, replaced and
 deleted with its dataset, and is hidden unless asked for:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="va">st</span>, index <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
@@ -186,8 +197,8 @@ deleted with its dataset, and is hidden unless asked for:</p>
 <span><span class="co">#&gt; Datasets: 2</span></span>
 <span><span class="co">#&gt;   name            kind        rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   shapes/</span></span>
-<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-22 15:54</span></span>
-<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-22 15:54</span></span></code></pre></div>
+<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-27 18:58</span></span>
+<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-27 18:58</span></span></code></pre></div>
 <p><code>h3</code> and <code>bbox</code> come back with the data.
 <code><a href="../reference/store_h3_hex.html">store_h3_hex()</a></code> turns the cell columns of a data frame into
 the 15-character text form that other H3 tools use:</p>
@@ -411,7 +422,7 @@ filter pay off”).</p>
 <span>  max_files <span class="op">=</span> <span class="fl">10</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons_by_cell"</span>: 500 rows in 7 files (partition h3_p2), and its index table in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  157.2 kB  0.3s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  157.5 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 8 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The work counters show which files a read opened:</p>
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
@@ -427,7 +438,7 @@ filter pay off”).</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 2</span></span></span>
 <span><span class="co">#&gt;   detail                                                                       n</span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                                                    <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span></span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> shapes/polygons_by_cell/h3_p2=587654880185810943/part-b331e5c7b2facfa8.…     1</span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> shapes/polygons_by_cell/h3_p2=587654880185810943/part-ec840f50f56b6b5e.…     1</span></span></code></pre></div>
 <p>One data file of seven was opened. The query is a compact box, so the
 box test alone selects the rows, and the index table is not read.</p>
 </div>
@@ -448,7 +459,7 @@ smaller than their box, and always complete.
 <span>  geocode <span class="op">=</span> <span class="cn">FALSE</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons_boxes"</span>: 500 rows in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  61.1 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  61.1 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"polygons_boxes"</span>, intersects <span class="op">=</span> <span class="va">query</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] 89</span></span></code></pre></div>
@@ -613,8 +624,9 @@ geocoded in the plane:</p>
 <span>  key <span class="op">=</span> <span class="st">"id"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; Warning: Geocoding <span style="color: #0000BB;">"shapes/mixed"</span>: 2 rows are invalid on the sphere.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> 2 rebuilt by s2, 0 geocoded in the plane after a failed rebuild check.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Rebuilt: id = 501; id = 502.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> 1 rebuilt by s2, 1 geocoded in the plane after a failed rebuild check.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> Rebuilt: id = 501.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> In the plane: id = 502.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/mixed"</span>: 502 rows in 1 file, and its index table in 1 file.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  2/2 files sent  73.3 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span>
@@ -634,8 +646,11 @@ same cells and the same version every time.</p>
 default (<code>NULL</code>) it follows the dataset’s engine:
 <code>"s2"</code> on the sphere, <code>"planar"</code> in the plane, and
 <code>"auto"</code> on the sphere for candidate rows valid there and in
-the plane for the others, so that an invalid row never makes s2 fail.
-Datasets without a recorded engine (written before engines were
+the plane for the others, so that an invalid row never makes s2 fail. On
+the sphere (dataset engine <code>"s2"</code>, or
+<code>exact_engine = "s2"</code>), a row that is invalid there is first
+rebuilt by s2, as a write with engine <code>"s2"</code> does, and then
+tested. Datasets without a recorded engine (written before engines were
 recorded, or with <code>geocode = FALSE</code>) follow the session’s
 <code><a href="https://r-spatial.github.io/sf/reference/s2.html" class="external-link">sf::sf_use_s2()</a></code>. <code>"s2"</code>, <code>"planar"</code>
 and <code>"session"</code> override it. Data in a projected CRS are
@@ -671,7 +686,7 @@ over the same box.</p>
 <span>  description <span class="op">=</span> <span class="st">"A simulated three-layer raster in open ocean."</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/simulated"</span>: 40,000 cells in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  686.5 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  701.1 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p><code><a href="../reference/store_read.html">store_read()</a></code> opens the raster through GDAL.
 <code>intersects</code> crops it to the query’s bounding box, rounded
@@ -688,7 +703,7 @@ outwards to whole cells.</p>
 <span><span class="co">#&gt; extent      : -28.02, -27, 6.99, 8.01  (xmin, xmax, ymin, ymax)</span></span>
 <span><span class="co">#&gt; coord. ref. : lon/lat WGS 84 (EPSG:4326)</span></span>
 <span><span class="co">#&gt; source(s)   : memory</span></span>
-<span><span class="co">#&gt; varname     : part-a2f2827357463723</span></span>
+<span><span class="co">#&gt; varname     : part-457765626da59c3a</span></span>
 <span><span class="co">#&gt; names       :      height, cover, moisture</span></span>
 <span><span class="co">#&gt; min values  : -101.836024,     1,   0.0011</span></span>
 <span><span class="co">#&gt; max values  :  103.103297,     5,   0.9989</span></span></code></pre></div>
@@ -697,6 +712,287 @@ replaced. Filters, <code>columns</code>, <code>geometry</code> and
 <code>exact</code> do not apply to rasters, and
 <code><a href="../reference/store_open.html">store_open()</a></code> and <code><a href="../reference/store_sample.html">store_sample()</a></code> refuse
 them.</p>
+<div class="section level3">
+<h3 id="class-maps-legend-colours-and-nodata">Class maps: legend, colours and nodata<a class="anchor" aria-label="anchor" href="#class-maps-legend-colours-and-nodata"></a>
+</h3>
+<p>A class map holds whole numbers that stand for classes, such as land
+cover. Three things belong to it besides the cells: the <em>legend</em>
+(which label each code has), the <em>colours</em> of the classes, and
+the value that means “no data”. The package stores the codes in the file
+and the rest in the catalog, and a read puts them together again. The
+steps below go from a map to a read of one window of it.</p>
+<p><strong>1. Build or open the map.</strong> The layer
+<code>cover</code> of the simulated raster serves as one here: five
+classes, with a band of <code>0</code> around the edge for “outside the
+map”. <code><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">terra::as.int()</a></code> makes the cells integers; doubles
+would be stored as doubles (<code>FLT8S</code>). A map of your own is
+opened with <code>terra::rast("landcover.tif")</code> instead (see
+“Large maps” below).</p>
+<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">codes</span> <span class="op">&lt;-</span> <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">as.int</a></span><span class="op">(</span><span class="va">grid</span><span class="op">[[</span><span class="st">"cover"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span>
+<span><span class="va">codes</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span>, <span class="fl">199</span><span class="op">:</span><span class="fl">200</span><span class="op">)</span>, <span class="op">]</span> <span class="op">&lt;-</span> <span class="fl">0L</span></span>
+<span><span class="va">codes</span><span class="op">[</span>, <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span>, <span class="fl">199</span><span class="op">:</span><span class="fl">200</span><span class="op">)</span><span class="op">]</span> <span class="op">&lt;-</span> <span class="fl">0L</span></span></code></pre></div>
+<p><strong>2. Set the legend and the colours.</strong> The legend is a
+data frame with the codes in the first column and the labels in the
+second, given with <code>levels&lt;-</code>. That call renames the layer
+to the label column, so the name is set again after it. The colours are
+a data frame of codes and colours, given with
+<code>terra::coltab&lt;-</code>.</p>
+<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">cover_legend</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  value <span class="op">=</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span>,</span>
+<span>  label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"water"</span>, <span class="st">"forest"</span>, <span class="st">"crop"</span>, <span class="st">"grass"</span>, <span class="st">"bare"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">cover_colours</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
+<span>  value <span class="op">=</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span>,</span>
+<span>  col <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"#1F78B4"</span>, <span class="st">"#33A02C"</span>, <span class="st">"#FFD92F"</span>, <span class="st">"#B2DF8A"</span>, <span class="st">"#B15928"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="va">cover</span> <span class="op">&lt;-</span> <span class="va">codes</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/levels.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">cover_legend</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="st">"cover"</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/colors.html" class="external-link">coltab</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">cover_colours</span></span></code></pre></div>
+<p><strong>3. Write it.</strong> <code>nodata = 0</code> declares that
+<code>0</code> is not a class: cells that hold it are missing when the
+map is read.</p>
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">cover</span>, <span class="st">"grids/cover"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Land cover"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"A simulated class map in open ocean."</span>,</span>
+<span>  nodata <span class="op">=</span> <span class="fl">0</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 40,000 cells in 1 file.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  4.7 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
+<p><strong>4. Look at what was recorded.</strong>
+<code><a href="../reference/store_describe.html">store_describe()</a></code> shows one row per layer: the data type of
+the file (<code>INT1U</code>, one byte per cell), the size, the nodata
+value and the number of classes.</p>
+<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">described</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_describe.html">store_describe</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span><span class="op">)</span></span>
+<span><span class="va">described</span><span class="op">$</span><span class="va">columns</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 4</span></span></span>
+<span><span class="co">#&gt;   name  type  r_type                                              description</span></span>
+<span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                               <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>      </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> cover INT1U raster layer (200 x 200 cells, nodata 0, 5 classes) <span style="color: #BB0000;">NA</span></span></span></code></pre></div>
+<p>The full record of the layer is in the catalog entry, as JSON: the
+resolution and the dimensions, the nodata value, the legend
+(<code>values</code>, <code>levels</code>, <code>levels_name</code>) and
+the colours (<code>color_values</code>, <code>colors</code>). The same
+text is in the dataset’s manifest, the JSON file next to the data (field
+<code>columns</code> of its <code>entry</code>), so other tools can read
+the legend without R.</p>
+<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">record</span> <span class="op">&lt;-</span> <span class="fu">jsonlite</span><span class="fu">::</span><span class="fu"><a href="https://rdrr.io/pkg/jsonlite/man/fromJSON.html" class="external-link">fromJSON</a></span><span class="op">(</span><span class="va">described</span><span class="op">$</span><span class="va">entry</span><span class="op">$</span><span class="va">columns</span>, simplifyDataFrame <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/utils/str.html" class="external-link">str</a></span><span class="op">(</span><span class="va">record</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">$</span><span class="va">r_type</span><span class="op">)</span></span>
+<span><span class="co">#&gt; List of 9</span></span>
+<span><span class="co">#&gt;  $ class       : chr "SpatRaster"</span></span>
+<span><span class="co">#&gt;  $ resolution  : num [1:2] 0.03 0.015</span></span>
+<span><span class="co">#&gt;  $ dim         : int [1:2] 200 200</span></span>
+<span><span class="co">#&gt;  $ nodata      : int 0</span></span>
+<span><span class="co">#&gt;  $ values      : int [1:5] 1 2 3 4 5</span></span>
+<span><span class="co">#&gt;  $ levels      : chr [1:5] "water" "forest" "crop" "grass" ...</span></span>
+<span><span class="co">#&gt;  $ levels_name : chr "label"</span></span>
+<span><span class="co">#&gt;  $ color_values: int [1:5] 1 2 3 4 5</span></span>
+<span><span class="co">#&gt;  $ colors      : chr [1:5] "#1F78B4FF" "#33A02CFF" "#FFD92FFF" "#B2DF8AFF" ...</span></span></code></pre></div>
+<p><strong>5. Read the whole map.</strong> <code><a href="../reference/store_read.html">store_read()</a></code>
+returns a <code>SpatRaster</code> that points to the stored file, with
+its categories and its colour table set again. The edge cells are
+missing.</p>
+<div class="sourceCode" id="cb34"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">map</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span><span class="op">)</span></span>
+<span><span class="va">map</span></span>
+<span><span class="co">#&gt; class       : SpatRaster</span></span>
+<span><span class="co">#&gt; size        : 200, 200, 1  (nrow, ncol, nlyr)</span></span>
+<span><span class="co">#&gt; resolution  : 0.03, 0.015  (x, y)</span></span>
+<span><span class="co">#&gt; extent      : -30, -24, 6, 9  (xmin, xmax, ymin, ymax)</span></span>
+<span><span class="co">#&gt; coord. ref. : lon/lat WGS 84 (EPSG:4326)</span></span>
+<span><span class="co">#&gt; source      : part-12e566b97094f119.tif</span></span>
+<span><span class="co">#&gt; color table : 1</span></span>
+<span><span class="co">#&gt; categories  : label</span></span>
+<span><span class="co">#&gt; name        : cover</span></span>
+<span><span class="co">#&gt; min value   : water</span></span>
+<span><span class="co">#&gt; max value   :  bare</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/factors.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">map</span><span class="op">)</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span></span>
+<span><span class="co">#&gt;   value  label</span></span>
+<span><span class="co">#&gt; 1     1  water</span></span>
+<span><span class="co">#&gt; 2     2 forest</span></span>
+<span><span class="co">#&gt; 3     3   crop</span></span>
+<span><span class="co">#&gt; 4     4  grass</span></span>
+<span><span class="co">#&gt; 5     5   bare</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/colors.html" class="external-link">coltab</a></span><span class="op">(</span><span class="va">map</span><span class="op">)</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span></span>
+<span><span class="co">#&gt;   values red green blue alpha</span></span>
+<span><span class="co">#&gt; 1      1  31   120  180   255</span></span>
+<span><span class="co">#&gt; 2      2  51   160   44   255</span></span>
+<span><span class="co">#&gt; 3      3 255   217   47   255</span></span>
+<span><span class="co">#&gt; 4      4 178   223  138   255</span></span>
+<span><span class="co">#&gt; 5      5 177    89   40   255</span></span>
+<span><span class="va">map</span><span class="op">[</span><span class="fl">1</span>, <span class="fl">1</span><span class="op">]</span></span>
+<span><span class="co">#&gt;   cover</span></span>
+<span><span class="co">#&gt; 1  &lt;NA&gt;</span></span></code></pre></div>
+<p><strong>6. Read a window.</strong> <code>intersects</code> reads only
+the cells inside the query’s bounding box, rounded outwards to whole
+cells. From a bucket they are read through GDAL, and the file is not
+downloaded as a whole. The window keeps the legend and the colours, so
+counts come with labels and a plot with the colours of the classes.</p>
+<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">window</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span>, intersects <span class="op">=</span> <span class="va">area</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/dim.html" class="external-link">dim</a></span><span class="op">(</span><span class="va">window</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] 68 34  1</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/freq.html" class="external-link">freq</a></span><span class="op">(</span><span class="va">window</span><span class="op">)</span></span>
+<span><span class="co">#&gt;   layer  value count</span></span>
+<span><span class="co">#&gt; 1     1  water   394</span></span>
+<span><span class="co">#&gt; 2     1 forest   429</span></span>
+<span><span class="co">#&gt; 3     1   crop   649</span></span>
+<span><span class="co">#&gt; 4     1  grass   441</span></span>
+<span><span class="co">#&gt; 5     1   bare   399</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/plot.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">window</span><span class="op">)</span></span></code></pre></div>
+<p><img src="geospatial_files/figure-html/unnamed-chunk-35-1.png" class="r-plt" alt="A map of the window: cells in five colours, with a legend naming the classes water, forest, crop, grass and bare." width="576"></p>
+<p>The rules behind these steps:</p>
+<p><strong>Data type.</strong> All layers of a raster get one data type.
+A raster read from a file keeps the type of that file: a Byte map stays
+<code>INT1U</code>, with no pass over its cells. The exception is a
+layer with a scale or an offset, whose values are not the stored
+numbers: its type comes from the values, like that of a raster in
+memory. Other whole numbers get the smallest integer type that holds the
+values and the nodata value, which is why the class map above takes one
+byte per cell. Anything else is stored as <code>FLT8S</code>; doubles
+are narrowed to single precision only when
+<code>datatype = "FLT4S"</code> asks for it. <code>datatype</code> sets
+the type directly, and the write stops when the values do not fit.</p>
+<p><strong>Nodata.</strong> The value that marks missing cells is, in
+this order: the argument <code>nodata</code>; a flag set in the session
+with <code>terra::NAflag(x) &lt;-</code> on a raster read from a file (a
+raster in memory keeps no flag; the cells are simply missing); the
+NoData tag of the source file; and otherwise the default of the integer
+type (<code>255</code> for <code>INT1U</code>). That default is written
+when the type was chosen from the values; for a type kept from the file
+or given with <code>datatype</code>, only when cells are missing. So a
+Byte file without a tag whose <code>0</code> means “outside the map”
+gets no nodata value unless <code>nodata = 0</code> is given. The float
+types get none: their missing cells are <code>NaN</code>. Cells that
+hold the nodata value read back as missing, as the edge above does.</p>
+<p><strong>Legend and colours.</strong> Codes must be whole numbers and
+every code needs a label; otherwise the write stops. When the legend has
+more columns than codes and labels, the labels in use
+(<code><a href="https://rspatial.github.io/terra/reference/activeCat.html" class="external-link">terra::activeCat()</a></code>) are stored and a message names the
+columns left out. With a legend, the colours of the legend’s codes are
+stored. A colour table without a legend is stored whole; one that comes
+from a file has 256 rows, one for each code from 0 to 255 (a code
+without a colour is black, or transparent when it is the file’s NoData
+value), so set the legend to keep only the classes. The legend and the
+colours do not change the file: the same cells with and without them
+give the same version. Writing the same cells with another legend or
+other colours keeps the version, sends no file and replaces the legend
+and the colours recorded for that version; the earlier ones are not
+kept.</p>
+<p><strong>File options.</strong> Only Cloud Optimized GeoTIFFs are
+written, with options that suit reads from a bucket:
+<code>COMPRESS=DEFLATE</code>, <code>PREDICTOR=2</code> for the integer
+types and <code>PREDICTOR=3</code> for the float types,
+<code>BLOCKSIZE=512</code>, <code>BIGTIFF=IF_SAFER</code>, and overviews
+built anew (<code>OVERVIEWS=IGNORE_EXISTING</code>) with
+<code>OVERVIEW_RESAMPLING=NEAREST</code> for the integer types and
+<code>AVERAGE</code> for the float types. <code>gdal</code> replaces a
+default of the same key and adds other options of GDAL’s COG driver,
+here ZSTD compression:</p>
+<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">grid</span>, <span class="st">"grids/simulated_zstd"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Simulated raster, ZSTD"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"A simulated three-layer raster in open ocean."</span>,</span>
+<span>  gdal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"COMPRESS=ZSTD"</span>, <span class="st">"LEVEL=9"</span><span class="op">)</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/simulated_zstd"</span>: 40,000 cells in 1 file.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  673.7 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
+</div>
+<div class="section level3">
+<h3 id="large-maps">Large maps<a class="anchor" aria-label="anchor" href="#large-maps"></a>
+</h3>
+<p>Write a large map straight from its file. A raster opened with
+<code>terra::rast(file)</code> and not changed is copied by GDAL from
+that file: its cells never pass through R, and the data type of the file
+is kept. The legend and the colours can still be set, because they do
+not touch the cells. A small file stands in for a national map here; it
+marks <code>0</code> as NoData itself.</p>
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">file</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir</a></span><span class="op">(</span><span class="op">)</span>, <span class="st">"geo-landcover.tif"</span><span class="op">)</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/writeRaster.html" class="external-link">writeRaster</a></span><span class="op">(</span><span class="va">codes</span>, <span class="va">file</span>, datatype <span class="op">=</span> <span class="st">"INT1U"</span>, NAflag <span class="op">=</span> <span class="fl">0</span>, overwrite <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="va">big</span> <span class="op">&lt;-</span> <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/rast.html" class="external-link">rast</a></span><span class="op">(</span><span class="va">file</span><span class="op">)</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/levels.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">big</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">cover_legend</span></span>
+<span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">big</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="st">"cover"</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/colors.html" class="external-link">coltab</a></span><span class="op">(</span><span class="va">big</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">cover_colours</span></span>
+<span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">st</span>, <span class="va">big</span>, <span class="st">"grids/cover_from_file"</span>,</span>
+<span>  title <span class="op">=</span> <span class="st">"Land cover, from a file"</span>,</span>
+<span>  description <span class="op">=</span> <span class="st">"A simulated class map in open ocean, written from a GeoTIFF."</span></span>
+<span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover_from_file"</span>: 40,000 cells in 1 file.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  4.7 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span>
+<span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/datatype.html" class="external-link">datatype</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover_from_file"</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="co">#&gt; [1] "INT1U"</span></span></code></pre></div>
+<ul>
+<li>
+<strong>Give <code>nodata</code> when the file has no NoData
+tag.</strong> Many class maps hold <code>0</code> for “outside” without
+saying so; <code>nodata = 0</code> says it. A tag the file has is kept
+when <code>nodata</code> is not given, as above.</li>
+<li>
+<strong>Keep the raster as <code>terra::rast(file)</code> returns
+it.</strong> GDAL copies the file only when the raster is all the layers
+of one file, with the file’s layer names, extent and CRS, and when the
+file’s own NoData tag, if it has one, is the value written. A crop, a
+calculation, other layer names, a subset of the layers, several files,
+or a scale or an offset in the file make terra write the map instead.
+The result is right either way; the difference is time and room on
+disk.</li>
+<li>
+<strong>Do not load a large map into memory.</strong> A map in
+memory needs RAM for all its cells, which terra holds as doubles (eight
+bytes per cell, whatever the type of the file), and it is written by
+terra.</li>
+<li>
+<strong>Room on disk.</strong> The file is first written on the
+local disk, below <code>getOption("rcs.staging_dir")</code> (default
+<code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir()</a></code>), and then uploaded. On a simulated map of 25,000
+× 25,000 cells of one byte, the staging folder held at most about 1.4
+times the size of the output when GDAL copied the file, and about 3.6
+times when terra wrote it, because terra first writes an intermediate
+file for a raster too large for memory. For a raster read from files,
+the write warns when that drive has less free room than twice the size
+of the source files; it never stops the write. Point
+<code>options(rcs.staging_dir = )</code> to a larger drive when
+needed.</li>
+<li>
+<strong>Read windows.</strong>
+<code>store_read(st, "name", intersects = area)</code> reads the part of
+the map you need; <code>store_read(st, "name")</code> only opens the
+file, and cells are read when a calculation asks for them.</li>
+<li>
+<strong>Every location gets the map.</strong> A write lands in the
+primary and in every secondary location of the connection. A dataset
+cannot yet be kept in the primary only.</li>
+</ul>
+</div>
+<div class="section level3">
+<h3 id="what-is-not-stored">What is not stored<a class="anchor" aria-label="anchor" href="#what-is-not-stored"></a>
+</h3>
+<ul>
+<li>A style file next to the map, such as a QGIS <code>.qml</code>:
+colours are taken only from the raster’s colour table
+(<code><a href="https://rspatial.github.io/terra/reference/colors.html" class="external-link">terra::coltab()</a></code>).</li>
+<li>The columns of a category table other than the codes and the labels
+in use. A message names them.</li>
+<li>The time and the units of layers (<code><a href="https://rspatial.github.io/terra/reference/time.html" class="external-link">terra::time()</a></code>,
+<code><a href="https://rspatial.github.io/terra/reference/units.html" class="external-link">terra::units()</a></code>).</li>
+<li>Side files (<code>.aux.xml</code>, <code>.aux.json</code>): a raster
+dataset is one <code>.tif</code> file and its manifest.</li>
+<li>The creation options: they are in the file, not in the catalog.</li>
+</ul>
+<p>A raster written with a version of the package before 0.0.0.9005 gets
+a new version when it is written again, even with unchanged cells,
+because the bytes of the file differ.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="shapes-across-the-antimeridian-or-around-a-pole">Shapes across the antimeridian or around a pole<a class="anchor" aria-label="anchor" href="#shapes-across-the-antimeridian-or-around-a-pole"></a>

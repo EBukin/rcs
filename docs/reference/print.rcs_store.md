@@ -53,7 +53,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-print/primary  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 print(st)
 #> ── rcs store ───────────────────────────────────────────────────────────────────
@@ -63,6 +63,6 @@ print(st)
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.7 kB      2  2026-11-22 10:51
+#>     daily  table   100  23.8 kB      2  2026-11-27 13:56
 unlink(root, recursive = TRUE)
 ```

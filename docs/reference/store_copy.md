@@ -63,7 +63,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-copy/primary  2/2
-#>   files sent  23.7 kB  0.2s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 st <- store_connect(file.path(root, "primary"),
   secondary = file.path(root, "copy")
@@ -71,10 +71,10 @@ st <- store_connect(file.path(root, "primary"),
 store_copy(st, "sales/daily",
   from = file.path(root, "primary"), to = file.path(root, "copy")
 )
-#> ℹ Copying "sales/daily" (version bf16efd1aebea856, 2 files) from
+#> ℹ Copying "sales/daily" (version 0f9e01793cbea58a, 2 files) from
 #>   /tmp/Rtmp/rcs-example-copy/primary to
 #>   /tmp/Rtmp/rcs-example-copy/copy.
-#> ✔ 2/2 files sent (23.7 kB) in 0.3s, MD5 verified. Catalogs of
+#> ✔ 2/2 files sent (23.8 kB) in 0.2s, MD5 verified. Catalogs of
 #>   /tmp/Rtmp/rcs-example-copy/copy updated.
 store_status(st)
 #> Source: /tmp/Rtmp/rcs-example-copy/primary
@@ -82,7 +82,7 @@ store_status(st)
 #> # A tibble: 1 × 8
 #>   dataset     location status newer primary_version  location_version
 #>   <chr>       <chr>    <chr>  <chr> <chr>            <chr>           
-#> 1 sales/daily [1]      same   NA    bf16efd1aebea856 bf16efd1aebea856
+#> 1 sales/daily [1]      same   NA    0f9e01793cbea58a 0f9e01793cbea58a
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
 unlink(root, recursive = TRUE)
 ```

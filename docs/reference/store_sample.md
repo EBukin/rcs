@@ -49,7 +49,7 @@ store_sample(
   Columns to return, as in
   [`dplyr::select()`](https://dplyr.tidyverse.org/reference/select.html)
   (tidyselect); `NULL` for all. The geometry column is controlled by
-  `geometry`.
+  `geometry`. A raster has no column selection.
 
 - seed:
 
@@ -93,7 +93,7 @@ store_write(st, rcs_sim_table(2000), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 2,000 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-sample  2/2
-#>   files sent  89.0 kB  0.2s
+#>   files sent  89.1 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_sample(st, "sales/daily", n = 5, qty > 10, seed = 42)
 #> # A tibble: 5 × 15

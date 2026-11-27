@@ -91,18 +91,37 @@ a lazy DuckDB table (anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, e.g
 required for such a table, ignored otherwise (an \code{sf} object carries
 its own).}
 
-\item{datatype}{For a raster: \code{NULL} to keep the source's data type or
-choose the smallest one that holds the values, or one of \code{"INT1U"},
-\code{"INT2U"}, \code{"INT2S"}, \code{"INT4U"}, \code{"INT4S"}, \code{"FLT4S"}, \code{"FLT8S"} (see
-"Rasters"). Aborts for any other data.}
+\item{datatype}{For a raster: the data type of the file, one for all
+layers. \code{NULL} (the default) keeps the type of the file the raster was
+read from; a raster that is not read from a file gets the smallest
+integer type that holds its values when they are whole numbers, else
+\code{"FLT8S"}. Or one of \code{"INT1U"}, \code{"INT2U"}, \code{"INT2S"}, \code{"INT4U"},
+\code{"INT4S"}, \code{"FLT4S"}, \code{"FLT8S"}; the write aborts when the values do
+not fit an integer type given. See "Rasters". Aborts for any other
+data.}
 
-\item{nodata}{For a raster: \code{NULL}, or the one number that marks missing
-cells in the file. Cells holding it are missing when read back (see
-"Rasters"). Aborts for any other data.}
+\item{nodata}{For a raster: the one number that marks missing cells in
+the file. Cells holding it are missing when read back, so \code{nodata = 0}
+declares that \code{0} is not a value of the map. \code{NULL} (the default)
+uses, in this order: a flag set with \verb{terra::NAflag(x) <- } on a
+raster read from files (a raster in memory keeps no flag: its cells
+become missing at once); the NoData tag of the source file; for an
+integer type its default (\code{255}
+for \code{INT1U}, \code{65535} for \code{INT2U}, \code{-32768} for \code{INT2S}, \code{4294967295}
+for \code{INT4U}, \code{-2147483648} for \code{INT4S}), which a type kept from the
+file or given with \code{datatype} gets only when cells are missing; none
+for a float type, whose missing cells are \code{NaN}. A Byte file without a
+tag whose \code{0} means "outside the map" therefore gets no NoData value
+unless \code{nodata = 0} is given. See "Rasters". Aborts for any other
+data.}
 
 \item{gdal}{For a raster: \code{NULL}, or a character vector of \code{KEY=VALUE}
-creation options of GDAL's COG driver, which replace the defaults by
-key (see "Rasters"). Aborts for any other data.}
+creation options of GDAL's COG driver, e.g.
+\code{c("COMPRESS=ZSTD", "LEVEL=9")}. An option replaces the default of the
+same key (\code{COMPRESS=DEFLATE}, \code{PREDICTOR=2} or \code{3}, \code{BLOCKSIZE=512},
+\code{BIGTIFF=IF_SAFER}, \code{OVERVIEWS=IGNORE_EXISTING},
+\code{OVERVIEW_RESAMPLING=NEAREST} or \code{AVERAGE}); other options are added.
+See "Rasters". Aborts for any other data.}
 }
 \value{
 A tibble with one row per location, invisibly: \code{location},
@@ -147,80 +166,154 @@ it has a column \code{geometry} (see "DuckDB input").
 
 \section{Rasters}{
 
-A \code{SpatRaster} is written as one Cloud Optimized GeoTIFF. All its layers
-get one data type and one NoData value, as a GeoTIFF requires.
+A \code{SpatRaster} is written as one Cloud Optimized GeoTIFF (COG), the only
+raster format: a reader can fetch a part of it without the rest, also
+from a bucket. The raster needs a CRS, cell values and unique layer
+names.
+
+\strong{What is stored where.} The file holds the cell values only; for a
+class map, the codes. What describes them is recorded per layer in the
+catalog and in the dataset's manifest: the data type, the NoData value
+(\code{nodata}), the resolution and the dimensions (\code{resolution}, \code{dim}), the
+legend of a categorical layer (\code{values}, \code{levels}, \code{levels_name}) and
+its colours (\code{color_values}, \code{colors}). \code{\link[=store_read]{store_read()}} returns the
+raster with its categories and colours set again, and
+\code{\link[=store_describe]{store_describe()}} shows the record. No side file (\code{.aux.xml},
+\code{.aux.json}) is written.
 \itemize{
-\item \strong{Data type.} \code{datatype}, when given: one of \code{"INT1U"}, \code{"INT2U"},
-\code{"INT2S"}, \code{"INT4U"}, \code{"INT4S"}, \code{"FLT4S"}, \code{"FLT8S"}; an integer type
-needs whole numbers inside its range, else the write aborts. Otherwise
-a raster read from files keeps the type of its source (a Byte map stays
-\code{INT1U}, an \code{FLT4S} file stays \code{FLT4S}); the type is then found with no
-pass over the cells. This does not hold for a raster with a scale or an
-offset (in the file or set with \code{terra::scoff()}), whose values are not
-the stored numbers. Otherwise whole numbers get the smallest integer
-type that holds them and the nodata value,
-and anything else \code{FLT8S}: doubles in memory are never narrowed to
-\code{FLT4S} unless \code{datatype = "FLT4S"} asks for it (it rounds them to
-single precision).
-\item \strong{NoData.} \code{nodata}, when given: one number the data type can hold.
+\item \strong{Data type} (\code{datatype}). All layers get one type, as a GeoTIFF
+requires. With \code{datatype = NULL}, the first rule that applies:
+\enumerate{
+\item A raster read from files, with its cells still on disk, keeps the
+type of its source: a Byte map stays \code{INT1U}, an \code{FLT4S} file
+stays \code{FLT4S}. No pass over the cells is needed. This rule is
+skipped when the layers have different types, and for a raster
+with a scale or an offset (in the file, or set with
+\code{terra::scoff()}), whose values are not the stored numbers.
+\item Whole numbers get the smallest of \code{INT1U}, \code{INT2U}, \code{INT2S},
+\code{INT4U}, \code{INT4S} that holds the values and the NoData value: codes
+1 to 5 with \code{nodata = 0} take one byte per cell. Whole numbers
+are integer layers (\code{terra::is.int()}) and categorical layers;
+doubles that happen to be whole are not, so convert them with
+\code{terra::as.int()} first.
+\item Anything else is \code{FLT8S}. Doubles are never narrowed to \code{FLT4S}
+unless \code{datatype = "FLT4S"} asks for it (it rounds them to single
+precision).
+}
+
+A \code{datatype} given is used as it is. An integer type needs whole
+numbers inside its range, else the write aborts.
+\item \strong{NoData} (\code{nodata}). One value marks the missing cells of all layers.
 Cells that hold this value are missing when read back; this is how a
-map whose \code{0} means "outside the map" is written (\code{nodata = 0}).
-Otherwise the value is a flag set in the session
-(\verb{terra::NAflag(x) <- }), else the NoData tag of the source file;
-layers that differ abort and ask for \code{nodata}. The tag of a source is
-not used for a layer with a scale or an offset, whose values are not
-the stored numbers the tag refers to. Otherwise an integer
-type chosen from the values gets its default value (\code{255} for \code{INT1U},
-\code{65535} for \code{INT2U}, \code{-32768} for \code{INT2S}, \code{4294967295} for \code{INT4U},
-\code{-2147483648} for \code{INT4S}), an integer type given or kept from the
-source gets it only when cells are missing (found by one pass over the
-cells, made only in this case), and a float type gets none: its missing
-cells are \code{NaN}.
-\item \strong{Creation options.} The defaults suit reads from a bucket:
+map whose \code{0} means "outside the map" is written (\code{nodata = 0}). With
+\code{nodata = NULL}, the first rule that applies:
+\enumerate{
+\item A flag set in the session on a raster read from files
+(\verb{terra::NAflag(x) <- }). On a raster in memory terra applies the
+flag at once, the cells become missing, and no flag is left: the
+rules below then apply.
+\item The NoData tag of the source file. It is not used for a layer
+with a scale or an offset, whose values are not the stored
+numbers the tag refers to.
+\item For an integer type chosen from the values (rule 2 of "Data
+type"), the default of the type: \code{255} for \code{INT1U}, \code{65535} for
+\code{INT2U}, \code{-32768} for \code{INT2S}, \code{4294967295} for \code{INT4U},
+\code{-2147483648} for \code{INT4S}. The type is chosen so that no cell
+holds that value: values up to 254 fit \code{INT1U}, and with 255
+among them the type is \code{INT2U}.
+\item For an integer type kept from the source or given with
+\code{datatype}, the same default, but only when cells are missing
+(found by one pass over the cells, made only in this case). The
+write aborts when a cell holds that value; give \code{nodata} then.
+Without missing cells the file has no NoData value: a Byte file
+without a tag whose \code{0} means "outside the map" gets none unless
+\code{nodata = 0} is given.
+\item A float type has none: its missing cells are \code{NaN}.
+}
+
+Layers whose flags or tags differ abort and ask for \code{nodata}. A
+\code{nodata} that the data type cannot hold aborts.
+\item \strong{Creation options} (\code{gdal}). The defaults suit reads from a bucket:
 \code{COMPRESS=DEFLATE}, \code{PREDICTOR=2} (integer types) or \code{PREDICTOR=3}
 (float types), \code{BLOCKSIZE=512}, \code{BIGTIFF=IF_SAFER}, and overviews
 built anew, never copied from a source file
 (\code{OVERVIEWS=IGNORE_EXISTING}), with \code{OVERVIEW_RESAMPLING=NEAREST}
-(integer types) or \code{AVERAGE} (float types). \code{gdal} replaces a default of the same key and adds other keys
-of GDAL's COG driver, e.g. \code{gdal = c("COMPRESS=ZSTD", "LEVEL=9")}; keys
-are compared in upper case, a key given twice aborts, and the order
-given does not change the file. The options are kept in the file, not
-in the catalog.
-\item \strong{Categorical layers.} The codes are written to the file, and the
-legend (the codes with the labels of the active category, see
-\code{terra::activeCat()}) is recorded in the catalog; \code{\link[=store_read]{store_read()}}
-returns the layer with its categories. Other columns of the category
-table are dropped, with a message. Codes must be whole numbers and
-every code needs a label. No side file (\code{.aux.xml}) is written, and the
-same cells with and without a legend give the same file and version.
-\item \strong{Time and units.} The time and the units of layers (\code{terra::time()},
-\code{terra::units()}) are not stored: the file is written without them, so
-they change neither the file nor the version, and no side file
-(\code{.aux.json}) is written; \code{x} itself keeps them. Only metadata that a
-source file holds itself may be copied with it when GDAL copies the
-file (see "Staging" below).
-\item \strong{Staging.} A raster that is an unchanged view of one file without a
-scale or an offset (as \code{terra::rast(file)} returns it) is copied by
-GDAL without an intermediate file; any other raster (in memory,
-computed, cropped, renamed, a subset of layers, several files, with a
-scale or an offset, or with another CRS or NoData flag than the file)
-is written by terra, which
-first writes an intermediate file of two to three times the output
-when the raster is too large for memory. Every temporary file lies
-below \code{getOption("rcs.staging_dir")} (default \code{\link[=tempdir]{tempdir()}}), which
-needs free room of about one and a half times the output for a file
-copied by GDAL, and of about four times the output for a large raster
-written by terra. For a raster read from files, the write warns (class
-\code{rcs_warning_staging_space}) when that drive has less free room than
-twice the size of the source files (the ps package tells the free
-room; without it there is no check), and goes on; a raster in memory
-is not checked.
+(integer types) or \code{AVERAGE} (float types). \code{gdal} is a character
+vector of \code{KEY=VALUE} options of GDAL's COG driver, e.g.
+\code{gdal = c("COMPRESS=ZSTD", "LEVEL=9")}: a key that has a default
+replaces it, other keys are added. Keys are compared in upper case, a
+key given twice aborts, and the order given does not change the file.
+The options are kept in the file, not in the catalog.
+\item \strong{Legend of a class map.} A categorical layer is one with a category
+table, set with \code{levels(x) <- data.frame(value = , label = )}: the
+codes in the first column, their labels in the second. \verb{levels<-}
+renames the layer to the label column, so set \code{names(x)} after it.
+The codes are written to the file; the legend is recorded as \code{values}
+(the codes, sorted), \code{levels} (their labels) and \code{levels_name} (the
+name of the label column). Codes must be whole numbers and every code
+needs a label, else the write aborts. Of a category table with
+several label columns, only the active one (\code{terra::activeCat()}) is
+kept; the others are dropped, with a message.
+\item \strong{Colours.} The colour table of a layer, set with
+\code{terra::coltab(x) <- data.frame(value = , col = )}, is recorded as
+\code{color_values} (the codes, sorted) and \code{colors} (\verb{#RRGGBBAA}). With a
+legend, only the colours of the legend's codes are kept. Without a
+legend every row of the colour table is kept; a colour table read
+from a file has 256 rows (the codes 0 to 255; a code without a colour
+is black, or transparent when it is the file's NoData value), and all
+256 are recorded. Colours come from the raster
+only: a style file such as a QGIS \code{.qml} is not read.
+\item \strong{Not stored.} The time and the units of layers (\code{terra::time()},
+\code{terra::units()}), and the columns of a category table other than the
+codes and the active labels. The file is written without categories,
+colour table, time and units; \code{x} itself is never changed. Only other
+metadata that a source file holds itself may be copied with it when
+GDAL copies the file (next point).
+\item \strong{Two ways to write, and the room they need.} The file is first
+written on the local disk, in the staging folder
+\code{getOption("rcs.staging_dir")} (default \code{\link[=tempdir]{tempdir()}}), and then
+uploaded. Every temporary file lies below that folder.
+\itemize{
+\item A raster opened with \code{terra::rast(file)} and not changed in the
+session is copied by GDAL straight from its file, with no
+intermediate file. On a simulated map of 25,000 x 25,000 cells
+the staging folder held at most about 1.4 times the size of the
+output. "Not changed" means: all layers of one file in their
+order, with the file's layer names, extent and CRS, and no NoData
+flag or tag other than the value written. Setting a legend (and
+the layer name again) or colours is not a change. A file with a
+scale or an offset is not copied by GDAL.
+\item Any other raster is written by terra: one in memory, computed,
+cropped, renamed, a subset of the layers, from several files,
+with a scale or an offset, or with another CRS or NoData value
+than its file. For a large raster terra first writes an
+intermediate file; on the same map the staging folder then held
+about 3.6 times the size of the output. A raster held in memory
+also needs RAM for all its cells, so write a large map from its
+file.
+}
+
+For a raster read from files, the write warns (class
+\code{rcs_warning_staging_space}) when the drive of the staging folder has
+less free room than twice the size of the source files, and goes on.
+The ps package tells the free room; without it, and for a raster in
+memory, there is no check. \code{options(rcs.staging_dir = )} moves the
+staging to another drive.
 }
 
 The same raster written with the same arguments gives the same file and
-the same version. A raster written with a version of the package before
-\verb{0.0.0.9005} gets a new version when it is written again, even with
-unchanged cells: the bytes of the file differ.
+the same version. The legend, the colours, the time and the units do
+not change the file: the same cells with and without them give the same
+version, and only the catalog entry differs. Writing the same cells
+with another legend or other colours keeps the version, sends no file
+and replaces the legend and the colours recorded for that version; the
+earlier ones are not kept. A \code{datatype}, \code{nodata} or \code{gdal} gives
+another file and another version only when it changes the file:
+\code{nodata = 0} for a source file already tagged \code{0}, or an option equal
+to its default, gives the same one. The two ways of writing may give
+different bytes for the same cells. A raster written with a version of
+the package before \verb{0.0.0.9005} gets a new version when it is written
+again, even with unchanged cells: the bytes of the file differ.
 }
 
 \section{DuckDB input}{
@@ -401,6 +494,41 @@ store_write(st, year_2024, "sales/daily",
   mode = "update"
 )
 st
+
+# A class map: the codes go into the file, the legend and the colours
+# into the catalog. `nodata = 0`: cells holding 0 are outside the map.
+if (requireNamespace("terra", quietly = TRUE)) {
+  cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+  cover[1:2, ] <- 0L
+  levels(cover) <- data.frame(
+    value = 1:5,
+    label = c("water", "forest", "crop", "grass", "bare")
+  )
+  names(cover) <- "cover" # `levels<-` renamed the layer
+  terra::coltab(cover) <- data.frame(
+    value = 1:5,
+    col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+  )
+  store_write(st, cover, "grids/cover",
+    title = "Land cover", description = "A simulated class map.",
+    nodata = 0
+  )
+  # One byte per cell, the NoData value and the number of classes
+  print(store_describe(st, "grids/cover")$columns)
+
+  # A large map is best written straight from its file: the data type
+  # and the NoData tag of the file are kept. `gdal` changes the
+  # compression here.
+  file <- file.path(root, "cover.tif")
+  terra::writeRaster(cover, file, datatype = "INT1U", NAflag = 0)
+  store_write(st, terra::rast(file), "grids/cover_zstd",
+    title = "Land cover, ZSTD", description = "A simulated class map.",
+    gdal = c("COMPRESS=ZSTD", "LEVEL=9")
+  )
+  # The label column is named `cover` here, not `label`:
+  # `terra::writeRaster()` named it after the layer
+  print(terra::levels(store_read(st, "grids/cover_zstd"))[[1]])
+}
 unlink(root, recursive = TRUE)
 }
 \seealso{

@@ -17,7 +17,7 @@ version."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9001</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -97,7 +97,10 @@ version.</p>
 <span>  columns <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  check <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  rows_per_group <span class="op">=</span> <span class="fl">50000L</span>,</span>
-<span>  crs <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  crs <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  datatype <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  nodata <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  gdal <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -133,7 +136,8 @@ unique together.</p></dd>
 <dd><p><code>NULL</code> for one file; column names to write one file per
 combination of their values; or <code>"h3"</code> (geospatial data) to partition
 by the H3 parent cell at the finest resolution that gives at most
-<code>max_files</code> files.</p></dd>
+<code>max_files</code> files. The catalog records which of the two it was. On
+update, leave it out or give what was given on create (see "Modes").</p></dd>
 
 
 <dt id="arg-mode">mode<a class="anchor" aria-label="anchor" href="#arg-mode"></a></dt>
@@ -155,7 +159,12 @@ bounding boxes only.</p></dd>
 geometries that cross cell edges are computed (see "Geocoding
 engines"); recorded with the dataset. An update uses the stored engine
 (a different one aborts); a dataset written without one geocodes new
-rows with <code>"s2"</code>.</p></dd>
+rows with <code>"s2"</code>. Rows geocoded in the plane (<code>"planar"</code>, or the
+fallback of <code>"auto"</code>) that are invalid in the plane too (for example a
+self-intersecting ring) are first repaired with <code><a href="https://r-spatial.github.io/sf/reference/valid.html" class="external-link">sf::st_make_valid()</a></code>,
+silently: the repaired copy is used only for the cells, and keeps only
+the parts of the row's own dimension (none: no cells, <code>h3</code> is <code>NA</code>).
+The stored geometry is unchanged.</p></dd>
 
 
 <dt id="arg-max-files">max_files<a class="anchor" aria-label="anchor" href="#arg-max-files"></a></dt>
@@ -193,6 +202,44 @@ a lazy DuckDB table (anything <code><a href="https://r-spatial.github.io/sf/refe
 required for such a table, ignored otherwise (an <code>sf</code> object carries
 its own).</p></dd>
 
+
+<dt id="arg-datatype">datatype<a class="anchor" aria-label="anchor" href="#arg-datatype"></a></dt>
+<dd><p>For a raster: the data type of the file, one for all
+layers. <code>NULL</code> (the default) keeps the type of the file the raster was
+read from; a raster that is not read from a file gets the smallest
+integer type that holds its values when they are whole numbers, else
+<code>"FLT8S"</code>. Or one of <code>"INT1U"</code>, <code>"INT2U"</code>, <code>"INT2S"</code>, <code>"INT4U"</code>,
+<code>"INT4S"</code>, <code>"FLT4S"</code>, <code>"FLT8S"</code>; the write aborts when the values do
+not fit an integer type given. See "Rasters". Aborts for any other
+data.</p></dd>
+
+
+<dt id="arg-nodata">nodata<a class="anchor" aria-label="anchor" href="#arg-nodata"></a></dt>
+<dd><p>For a raster: the one number that marks missing cells in
+the file. Cells holding it are missing when read back, so <code>nodata = 0</code>
+declares that <code>0</code> is not a value of the map. <code>NULL</code> (the default)
+uses, in this order: a flag set with <code>terra::NAflag(x) &lt;- </code> on a
+raster read from files (a raster in memory keeps no flag: its cells
+become missing at once); the NoData tag of the source file; for an
+integer type its default (<code>255</code>
+for <code>INT1U</code>, <code>65535</code> for <code>INT2U</code>, <code>-32768</code> for <code>INT2S</code>, <code>4294967295</code>
+for <code>INT4U</code>, <code>-2147483648</code> for <code>INT4S</code>), which a type kept from the
+file or given with <code>datatype</code> gets only when cells are missing; none
+for a float type, whose missing cells are <code>NaN</code>. A Byte file without a
+tag whose <code>0</code> means "outside the map" therefore gets no NoData value
+unless <code>nodata = 0</code> is given. See "Rasters". Aborts for any other
+data.</p></dd>
+
+
+<dt id="arg-gdal">gdal<a class="anchor" aria-label="anchor" href="#arg-gdal"></a></dt>
+<dd><p>For a raster: <code>NULL</code>, or a character vector of <code>KEY=VALUE</code>
+creation options of GDAL's COG driver, e.g.
+<code>c("COMPRESS=ZSTD", "LEVEL=9")</code>. An option replaces the default of the
+same key (<code>COMPRESS=DEFLATE</code>, <code>PREDICTOR=2</code> or <code>3</code>, <code>BLOCKSIZE=512</code>,
+<code>BIGTIFF=IF_SAFER</code>, <code>OVERVIEWS=IGNORE_EXISTING</code>,
+<code>OVERVIEW_RESAMPLING=NEAREST</code> or <code>AVERAGE</code>); other options are added.
+See "Rasters". Aborts for any other data.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -221,11 +268,147 @@ not given, is taken from the cells. Columns <code>h3_p&lt;r&gt;</code> are writt
 they are; with <code>partition = "h3"</code> one named as the chosen partition
 column must hold the same cells, and then serves as it. Raw and
 prepared data give the same version.</p></li>
-<li><p>A raster is written as one Cloud Optimized GeoTIFF; it cannot be
-partitioned or updated.</p></li>
+<li><p>A raster is written as one Cloud Optimized GeoTIFF (COG), the only
+raster format; it cannot be partitioned or updated (see "Rasters").</p></li>
 <li><p>A lazy table on a DuckDB connection is a <code>table</code>, or <code>geospatial</code> when
 it has a column <code>geometry</code> (see "DuckDB input").</p></li>
 </ul></div>
+    <div class="section level2">
+    <h2 id="rasters">Rasters<a class="anchor" aria-label="anchor" href="#rasters"></a></h2>
+
+
+<p>A <code>SpatRaster</code> is written as one Cloud Optimized GeoTIFF (COG), the only
+raster format: a reader can fetch a part of it without the rest, also
+from a bucket. The raster needs a CRS, cell values and unique layer
+names.</p>
+<p><strong>What is stored where.</strong> The file holds the cell values only; for a
+class map, the codes. What describes them is recorded per layer in the
+catalog and in the dataset's manifest: the data type, the NoData value
+(<code>nodata</code>), the resolution and the dimensions (<code>resolution</code>, <code>dim</code>), the
+legend of a categorical layer (<code>values</code>, <code>levels</code>, <code>levels_name</code>) and
+its colours (<code>color_values</code>, <code>colors</code>). <code><a href="store_read.html">store_read()</a></code> returns the
+raster with its categories and colours set again, and
+<code><a href="store_describe.html">store_describe()</a></code> shows the record. No side file (<code>.aux.xml</code>,
+<code>.aux.json</code>) is written.</p><ul><li><p><strong>Data type</strong> (<code>datatype</code>). All layers get one type, as a GeoTIFF
+requires. With <code>datatype = NULL</code>, the first rule that applies:</p><ol><li><p>A raster read from files, with its cells still on disk, keeps the
+type of its source: a Byte map stays <code>INT1U</code>, an <code>FLT4S</code> file
+stays <code>FLT4S</code>. No pass over the cells is needed. This rule is
+skipped when the layers have different types, and for a raster
+with a scale or an offset (in the file, or set with
+<code><a href="https://rspatial.github.io/terra/reference/scoff.html" class="external-link">terra::scoff()</a></code>), whose values are not the stored numbers.</p></li>
+<li><p>Whole numbers get the smallest of <code>INT1U</code>, <code>INT2U</code>, <code>INT2S</code>,
+<code>INT4U</code>, <code>INT4S</code> that holds the values and the NoData value: codes
+1 to 5 with <code>nodata = 0</code> take one byte per cell. Whole numbers
+are integer layers (<code><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">terra::is.int()</a></code>) and categorical layers;
+doubles that happen to be whole are not, so convert them with
+<code><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">terra::as.int()</a></code> first.</p></li>
+<li><p>Anything else is <code>FLT8S</code>. Doubles are never narrowed to <code>FLT4S</code>
+unless <code>datatype = "FLT4S"</code> asks for it (it rounds them to single
+precision).</p></li>
+</ol><p>A <code>datatype</code> given is used as it is. An integer type needs whole
+numbers inside its range, else the write aborts.</p></li>
+<li><p><strong>NoData</strong> (<code>nodata</code>). One value marks the missing cells of all layers.
+Cells that hold this value are missing when read back; this is how a
+map whose <code>0</code> means "outside the map" is written (<code>nodata = 0</code>). With
+<code>nodata = NULL</code>, the first rule that applies:</p><ol><li><p>A flag set in the session on a raster read from files
+(<code>terra::NAflag(x) &lt;- </code>). On a raster in memory terra applies the
+flag at once, the cells become missing, and no flag is left: the
+rules below then apply.</p></li>
+<li><p>The NoData tag of the source file. It is not used for a layer
+with a scale or an offset, whose values are not the stored
+numbers the tag refers to.</p></li>
+<li><p>For an integer type chosen from the values (rule 2 of "Data
+type"), the default of the type: <code>255</code> for <code>INT1U</code>, <code>65535</code> for
+<code>INT2U</code>, <code>-32768</code> for <code>INT2S</code>, <code>4294967295</code> for <code>INT4U</code>,
+<code>-2147483648</code> for <code>INT4S</code>. The type is chosen so that no cell
+holds that value: values up to 254 fit <code>INT1U</code>, and with 255
+among them the type is <code>INT2U</code>.</p></li>
+<li><p>For an integer type kept from the source or given with
+<code>datatype</code>, the same default, but only when cells are missing
+(found by one pass over the cells, made only in this case). The
+write aborts when a cell holds that value; give <code>nodata</code> then.
+Without missing cells the file has no NoData value: a Byte file
+without a tag whose <code>0</code> means "outside the map" gets none unless
+<code>nodata = 0</code> is given.</p></li>
+<li><p>A float type has none: its missing cells are <code>NaN</code>.</p></li>
+</ol><p>Layers whose flags or tags differ abort and ask for <code>nodata</code>. A
+<code>nodata</code> that the data type cannot hold aborts.</p></li>
+<li><p><strong>Creation options</strong> (<code>gdal</code>). The defaults suit reads from a bucket:
+<code>COMPRESS=DEFLATE</code>, <code>PREDICTOR=2</code> (integer types) or <code>PREDICTOR=3</code>
+(float types), <code>BLOCKSIZE=512</code>, <code>BIGTIFF=IF_SAFER</code>, and overviews
+built anew, never copied from a source file
+(<code>OVERVIEWS=IGNORE_EXISTING</code>), with <code>OVERVIEW_RESAMPLING=NEAREST</code>
+(integer types) or <code>AVERAGE</code> (float types). <code>gdal</code> is a character
+vector of <code>KEY=VALUE</code> options of GDAL's COG driver, e.g.
+<code>gdal = c("COMPRESS=ZSTD", "LEVEL=9")</code>: a key that has a default
+replaces it, other keys are added. Keys are compared in upper case, a
+key given twice aborts, and the order given does not change the file.
+The options are kept in the file, not in the catalog.</p></li>
+<li><p><strong>Legend of a class map.</strong> A categorical layer is one with a category
+table, set with <code>levels(x) &lt;- data.frame(value = , label = )</code>: the
+codes in the first column, their labels in the second. <code>levels&lt;-</code>
+renames the layer to the label column, so set <code>names(x)</code> after it.
+The codes are written to the file; the legend is recorded as <code>values</code>
+(the codes, sorted), <code>levels</code> (their labels) and <code>levels_name</code> (the
+name of the label column). Codes must be whole numbers and every code
+needs a label, else the write aborts. Of a category table with
+several label columns, only the active one (<code><a href="https://rspatial.github.io/terra/reference/activeCat.html" class="external-link">terra::activeCat()</a></code>) is
+kept; the others are dropped, with a message.</p></li>
+<li><p><strong>Colours.</strong> The colour table of a layer, set with
+<code>terra::coltab(x) &lt;- data.frame(value = , col = )</code>, is recorded as
+<code>color_values</code> (the codes, sorted) and <code>colors</code> (<code>#RRGGBBAA</code>). With a
+legend, only the colours of the legend's codes are kept. Without a
+legend every row of the colour table is kept; a colour table read
+from a file has 256 rows (the codes 0 to 255; a code without a colour
+is black, or transparent when it is the file's NoData value), and all
+256 are recorded. Colours come from the raster
+only: a style file such as a QGIS <code>.qml</code> is not read.</p></li>
+<li><p><strong>Not stored.</strong> The time and the units of layers (<code><a href="https://rspatial.github.io/terra/reference/time.html" class="external-link">terra::time()</a></code>,
+<code><a href="https://rspatial.github.io/terra/reference/units.html" class="external-link">terra::units()</a></code>), and the columns of a category table other than the
+codes and the active labels. The file is written without categories,
+colour table, time and units; <code>x</code> itself is never changed. Only other
+metadata that a source file holds itself may be copied with it when
+GDAL copies the file (next point).</p></li>
+<li><p><strong>Two ways to write, and the room they need.</strong> The file is first
+written on the local disk, in the staging folder
+<code>getOption("rcs.staging_dir")</code> (default <code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir()</a></code>), and then
+uploaded. Every temporary file lies below that folder.</p><ul><li><p>A raster opened with <code>terra::rast(file)</code> and not changed in the
+session is copied by GDAL straight from its file, with no
+intermediate file. On a simulated map of 25,000 x 25,000 cells
+the staging folder held at most about 1.4 times the size of the
+output. "Not changed" means: all layers of one file in their
+order, with the file's layer names, extent and CRS, and no NoData
+flag or tag other than the value written. Setting a legend (and
+the layer name again) or colours is not a change. A file with a
+scale or an offset is not copied by GDAL.</p></li>
+<li><p>Any other raster is written by terra: one in memory, computed,
+cropped, renamed, a subset of the layers, from several files,
+with a scale or an offset, or with another CRS or NoData value
+than its file. For a large raster terra first writes an
+intermediate file; on the same map the staging folder then held
+about 3.6 times the size of the output. A raster held in memory
+also needs RAM for all its cells, so write a large map from its
+file.</p></li>
+</ul><p>For a raster read from files, the write warns (class
+<code>rcs_warning_staging_space</code>) when the drive of the staging folder has
+less free room than twice the size of the source files, and goes on.
+The ps package tells the free room; without it, and for a raster in
+memory, there is no check. <code>options(rcs.staging_dir = )</code> moves the
+staging to another drive.</p></li>
+</ul><p>The same raster written with the same arguments gives the same file and
+the same version. The legend, the colours, the time and the units do
+not change the file: the same cells with and without them give the same
+version, and only the catalog entry differs. Writing the same cells
+with another legend or other colours keeps the version, sends no file
+and replaces the legend and the colours recorded for that version; the
+earlier ones are not kept. A <code>datatype</code>, <code>nodata</code> or <code>gdal</code> gives
+another file and another version only when it changes the file:
+<code>nodata = 0</code> for a source file already tagged <code>0</code>, or an option equal
+to its default, gives the same one. The two ways of writing may give
+different bytes for the same cells. A raster written with a version of
+the package before <code>0.0.0.9005</code> gets a new version when it is written
+again, even with unchanged cells: the bytes of the file differ.</p>
+    </div>
     <div class="section level2">
     <h2 id="duckdb-input">DuckDB input<a class="anchor" aria-label="anchor" href="#duckdb-input"></a></h2>
 
@@ -233,18 +416,35 @@ it has a column <code>geometry</code> (see "DuckDB input").</p></li>
 <p><code>x</code> may be a lazy table on a DuckDB connection (from <code><a href="https://dplyr.tidyverse.org/reference/tbl.html" class="external-link">dplyr::tbl()</a></code>, for
 example on a view of <code><a href="store_duckdb.html">store_duckdb()</a></code>, or from
 <code>store_open(engine = "duckdb")</code>), so that a result computed in DuckDB is
-stored without being collected into R as a whole. Its query runs once
-inside DuckDB into a temporary copy, the table <code>rcs_write_&lt;random&gt;</code> on
-the same connection, which every later step reads and which is dropped
-when the call ends, also after an error; the copy needs room in DuckDB's
-memory or its temporary folder. The key and the partitions are checked
-in DuckDB, and the rows are fetched in batches of
-<code>getOption("rcs.duckdb_batch_rows")</code> rows (default <code>5e5</code>), so that R
-holds about one batch at a time; a progress bar shows the batches unless
-<code>options(rcs.quiet = TRUE)</code>. DuckDB never uploads: the files are staged
-and land in every location as for any other write. The files equal those
-written from the same rows collected into R, so both give the same
-version.</p><ul><li><p>Modes <code>"create"</code> and <code>"replace"</code> only; <code>"update"</code> aborts (collect the
+stored without being collected into R as a whole.</p><ul><li><p>A table (no <code>geometry</code> column) with a <code>partition</code> is written one
+partition at a time. The query runs as a subquery <code>2 + P</code> times (P
+partitions): once to check the key, once for the partition values and
+row counts, then once per partition, whose rows are copied into the
+temporary table <code>rcs_write_&lt;random&gt;_part</code>, written, checked and
+dropped. DuckDB then needs room for about the largest partition, not
+for the whole result. The query must therefore be deterministic (give
+the same rows each time), and is best a scan of stored files or views;
+an expensive query is better computed once into a DuckDB table first.
+<code>options(rcs.duckdb_stream = FALSE)</code> turns this off.</p></li>
+<li><p>Otherwise (no partition, geospatial data, or
+<code>rcs.duckdb_stream = FALSE</code>) the query runs once into a temporary copy,
+the table <code>rcs_write_&lt;random&gt;</code> on the same connection, which every
+later step reads; the copy needs room for the whole result in DuckDB's
+memory or its temporary folder.</p></li>
+</ul><p>The temporary tables are dropped when the call ends, also after an error.
+The key and the partitions are checked in DuckDB, and the rows are
+fetched in batches of <code>getOption("rcs.duckdb_batch_rows")</code> rows (default
+<code>5e5</code>), so that R holds about one batch at a time; a progress bar shows
+the batches unless <code>options(rcs.quiet = TRUE)</code>. For the duration of the
+call the connection runs with <code>preserve_insertion_order = true</code>, so that
+the rows reach R in the order the write asks for; the caller's setting is
+restored when the call ends, also after an error. DuckDB never uploads:
+the files are staged and land in every location as for any other write.
+Staged files need free room equal to the output in
+<code>getOption("rcs.staging_dir")</code> (default <code><a href="https://rdrr.io/r/base/tempfile.html" class="external-link">tempdir()</a></code>); setting it to a
+folder on the store's drive avoids copying them across drives. The files
+equal those written from the same rows collected into R, so both give the
+same version.</p><ul><li><p>Modes <code>"create"</code> and <code>"replace"</code> only; <code>"update"</code> aborts (collect the
 rows and update from R, or write the whole dataset).</p></li>
 <li><p>Columns <code>.rcs_id</code>, <code>h3</code>, <code>bbox</code> and <code>geom</code> are the package's own: they
 are dropped with a message and computed again. Columns <code>h3_p&lt;r&gt;</code> are
@@ -314,7 +514,10 @@ the whole dataset. A message lists every replaced partition with its old
 and new number of rows: rows of a replaced partition that are missing
 from <code>x</code> disappear. In this mode <code>key</code>, <code>partition</code>, <code>h3_res</code>,
 <code>geocode</code> and <code>geocode_engine</code> come from the stored dataset; arguments
-that disagree abort.
+that disagree abort. <code>partition</code> may be left out; if given, it must be
+what was given on create: <code>"h3"</code>, or the column names. Partition columns
+given by the user, even ones named <code>h3_p&lt;r&gt;</code>, are kept as given: never
+recomputed from the geometries.
 With <code>partition = "h3"</code>, an update that would need more than
 <code>max_files</code> files re-partitions the whole dataset at a coarser H3
 resolution.</p></li>
@@ -365,10 +568,10 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.3s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.8 kB  0.5s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     2/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># The same data again: nothing is uploaded</span></span></span>
@@ -378,10 +581,10 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span>  key <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"shop_id"</span>, <span class="st">"date"</span>, <span class="st">"product"</span><span class="op">)</span>, partition <span class="op">=</span> <span class="st">"year"</span>,</span></span>
 <span class="r-in"><span>  mode <span class="op">=</span> <span class="st">"replace"</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">"sales/daily"</span> is unchanged (version e39540d1414c4708): 200 rows in 2 files</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">"sales/daily"</span> is unchanged (version 41ec22ed5b5602ce): 200 rows in 2 files</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  unchanged</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     up</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  unchanged</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     up</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   to date</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> All 2 locations hold this version.</span>
 <span class="r-in"><span></span></span>
@@ -396,22 +599,79 @@ continues with the next location and reports the secondary as behind;
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> year = 2024: 97 rows -&gt; 97 rows</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary  1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.2s</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy     1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.8 kB  0.3s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/2</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Locations:</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   primary      local  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/primary</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>   secondary 1  local  C:/Users/EB2/AppData/Local/Temp/RtmpotBngr/rcs-example-write/copy</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   primary      local  /tmp/Rtmp/rcs-example-write/primary</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   secondary 1  local  /tmp/Rtmp/rcs-example-write/copy</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> History: off (store default)</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated           1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.8 kB      2  2026-11-22 16:33  =</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.9 kB      2  2026-11-27 13:56  =</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span><span class="co"># A class map: the codes go into the file, the legend and the colours</span></span></span>
+<span class="r-in"><span><span class="co"># into the catalog. `nodata = 0`: cells holding 0 are outside the map.</span></span></span>
+<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/ns-load.html" class="external-link">requireNamespace</a></span><span class="op">(</span><span class="st">"terra"</span>, quietly <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span><span class="op">)</span> <span class="op">{</span></span></span>
+<span class="r-in"><span>  <span class="va">cover</span> <span class="op">&lt;-</span> <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/is.bool.html" class="external-link">as.int</a></span><span class="op">(</span><span class="fu"><a href="rcs_sim_polygons.html">rcs_sim_raster</a></span><span class="op">(</span>nrow <span class="op">=</span> <span class="fl">60</span>, ncol <span class="op">=</span> <span class="fl">80</span><span class="op">)</span><span class="op">[[</span><span class="st">"cover"</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="va">cover</span><span class="op">[</span><span class="fl">1</span><span class="op">:</span><span class="fl">2</span>, <span class="op">]</span> <span class="op">&lt;-</span> <span class="fl">0L</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/levels.html" class="external-link">levels</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span></span>
+<span class="r-in"><span>    value <span class="op">=</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span>,</span></span>
+<span class="r-in"><span>    label <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"water"</span>, <span class="st">"forest"</span>, <span class="st">"crop"</span>, <span class="st">"grass"</span>, <span class="st">"bare"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="st">"cover"</span> <span class="co"># `levels&lt;-` renamed the layer</span></span></span>
+<span class="r-in"><span>  <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/colors.html" class="external-link">coltab</a></span><span class="op">(</span><span class="va">cover</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span></span>
+<span class="r-in"><span>    value <span class="op">=</span> <span class="fl">1</span><span class="op">:</span><span class="fl">5</span>,</span></span>
+<span class="r-in"><span>    col <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"#1F78B4"</span>, <span class="st">"#33A02C"</span>, <span class="st">"#FFD92F"</span>, <span class="st">"#B2DF8A"</span>, <span class="st">"#B15928"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu">store_write</span><span class="op">(</span><span class="va">st</span>, <span class="va">cover</span>, <span class="st">"grids/cover"</span>,</span></span>
+<span class="r-in"><span>    title <span class="op">=</span> <span class="st">"Land cover"</span>, description <span class="op">=</span> <span class="st">"A simulated class map."</span>,</span></span>
+<span class="r-in"><span>    nodata <span class="op">=</span> <span class="fl">0</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># One byte per cell, the NoData value and the number of classes</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu"><a href="store_describe.html">store_describe</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span><span class="op">)</span><span class="op">$</span><span class="va">columns</span><span class="op">)</span></span></span>
+<span class="r-in"><span></span></span>
+<span class="r-in"><span>  <span class="co"># A large map is best written straight from its file: the data type</span></span></span>
+<span class="r-in"><span>  <span class="co"># and the NoData tag of the file are kept. `gdal` changes the</span></span></span>
+<span class="r-in"><span>  <span class="co"># compression here.</span></span></span>
+<span class="r-in"><span>  <span class="va">file</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"cover.tif"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/writeRaster.html" class="external-link">writeRaster</a></span><span class="op">(</span><span class="va">cover</span>, <span class="va">file</span>, datatype <span class="op">=</span> <span class="st">"INT1U"</span>, NAflag <span class="op">=</span> <span class="fl">0</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="fu">store_write</span><span class="op">(</span><span class="va">st</span>, <span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/rast.html" class="external-link">rast</a></span><span class="op">(</span><span class="va">file</span><span class="op">)</span>, <span class="st">"grids/cover_zstd"</span>,</span></span>
+<span class="r-in"><span>    title <span class="op">=</span> <span class="st">"Land cover, ZSTD"</span>, description <span class="op">=</span> <span class="st">"A simulated class map."</span>,</span></span>
+<span class="r-in"><span>    gdal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"COMPRESS=ZSTD"</span>, <span class="st">"LEVEL=9"</span><span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span></span></span>
+<span class="r-in"><span>  <span class="co"># The label column is named `cover` here, not `label`:</span></span></span>
+<span class="r-in"><span>  <span class="co"># `terra::writeRaster()` named it after the layer</span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/print.html" class="external-link">print</a></span><span class="op">(</span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/factors.html" class="external-link">levels</a></span><span class="op">(</span><span class="fu"><a href="store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover_zstd"</span><span class="op">)</span><span class="op">)</span><span class="op">[[</span><span class="fl">1</span><span class="op">]</span><span class="op">]</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="op">}</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 4,800 cells in 1 file.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/1</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/1</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 2 locations. Catalogs updated.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 4</span></span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   name  type  r_type                                            description</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>                                             <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>      </span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> cover INT1U raster layer (60 x 80 cells, nodata 0, 5 classes) <span style="color: #BB0000;">NA</span>         </span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover_zstd"</span>: 4,800 cells in 1 file.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/1</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.6 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/1</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.6 kB  0.1s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 2 locations. Catalogs updated.</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>   value  cover</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 1     1  water</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 2     2 forest</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 3     3   crop</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 4     4  grass</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span> 5     5   bare</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

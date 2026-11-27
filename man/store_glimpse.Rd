@@ -19,7 +19,9 @@ invisibly; for a raster, the \code{terra::SpatRaster}, invisibly.
 \description{
 Prints what the catalog says about a dataset (kind, rows, files, version,
 key, partition, coordinate reference system) and the first rows of its
-first file, read from one row group. Opens one file.
+first file, read from one row group. Opens one file. For a raster, the
+\code{terra::SpatRaster} is printed instead, with its categories and colours
+as \code{\link[=store_read]{store_read()}} returns them.
 }
 \examples{
 location <- file.path(tempdir(), "rcs-example-glimpse")

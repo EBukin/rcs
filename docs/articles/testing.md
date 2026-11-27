@@ -23,7 +23,7 @@ The suite has three levels, chosen by the environment variable
 
 | Level | What it runs | Default when |
 |----|----|----|
-| `cran` | Unit tests: no network, small data, a few seconds per file. | `RCS_TEST_LEVEL` is unset and the tests run on CRAN or under `R CMD check`. |
+| `cran` | Unit tests and small property tests (4 to 30 random cases each): no network, small data, a few seconds per file. | `RCS_TEST_LEVEL` is unset and the tests run on CRAN or under `R CMD check`. |
 | `default` | Adds the integration suite on local folders and property tests of about 200 random cases each. | `RCS_TEST_LEVEL` is unset otherwise, e.g. under [`devtools::test()`](https://devtools.r-lib.org/reference/test.html). |
 | `full` | Adds property tests of up to 2,000 cases, every point of every crash-point matrix, the long random-operation sequences, and the tests against a Google Cloud Storage bucket. | Never; set it. |
 
@@ -34,7 +34,7 @@ Run each level from the package folder:
 # default: the local integration suite and property tests
 devtools::test()
 
-# cran: unit tests only
+# cran: unit tests and small property tests
 withr::with_envvar(c(RCS_TEST_LEVEL = "cran"), devtools::test())
 
 # full: everything, including the random-operation test
@@ -210,8 +210,11 @@ tests themselves):
   the catalog are each caught by
   [`store_check()`](https://ebukin.github.io/rcs/reference/store_check.md),
   with a message naming the file.
-- **Determinism:** the same data written twice give the same version;
-  changing one value changes it.
+- **Determinism:** the same data written twice, with the same name and
+  metadata, give the same version; changing one value changes it. The
+  files embed the dataset’s metadata (name, title, key, partition and
+  more), so the same rows under another name or title give another
+  version.
 - **Work counters:** with `options(rcs.trace = TRUE)` the package counts
   backend calls, files opened, row groups and rows (see
   [`rcs_trace()`](https://ebukin.github.io/rcs/reference/rcs_trace.md)).
@@ -306,8 +309,8 @@ download on first use).
   called), and a file that stays small because views hold query text
   only.
 - `test-duckdb-tbl.R`: `store_open(engine = "duckdb")`, whose
-  `collect()` restores the R types and returns the rows of the Arrow
-  engine.
+  [`collect()`](https://dplyr.tidyverse.org/reference/compute.html)
+  restores the R types and returns the rows of the Arrow engine.
 - `test-duckdb-intersects.R`:
   [`store_intersects()`](https://ebukin.github.io/rcs/reference/store_intersects.md)
   on DuckDB tables returns exactly the rows of the Arrow path, for

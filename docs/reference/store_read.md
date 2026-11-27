@@ -42,7 +42,7 @@ store_read(
   Columns to return, as in
   [`dplyr::select()`](https://dplyr.tidyverse.org/reference/select.html)
   (tidyselect); `NULL` for all. The geometry column is controlled by
-  `geometry`.
+  `geometry`. A raster has no column selection.
 
 - intersects:
 
@@ -55,6 +55,8 @@ store_read(
   [`sf::st_make_valid()`](https://r-spatial.github.io/sf/reference/valid.html);
   validity is read on the sphere or in the plane as in
   [`store_intersects()`](https://ebukin.github.io/rcs/reference/store_intersects.md).
+  For a raster, the query's bounding box is the window that is read (see
+  "Rasters").
 
 - geometry:
 
@@ -88,7 +90,8 @@ store_read(
 
 A tibble; an `sf` object for geospatial data read with geometry; a
 [`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
-for a raster.
+for a raster, with the categories and the colours recorded when it was
+written.
 
 ## Details
 
@@ -117,8 +120,57 @@ for a raster.
 - A raster is returned as a
   [`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
   opened through GDAL, so only the tiles needed are read; `intersects`
-  crops it to the query's bounding box. Filters, `columns`, `geometry`
-  and `exact` do not apply to rasters and abort.
+  crops it to the query's bounding box (see "Rasters"). Filters,
+  `columns`, `geometry`, `exact` and `exact_engine` do not apply to
+  rasters and abort.
+
+## Rasters
+
+A raster is returned as a
+[`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
+that points to the stored file: at the location itself for a local
+store, through GDAL's virtual file system for a bucket. No cell is read
+until it is needed, and the file is not downloaded.
+
+- **The whole raster.** `store_read(st, "name")` returns every layer,
+  with the layer names, the data type and the NoData value of the file.
+  Cells that hold the NoData value are missing (`NA`).
+
+- **A window.** `intersects` returns only the part inside the bounding
+  box of the query, in the raster's CRS, rounded outwards to whole
+  cells; a point or a line gives the cells it touches. The cells of the
+  window are read at once, straight from the bucket for a store in a
+  bucket: this is the way to work with a map too large to read whole.
+  The query takes the same forms as for geospatial data (an `sf`, `sfc`
+  or `bbox` object in any CRS, or H3 cells). A query that does not
+  overlap the raster aborts; one that crosses the antimeridian or holds
+  a pole returns the raster uncropped.
+
+- **Legend.** A layer written with categories (see "Rasters" in
+  [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md))
+  comes back categorical:
+  [`terra::levels()`](https://rspatial.github.io/terra/reference/factors.html)
+  gives the codes and labels recorded with the dataset,
+  [`terra::freq()`](https://rspatial.github.io/terra/reference/freq.html)
+  and
+  [`terra::plot()`](https://rspatial.github.io/terra/reference/plot.html)
+  use the labels, and `terra::extract(x, cells, raw = TRUE)` gives the
+  codes. The label column is named as it was when the map was written;
+  the code column is named `value` (`code` when the label column is
+  itself called `value`).
+
+- **Colours.** A layer written with a colour table has it again:
+  [`terra::has.colors()`](https://rspatial.github.io/terra/reference/colors.html)
+  is `TRUE`,
+  [`terra::coltab()`](https://rspatial.github.io/terra/reference/colors.html)
+  gives the table, and
+  [`terra::plot()`](https://rspatial.github.io/terra/reference/plot.html)
+  draws with it.
+
+The legend and the colours come from the catalog, not from the file, and
+nothing is written next to the file. A window and a subset of the layers
+(`x[["name"]]`) keep both. There is no `columns` for rasters: read the
+raster and take the layers from it.
 
 The location read from is, among the available locations that hold the
 dataset at the primary's version, a local one first, then the primary,
@@ -146,7 +198,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  38.1 kB  0.2s
+#>   files sent  38.3 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_read(st, "sales/daily", year == 2023, product == "p07",
   columns = c(shop_id, date, qty)
@@ -174,7 +226,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
 )
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  41.2 kB  0.3s
+#>   files sent  41.2 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(
   c(xmin = -28, ymin = 7, xmax = -27, ymax = 8),
@@ -221,5 +273,74 @@ store_read(st, "polygons", geometry = FALSE)
 #>  9    63 0.0938 d     855648affffffff     -25.6  8.60 -25.6  8.60
 #> 10   139 0.499  c     855648affffffff     -25.7  8.62 -25.7  8.62
 #> # ℹ 190 more rows
+
+# A class map: whole, and a window of it
+if (requireNamespace("terra", quietly = TRUE)) {
+  cover <- terra::as.int(rcs_sim_raster(nrow = 60, ncol = 80)[["cover"]])
+  cover[1:2, ] <- 0L
+  levels(cover) <- data.frame(
+    value = 1:5,
+    label = c("water", "forest", "crop", "grass", "bare")
+  )
+  names(cover) <- "cover"
+  terra::coltab(cover) <- data.frame(
+    value = 1:5,
+    col = c("#1F78B4", "#33A02C", "#FFD92F", "#B2DF8A", "#B15928")
+  )
+  store_write(st, cover, "grids/cover",
+    title = "Land cover", description = "A simulated class map.",
+    nodata = 0
+  )
+
+  map <- store_read(st, "grids/cover")
+  print(map)
+  print(terra::levels(map)[[1]]) # the legend
+  print(terra::has.colors(map))
+  print(terra::coltab(map)[[1]]) # the colours
+  print(map[1, 1]) # a cell holding the NoData value is missing
+
+  # Only the cells inside the box of `area`, with legend and colours
+  window <- store_read(st, "grids/cover", intersects = area)
+  print(dim(window))
+  print(terra::freq(window))
+  rm(map, window)
+}
+#> ℹ Writing "grids/cover": 4,800 cells in 1 file.
+#> ✔ primary  /tmp/Rtmp/rcs-example-read  1/1
+#>   files sent  1.9 kB  0.2s
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+#> class       : SpatRaster
+#> size        : 60, 80, 1  (nrow, ncol, nlyr)
+#> resolution  : 0.075, 0.05  (x, y)
+#> extent      : -30, -24, 6, 9  (xmin, xmax, ymin, ymax)
+#> coord. ref. : lon/lat WGS 84 (EPSG:4326)
+#> source      : part-0a57aa5e38cbde52.tif
+#> color table : 1
+#> categories  : label
+#> name        : cover
+#> min value   : water
+#> max value   :  bare
+#>   value  label
+#> 1     1  water
+#> 2     2 forest
+#> 3     3   crop
+#> 4     4  grass
+#> 5     5   bare
+#> [1] TRUE
+#>   values red green blue alpha
+#> 1      1  31   120  180   255
+#> 2      2  51   160   44   255
+#> 3      3 255   217   47   255
+#> 4      4 178   223  138   255
+#> 5      5 177    89   40   255
+#>   cover
+#> 1  <NA>
+#> [1] 20 14  1
+#>   layer  value count
+#> 1     1  water    53
+#> 2     1 forest    52
+#> 3     1   crop    78
+#> 4     1  grass    48
+#> 5     1   bare    49
 unlink(location, recursive = TRUE)
 ```
