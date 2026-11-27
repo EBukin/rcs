@@ -420,6 +420,28 @@ format_bytes <- function(bytes) {
   out
 }
 
+#' Free space of the drive that holds a folder
+#'
+#' Uses the ps package when it is installed. A folder that does not exist yet
+#' is answered for its nearest existing parent.
+#'
+#' @param path A folder.
+#' @return Bytes available, a double; `NA` when it cannot be told (ps is not
+#'   installed, or the call fails).
+#' @noRd
+disk_free <- function(path) {
+  if (!requireNamespace("ps", quietly = TRUE)) {
+    return(NA_real_)
+  }
+  while (!dir.exists(path) && dirname(path) != path) {
+    path <- dirname(path)
+  }
+  tryCatch(
+    as.numeric(ps::ps_disk_usage(path)$available[[1]]),
+    error = function(e) NA_real_
+  )
+}
+
 #' Format a count with thousands separators, e.g. `"5,012,334"`
 #' @param n Numeric or `integer64` vector.
 #' @return Character vector.

@@ -514,6 +514,105 @@ A raster has one file: it cannot be partitioned or updated, only replaced.
 Filters, `columns`, `geometry` and `exact` do not apply to rasters, and
 `store_open()` and `store_sample()` refuse them.
 
+### Class maps: categories and nodata
+
+A class map holds whole numbers that stand for classes, such as land cover.
+The layer `cover` of the simulated raster serves as one here: five classes,
+and a band of `0` around the edge for "outside the map". `levels<-` gives
+the codes their labels; it also renames the layer, so the name is set after
+it.
+
+```{r, eval = has_terra}
+cover <- terra::as.int(grid[["cover"]])
+cover[c(1:2, 199:200), ] <- 0L
+cover[, c(1:2, 199:200)] <- 0L
+levels(cover) <- data.frame(
+  value = 1:5,
+  label = c("water", "forest", "crop", "grass", "bare")
+)
+names(cover) <- "cover"
+```
+
+`nodata = 0` declares that `0` is not a class. The codes go into the file,
+and the legend is recorded in the catalog, so it travels with the dataset.
+
+```{r, eval = has_terra}
+store_write(st, cover, "grids/cover",
+  title = "Land cover",
+  description = "A simulated class map in open ocean.",
+  nodata = 0
+)
+```
+
+A read returns the layer with its categories. The file holds one byte per
+cell (`INT1U`), and the cells of the edge are missing:
+
+```{r, eval = has_terra}
+classes <- store_read(st, "grids/cover")
+terra::datatype(classes)
+terra::levels(classes)[[1]]
+classes[1, 1]
+```
+
+A read with `intersects` keeps the categories:
+
+```{r, eval = has_terra}
+terra::freq(store_read(st, "grids/cover", intersects = area))
+```
+
+**Data type.** All layers of a raster get one data type. A raster read from
+a file keeps the type of that file: a Byte map stays `INT1U`, with no pass
+over its cells. The exception is a layer with a scale or an offset, whose
+values are not the stored numbers: its type comes from the values, like
+that of a raster in memory. Other whole numbers get the smallest integer type that holds
+the values and the nodata value, which is why the class map above takes one
+byte per cell. Anything else is stored as `FLT8S`; doubles are narrowed to
+single precision only when `datatype = "FLT4S"` asks for it. `datatype`
+sets the type directly, and the write stops when the values do not fit.
+
+**Nodata.** The value that marks missing cells is, in this order: the
+argument `nodata`; a flag set in the session with `terra::NAflag(x) <-`;
+the NoData tag of the source file; and otherwise the default of the integer
+type (`255` for `INT1U`). That default is written when the type was chosen
+from the values; for a type kept from the file or given with `datatype`,
+only when cells are missing. The float types get none: their missing cells
+are `NaN`. Cells that hold the nodata value read back as missing, as the
+edge above does.
+
+**File options.** Only Cloud Optimized GeoTIFFs are written, with options
+that suit reads from a bucket: `COMPRESS=DEFLATE`, `PREDICTOR=2` for the
+integer types and `PREDICTOR=3` for the float types, `BLOCKSIZE=512`,
+`BIGTIFF=IF_SAFER`, and overviews built anew (`OVERVIEWS=IGNORE_EXISTING`)
+with `OVERVIEW_RESAMPLING=NEAREST` for the integer types and `AVERAGE` for
+the float types. `gdal` replaces a default of the same key and adds other
+options of GDAL's COG driver, here ZSTD compression:
+
+```{r, eval = has_terra}
+store_write(st, grid, "grids/simulated_zstd",
+  title = "Simulated raster, ZSTD",
+  description = "A simulated three-layer raster in open ocean.",
+  gdal = c("COMPRESS=ZSTD", "LEVEL=9")
+)
+```
+
+**Room for staging.** The file is first written on the local disk, below
+`getOption("rcs.staging_dir")` (default `tempdir()`), and then uploaded. A
+raster that is an unchanged view of one file without a scale or an offset,
+as `terra::rast(file)` returns it, is copied by GDAL and needs free room of
+about one and a half times the output. Any other raster (in memory,
+computed, cropped, renamed, with a scale or an offset) is written by terra,
+which first writes an intermediate file when the raster
+is too large for memory, and then needs about four times the output. For a
+raster read from files, the write warns when that drive has less free room
+than twice the size of the source files; it never stops the write. Point
+`options(rcs.staging_dir = )` to a larger drive when needed. Write a large
+raster straight from its file (`terra::rast(file)`), not from memory: a
+raster held in memory needs RAM for all its cells. The time and
+the units of layers (`terra::time()`, `terra::units()`) are not stored. A
+raster written with an earlier version of the package gets a new version
+when it is written again, even with unchanged cells, because the bytes of
+the file differ.
+
 ## Shapes across the antimeridian or around a pole
 
 Geometries that cross the antimeridian (longitude ±180°) or contain a pole

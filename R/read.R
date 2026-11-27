@@ -65,8 +65,11 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   `h3_p<r>` are returned.
 #' * A raster is returned as a `terra::SpatRaster` opened through GDAL, so
 #'   only the tiles needed are read; `intersects` crops it to the query's
-#'   bounding box. Filters, `columns`, `geometry` and `exact` do not apply
-#'   to rasters and abort.
+#'   bounding box. A categorical layer is returned with its categories (the
+#'   codes and labels recorded when it was written), also after a crop; the
+#'   data type and the NoData value are those of the file, so cells holding
+#'   the NoData value are missing. Filters, `columns`, `geometry` and `exact`
+#'   do not apply to rasters and abort.
 #'
 #' The location read from is, among the available locations that hold the
 #' dataset at the primary's version, a local one first, then the primary,
@@ -158,7 +161,10 @@ store_read <- function(st, dataset, ..., columns = NULL, intersects = NULL,
         class = "rcs_error_argument", call = call
       )
     }
-    return(raster_open(target$location$backend, target$files$path[[1]], intersects))
+    return(raster_open(
+      target$location$backend, target$files$path[[1]], intersects,
+      columns = columns_from_json(target$entry$columns)
+    ))
   }
 
   # the file pruning of the filters is done on the catalog before any file
@@ -357,7 +363,10 @@ store_glimpse <- function(st, dataset) {
   }
   cli::cat_line(facts)
   if (identical(entry$kind, "raster")) {
-    r <- raster_open(target$location$backend, target$files$path[[1]])
+    r <- raster_open(
+      target$location$backend, target$files$path[[1]],
+      columns = columns_from_json(entry$columns)
+    )
     cli::cat_line()
     print(r)
     return(invisible(r))

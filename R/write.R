@@ -50,10 +50,85 @@
 #'   they are; with `partition = "h3"` one named as the chosen partition
 #'   column must hold the same cells, and then serves as it. Raw and
 #'   prepared data give the same version.
-#' * A raster is written as one Cloud Optimized GeoTIFF; it cannot be
-#'   partitioned or updated.
+#' * A raster is written as one Cloud Optimized GeoTIFF (COG), the only
+#'   raster format; it cannot be partitioned or updated (see "Rasters").
 #' * A lazy table on a DuckDB connection is a `table`, or `geospatial` when
 #'   it has a column `geometry` (see "DuckDB input").
+#'
+#' @section Rasters:
+#' A `SpatRaster` is written as one Cloud Optimized GeoTIFF. All its layers
+#' get one data type and one NoData value, as a GeoTIFF requires.
+#'
+#' * **Data type.** `datatype`, when given: one of `"INT1U"`, `"INT2U"`,
+#'   `"INT2S"`, `"INT4U"`, `"INT4S"`, `"FLT4S"`, `"FLT8S"`; an integer type
+#'   needs whole numbers inside its range, else the write aborts. Otherwise
+#'   a raster read from files keeps the type of its source (a Byte map stays
+#'   `INT1U`, an `FLT4S` file stays `FLT4S`); the type is then found with no
+#'   pass over the cells. This does not hold for a raster with a scale or an
+#'   offset (in the file or set with `terra::scoff()`), whose values are not
+#'   the stored numbers. Otherwise whole numbers get the smallest integer
+#'   type that holds them and the nodata value,
+#'   and anything else `FLT8S`: doubles in memory are never narrowed to
+#'   `FLT4S` unless `datatype = "FLT4S"` asks for it (it rounds them to
+#'   single precision).
+#' * **NoData.** `nodata`, when given: one number the data type can hold.
+#'   Cells that hold this value are missing when read back; this is how a
+#'   map whose `0` means "outside the map" is written (`nodata = 0`).
+#'   Otherwise the value is a flag set in the session
+#'   (`terra::NAflag(x) <- `), else the NoData tag of the source file;
+#'   layers that differ abort and ask for `nodata`. The tag of a source is
+#'   not used for a layer with a scale or an offset, whose values are not
+#'   the stored numbers the tag refers to. Otherwise an integer
+#'   type chosen from the values gets its default value (`255` for `INT1U`,
+#'   `65535` for `INT2U`, `-32768` for `INT2S`, `4294967295` for `INT4U`,
+#'   `-2147483648` for `INT4S`), an integer type given or kept from the
+#'   source gets it only when cells are missing (found by one pass over the
+#'   cells, made only in this case), and a float type gets none: its missing
+#'   cells are `NaN`.
+#' * **Creation options.** The defaults suit reads from a bucket:
+#'   `COMPRESS=DEFLATE`, `PREDICTOR=2` (integer types) or `PREDICTOR=3`
+#'   (float types), `BLOCKSIZE=512`, `BIGTIFF=IF_SAFER`, and overviews
+#'   built anew, never copied from a source file
+#'   (`OVERVIEWS=IGNORE_EXISTING`), with `OVERVIEW_RESAMPLING=NEAREST`
+#'   (integer types) or `AVERAGE` (float types). `gdal` replaces a default of the same key and adds other keys
+#'   of GDAL's COG driver, e.g. `gdal = c("COMPRESS=ZSTD", "LEVEL=9")`; keys
+#'   are compared in upper case, a key given twice aborts, and the order
+#'   given does not change the file. The options are kept in the file, not
+#'   in the catalog.
+#' * **Categorical layers.** The codes are written to the file, and the
+#'   legend (the codes with the labels of the active category, see
+#'   `terra::activeCat()`) is recorded in the catalog; [store_read()]
+#'   returns the layer with its categories. Other columns of the category
+#'   table are dropped, with a message. Codes must be whole numbers and
+#'   every code needs a label. No side file (`.aux.xml`) is written, and the
+#'   same cells with and without a legend give the same file and version.
+#' * **Time and units.** The time and the units of layers (`terra::time()`,
+#'   `terra::units()`) are not stored: the file is written without them, so
+#'   they change neither the file nor the version, and no side file
+#'   (`.aux.json`) is written; `x` itself keeps them. Only metadata that a
+#'   source file holds itself may be copied with it when GDAL copies the
+#'   file (see "Staging" below).
+#' * **Staging.** A raster that is an unchanged view of one file without a
+#'   scale or an offset (as `terra::rast(file)` returns it) is copied by
+#'   GDAL without an intermediate file; any other raster (in memory,
+#'   computed, cropped, renamed, a subset of layers, several files, with a
+#'   scale or an offset, or with another CRS or NoData flag than the file)
+#'   is written by terra, which
+#'   first writes an intermediate file of two to three times the output
+#'   when the raster is too large for memory. Every temporary file lies
+#'   below `getOption("rcs.staging_dir")` (default [tempdir()]), which
+#'   needs free room of about one and a half times the output for a file
+#'   copied by GDAL, and of about four times the output for a large raster
+#'   written by terra. For a raster read from files, the write warns (class
+#'   `rcs_warning_staging_space`) when that drive has less free room than
+#'   twice the size of the source files (the ps package tells the free
+#'   room; without it there is no check), and goes on; a raster in memory
+#'   is not checked.
+#'
+#' The same raster written with the same arguments gives the same file and
+#' the same version. A raster written with a version of the package before
+#' `0.0.0.9005` gets a new version when it is written again, even with
+#' unchanged cells: the bytes of the file differ.
 #'
 #' @section DuckDB input:
 #' `x` may be a lazy table on a DuckDB connection (from [dplyr::tbl()], for
@@ -231,6 +306,16 @@
 #'   a lazy DuckDB table (anything [sf::st_crs()] accepts, e.g. `4326`);
 #'   required for such a table, ignored otherwise (an `sf` object carries
 #'   its own).
+#' @param datatype For a raster: `NULL` to keep the source's data type or
+#'   choose the smallest one that holds the values, or one of `"INT1U"`,
+#'   `"INT2U"`, `"INT2S"`, `"INT4U"`, `"INT4S"`, `"FLT4S"`, `"FLT8S"` (see
+#'   "Rasters"). Aborts for any other data.
+#' @param nodata For a raster: `NULL`, or the one number that marks missing
+#'   cells in the file. Cells holding it are missing when read back (see
+#'   "Rasters"). Aborts for any other data.
+#' @param gdal For a raster: `NULL`, or a character vector of `KEY=VALUE`
+#'   creation options of GDAL's COG driver, which replace the defaults by
+#'   key (see "Rasters"). Aborts for any other data.
 #' @return A tibble with one row per location, invisibly: `location`,
 #'   `role`, `status` (`"written"`, `"unchanged"`, `"same"` for a secondary
 #'   that already held the version, `"behind"` or `"unavailable"`), `files`
@@ -278,7 +363,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
                         geocode_engine = c("auto", "s2", "planar"),
                         max_files = 50L, history = NULL, source = NULL, inputs = NULL,
                         columns = NULL, check = TRUE, rows_per_group = 50000L,
-                        crs = NULL) {
+                        crs = NULL, datatype = NULL, nodata = NULL, gdal = NULL) {
   validate_store(st)
   local_trace("store_write")
   call <- rlang::current_env()
@@ -298,6 +383,24 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   kind <- write_kind(x, call)
   if (kind == "duckdb") {
     check_duckdb_mode(mode, call)
+  }
+  if (kind == "raster") {
+    check_raster_arguments(datatype, nodata, gdal, call = call)
+  } else {
+    given <- c(
+      if (!is.null(datatype)) "datatype",
+      if (!is.null(nodata)) "nodata",
+      if (!is.null(gdal)) "gdal"
+    )
+    if (length(given) > 0) {
+      cli::cli_abort(
+        c(
+          "{.arg {given}} appl{?ies/y} to rasters only.",
+          x = "{.arg x} is {.obj_type_friendly {x}}, not a {.cls SpatRaster}."
+        ),
+        class = "rcs_error_argument", call = call
+      )
+    }
   }
 
   # Step 1: fresh catalogs of every location, then the mode.
@@ -330,7 +433,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     geocode_engine = geocode_engine, engine_given = engine_given, max_files = max_files,
     history = dataset_history, source = source %||% NA_character_,
     inputs = inputs %||% NA_character_, columns = columns,
-    rows_per_group = rows_per_group, crs = crs, existing = existing,
+    rows_per_group = rows_per_group, crs = crs, datatype = datatype,
+    nodata = nodata, gdal = gdal, existing = existing,
     existing_index = existing_index, dir = dir, now = now, mode = mode,
     check = check, call = call
   )
@@ -600,7 +704,8 @@ stage_raster <- function(a) {
   staged <- raster_stage(
     a$x, a$dataset, a$title, a$description,
     source = a$source, inputs = a$inputs, columns = descriptions,
-    history = a$history, dir = data_dir
+    history = a$history, dir = data_dir,
+    datatype = a$datatype, nodata = a$nodata, gdal = a$gdal
   )
   entry <- staged$entry
   entry$created <- created_of(a$existing, a$now)

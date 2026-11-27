@@ -533,8 +533,21 @@ r_type_text <- function(r_type) {
       if (isTRUE(r_type$ordered)) "ordered factor" else "factor",
       " (", length(r_type$levels), " level", if (length(r_type$levels) == 1) "" else "s", ")"
     ),
+    # the NoData value and the classes appear only when recorded
     SpatRaster = paste0(
-      "raster layer (", paste(r_type$dim, collapse = " x "), " cells)"
+      "raster layer (",
+      paste(
+        c(
+          paste0(paste(r_type[["dim"]], collapse = " x "), " cells"),
+          if (!is.null(r_type[["nodata"]])) paste0("nodata ", sprintf("%.15g", r_type[["nodata"]])),
+          if (!is.null(r_type[["values"]])) {
+            n <- length(r_type[["values"]])
+            paste0(n, " class", if (n == 1) "" else "es")
+          }
+        ),
+        collapse = ", "
+      ),
+      ")"
     ),
     r_type$class
   )

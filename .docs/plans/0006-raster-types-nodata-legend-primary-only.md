@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-27
 - **Author:** Eduard Bukin
-- **Status:** draft
+- **Status:** active
 
 ## Goal
 
@@ -131,12 +131,12 @@ Part B, primary-only writes (runs only when plan 0005 is `done`; see WP0):
 
 ### WP0. Preflight (orchestrator, no code)
 
-- [ ] `git status` is clean (this plan and note 0004 are committed). Otherwise ask the owner.
-- [ ] Read `DESCRIPTION` and the status line of `.docs/plans/0005-copy-on-read-and-restricted-sync.md`. Record both in "Results".
+- [x] `git status` is clean (this plan and note 0004 are committed). Otherwise ask the owner.
+- [x] Read `DESCRIPTION` and the status line of `.docs/plans/0005-copy-on-read-and-restricted-sync.md`. Record both in "Results".
   - Plan 0005 `done`: Parts A and B both run.
   - Plan 0005 `draft`: only Part A runs (WP1–WP5). After WP5 the orchestrator leaves this plan `active`, writes in "Results" that Part B waits for plan 0005, and reports to the owner.
   - Plan 0005 `active` (being executed by someone else): stop and report to the owner; both plans edit `R/read.R` and `R/write.R`.
-- [ ] Set this plan's status to `active`.
+- [x] Set this plan's status to `active`.
 
 ### Part A. Raster files
 
@@ -144,17 +144,17 @@ Part B, primary-only writes (runs only when plan 0005 is `done`; see WP0):
 
 Scripts and files go in the agent's scratchpad. Each answer is a fact with the code that showed it.
 
-- [ ] **Source NoData tag (D-A3 rule 3).** Find a reliable way to read the NoData tag of each band of a file-backed `SpatRaster`'s source (candidates: `terra::describe(file, options = "json")` parsed with jsonlite; `sf::gdal_utils("info", file, options = "-json")`). Test on files with a tag of 0, with another tag, and without a tag, for `INT1U` and `FLT4S`. Name the function to write (input, output).
-- [ ] **File-backed detection (D-A2 rule 2, D-A10).** Show what `terra::datatype()`, `terra::sources()` (with `bands = TRUE`), `terra::inMemory()` and `terra::window()` return for: a raster read from a file; one layer subset of it; a renamed one; a cropped one; a computed one (`x * 1L`); `c()` of two files; one with `levels<-` set; one with `NAflag<-` set. Give the exact condition for "an unchanged view of one file".
-- [ ] **Translate path (D-A10).** With `sf::gdal_utils("translate")` and the D-A5 options on a stripped LZW `INT1U` source without a NoData tag: confirm type, `-a_nodata`, 512 blocks, overviews, band descriptions (layer names) kept, the same MD5 on two runs, and no `.aux.xml` (also when the source has its own `.aux.xml` with categories, with `-norat`). Compare the values with the terra path. State the branch of the fallback rule.
-- [ ] **Removing levels (D-A6).** Confirm that `levels(copy) <- NULL` on a file-backed raster reads no cells and leaves `x` and its source untouched, that the written TIFF has the same MD5 as the one written from the raster without categories, and that no `.aux.xml` appears. Show how to get codes, labels and the label column name from `terra::cats()` / `terra::activeCat()`.
-- [ ] **Restoring levels (D-A7).** Confirm that `terra::set.cats()` on a raster opened from a file writes nothing next to it, that `terra::crop()` keeps the categories, that `terra::datatype()` still reports the file's type, and that it works on a multi-layer raster with one categorical layer.
-- [ ] **Codes in the check (D-A9).** Name the `terra::extract()` call (or other) that returns codes, not labels, for a categorical raster at given cell numbers.
-- [ ] **Temp folder (D-A11).** Confirm that `terra::terraOptions(tempdir = )` moves the `spat_*.tif` intermediate of `writeRaster(filetype = "COG")`, how to read the current value, and that restoring it works. Say where GDAL puts `.ovr.tmp`.
-- [ ] **Free space (D-A12).** Confirm `ps::ps_disk_usage()` (or the right call) returns free bytes for a folder on Windows; give the code of `disk_free()`.
-- [ ] **Overview resampling test.** Find a way for a test to see the resampling of the overviews (candidates: `terra::rast(file, opts = "OVERVIEW_LEVEL=0")`; the `OVERVIEW_RESAMPLING` item in `terra::describe()`), and a small raster (at least 1,100 × 1,100 cells) on which NEAREST and GDAL's default differ.
-- [ ] **Existing tests and snapshots.** List every test and snapshot that depends on `INT4S` for integers, on the refusal of categorical layers, on the text `raster layer (… cells)`, or on a raster file's MD5 or version, with file, line and the smallest edit.
-- [ ] Report the facts, the D-A10 branch, the lists, and `session closed`. The orchestrator copies them into "Results".
+- [x] **Source NoData tag (D-A3 rule 3).** Find a reliable way to read the NoData tag of each band of a file-backed `SpatRaster`'s source (candidates: `terra::describe(file, options = "json")` parsed with jsonlite; `sf::gdal_utils("info", file, options = "-json")`). Test on files with a tag of 0, with another tag, and without a tag, for `INT1U` and `FLT4S`. Name the function to write (input, output).
+- [x] **File-backed detection (D-A2 rule 2, D-A10).** Show what `terra::datatype()`, `terra::sources()` (with `bands = TRUE`), `terra::inMemory()` and `terra::window()` return for: a raster read from a file; one layer subset of it; a renamed one; a cropped one; a computed one (`x * 1L`); `c()` of two files; one with `levels<-` set; one with `NAflag<-` set. Give the exact condition for "an unchanged view of one file".
+- [x] **Translate path (D-A10).** With `sf::gdal_utils("translate")` and the D-A5 options on a stripped LZW `INT1U` source without a NoData tag: confirm type, `-a_nodata`, 512 blocks, overviews, band descriptions (layer names) kept, the same MD5 on two runs, and no `.aux.xml` (also when the source has its own `.aux.xml` with categories, with `-norat`). Compare the values with the terra path. State the branch of the fallback rule.
+- [x] **Removing levels (D-A6).** Confirm that `levels(copy) <- NULL` on a file-backed raster reads no cells and leaves `x` and its source untouched, that the written TIFF has the same MD5 as the one written from the raster without categories, and that no `.aux.xml` appears. Show how to get codes, labels and the label column name from `terra::cats()` / `terra::activeCat()`.
+- [x] **Restoring levels (D-A7).** Confirm that `terra::set.cats()` on a raster opened from a file writes nothing next to it, that `terra::crop()` keeps the categories, that `terra::datatype()` still reports the file's type, and that it works on a multi-layer raster with one categorical layer.
+- [x] **Codes in the check (D-A9).** Name the `terra::extract()` call (or other) that returns codes, not labels, for a categorical raster at given cell numbers.
+- [x] **Temp folder (D-A11).** Confirm that `terra::terraOptions(tempdir = )` moves the `spat_*.tif` intermediate of `writeRaster(filetype = "COG")`, how to read the current value, and that restoring it works. Say where GDAL puts `.ovr.tmp`.
+- [x] **Free space (D-A12).** Confirm `ps::ps_disk_usage()` (or the right call) returns free bytes for a folder on Windows; give the code of `disk_free()`.
+- [x] **Overview resampling test.** Find a way for a test to see the resampling of the overviews (candidates: `terra::rast(file, opts = "OVERVIEW_LEVEL=0")`; the `OVERVIEW_RESAMPLING` item in `terra::describe()`), and a small raster (at least 1,100 × 1,100 cells) on which NEAREST and GDAL's default differ.
+- [x] **Existing tests and snapshots.** List every test and snapshot that depends on `INT4S` for integers, on the refusal of categorical layers, on the text `raster layer (… cells)`, or on a raster file's MD5 or version, with file, line and the smallest edit.
+- [x] Report the facts, the D-A10 branch, the lists, and `session closed`. The orchestrator copies them into "Results".
 
 #### WP2. Red tests for Part A (test writer)
 
@@ -164,93 +164,93 @@ Helper, in `helper-sim.R`: `sim_landcover(nrow = 60, ncol = 80, seed = 1, file =
 
 Each `test_that()` is named by the behaviour; its comment states the expected red reason.
 
-- [ ] **A-T1 (red).** In-memory whole numbers 1–5 with missing cells: stored type `INT1U`, `r_type$nodata` 255, values and missing cells equal after stage and open. Red: `INT4S`.
-- [ ] **A-T2 (red).** The type follows the range (D-A2 rule 3), one small raster each: largest value 254 → `INT1U`; 255 → `INT2U`; smallest −5 → `INT2S`; largest 70,000 → `INT4U`; smallest −70,000 → `INT4S`. Each round-trips. Red: all `INT4S`.
-- [ ] **A-T3 (guard).** In-memory doubles stay `FLT8S` and round-trip exactly.
-- [ ] **A-T4 (red).** File-backed `sim_landcover(file = )` with `nodata = 0`: `terra::describe()` of the staged file shows `Type=Byte` and `NoData Value=0`; the edge cells read as missing; `r_type$nodata` is 0; the stored type is `INT1U`. Red: unused argument `nodata`.
-- [ ] **A-T5 (red + guard).** A file-backed `FLT4S` source stays `FLT4S` (red: `FLT8S`). A file-backed `INT4S` source with small values stays `INT4S` (guard).
-- [ ] **A-T6 (red).** A file-backed `INT2S` source with a NoData tag of −1 and no `nodata` argument: the tag is kept and recorded. A flag set with `terra::NAflag(x) <- 9` wins over the source tag; `nodata = 7` wins over both.
-- [ ] **A-T7 (red).** Explicit `datatype`: `"FLT4S"` on in-memory doubles is stored as `FLT4S`; `"INT1U"` with a value of 300 aborts with `rcs_error_raster`; `"INT1U"` on doubles with fractions aborts with `rcs_error_raster`; `"INT8S"` and `1L` abort with `rcs_error_argument`; `nodata = 300` with `INT1U`, `nodata = 0.5` with an integer type, `nodata = NA` and `nodata = c(0, 1)` abort with `rcs_error_argument`. Snapshot one message of each class.
-- [ ] **A-T8 (red).** An explicit type with missing cells (D-A3 rule 5): `datatype = "INT2S"` on in-memory values 1–5 with missing cells is stored as `INT2S` with nodata −32768 and round-trips; `datatype = "INT1U"` on in-memory values that include 255 and missing cells aborts with `rcs_error_raster`; `datatype = "INT1U"` on in-memory values 0–255 without missing cells is stored with no NoData tag (`r_type` has no `nodata`).
-- [ ] **A-T9 (red).** Layout, on a 1,100 × 1,100 `sim_landcover()`: `terra::describe()` shows `Block=512x512`, `COMPRESSION=DEFLATE`, `LAYOUT=COG` and overviews; the overviews hold only the class codes of the raster (WP1's method), on WP1's raster where averaging would give other values. Red: block size or resampling of GDAL's defaults (state which in the comment after running).
-- [ ] **A-T10 (red).** `gdal = c("COMPRESS=LZW", "BLOCKSIZE=256")` gives `COMPRESSION=LZW` and `Block=256x256` and keeps the other defaults; `gdal = c("blocksize=256")` equals `"BLOCKSIZE=256"`; the order of `gdal` does not change the MD5; `gdal = "COMPRESS"`, `gdal = 1` and `gdal = NA_character_` abort with `rcs_error_argument`.
-- [ ] **A-T11 (red).** `sim_landcover(legend = TRUE)` is accepted. The staging folder holds exactly the data file (no `.aux.xml`, listed with `all.files = TRUE`). The layer's `r_type` has `values` 1:5, `levels` the five labels and `levels_name` `"label"`. The MD5 and the version equal those of `sim_landcover()` without the legend. A round trip of `columns_to_json()` / `columns_from_json()` keeps the three fields with their types. `x` still has its levels afterwards. Red: categorical layers abort.
-- [ ] **A-T12 (red).** Bad legends abort with `rcs_error_raster`: a duplicated code, a missing label. A category table with a third column informs once, naming the dropped column (snapshot), and stores the active one; with `terra::activeCat(x) <- 2` the second label column is the one stored.
-- [ ] **A-T13 (red).** `raster_open(be, path, columns = <spec>)` returns a categorical raster: `terra::is.factor()` is `TRUE`, `terra::cats()` equals the legend, `terra::datatype()` is `INT1U`. With `intersects`, the cropped raster keeps the categories. Without `columns`, the raster holds codes. The folder of the file holds no new file after opening. A three-layer raster with one categorical layer restores that layer only.
-- [ ] **A-T14 (red).** Staging. After staging a file-backed and an in-memory raster, R's `tempdir()` holds no new `spat_*` file and the staging folder holds only the data file; `terra::terraOptions(print = FALSE)$tempdir` is what it was before, also after a staging that aborts (`datatype = "INT1U"` with a value of 300). With `disk_free()` mocked (`local_mocked_bindings()`) to return 1, staging a file-backed raster warns with class `rcs_warning_staging_space` and still writes; mocked to `NA`, and for an in-memory raster, no warning. Snapshot the warning with the folder masked.
-- [ ] **A-T15 (red; dropped under the fallback branch).** The path taken, seen by mocking `raster_write_translate()` and `raster_write_terra()` (or the names WP3 is told to use: fix them here and in WP3) with counting wrappers: the translate path for `sim_landcover(file = )` unchanged; the terra path for an in-memory raster, a renamed one, a cropped one, one layer of a three-layer file, and one with a legend whose source has other layer names. Both paths read back with equal values, type, NoData tag and names.
-- [ ] **A-T16 (red + guard).** Determinism: two stagings give the same MD5 and version for (a) file-backed `INT1U` with `nodata = 0` and a legend, (b) in-memory `INT1U`, (c) `FLT4S`. Another `nodata` gives another version.
-- [ ] **A-T17 (red), `test-write.R` / `test-read.R`.** Through the public functions, with a primary and a local secondary: `store_write(st, sim_landcover(file = , legend = TRUE), "grids/cover", …, nodata = 0)`, then `store_read()`: categorical, `INT1U`, edge cells missing, values equal as codes; the same from the secondary; `store_read(intersects = <box>)` keeps the categories. The manifest file read from disk (`jsonlite`) holds for the layer: type `INT1U`, nodata 0, resolution, dim, values and levels. A second identical write uploads nothing. `datatype`, `nodata` or `gdal` given with a data frame aborts with `rcs_error_argument` (snapshot one).
-- [ ] **A-T18 (red), `test-check.R`.** The serialization check passes for the write of A-T17 (reference cells equal to nodata count as missing; codes compared with codes) and for `datatype = "FLT4S"` on in-memory doubles; `store_check(st, "grids/cover", x = <the raster>)` reports `"ok"`; with one cell of the reference changed inside the sampled cells (set `n` to the number of cells of a small raster) it reports `"failed"`.
-- [ ] **A-T19 (red), `test-inspect.R`.** Snapshot of `store_describe()` for the dataset of A-T17: the layer line shows the cells, `nodata 0` and `5 classes`. A plain float raster shows neither addition (guard on the existing snapshot text).
-- [ ] **A-T20 (level `full`, GCS; skipped otherwise).** Extend "a raster opens from GCS through /vsigs/": a staged `sim_landcover(file = , legend = TRUE)` with `nodata = 0`, opened with `columns` and `intersects`, is categorical, `INT1U`, with equal values.
-- [ ] **Edits to existing tests** (the only ones allowed; plus those on WP1's list that follow from the same decisions):
+- [x] **A-T1 (red).** In-memory whole numbers 1–5 with missing cells: stored type `INT1U`, `r_type$nodata` 255, values and missing cells equal after stage and open. Red: `INT4S`.
+- [x] **A-T2 (red).** The type follows the range (D-A2 rule 3), one small raster each: largest value 254 → `INT1U`; 255 → `INT2U`; smallest −5 → `INT2S`; largest 70,000 → `INT4U`; smallest −70,000 → `INT4S`. Each round-trips. Red: all `INT4S`.
+- [x] **A-T3 (guard).** In-memory doubles stay `FLT8S` and round-trip exactly.
+- [x] **A-T4 (red).** File-backed `sim_landcover(file = )` with `nodata = 0`: `terra::describe()` of the staged file shows `Type=Byte` and `NoData Value=0`; the edge cells read as missing; `r_type$nodata` is 0; the stored type is `INT1U`. Red: unused argument `nodata`.
+- [x] **A-T5 (red + guard).** A file-backed `FLT4S` source stays `FLT4S` (red: `FLT8S`). A file-backed `INT4S` source with small values stays `INT4S` (guard).
+- [x] **A-T6 (red).** A file-backed `INT2S` source with a NoData tag of −1 and no `nodata` argument: the tag is kept and recorded. A flag set with `terra::NAflag(x) <- 9` wins over the source tag; `nodata = 7` wins over both.
+- [x] **A-T7 (red).** Explicit `datatype`: `"FLT4S"` on in-memory doubles is stored as `FLT4S`; `"INT1U"` with a value of 300 aborts with `rcs_error_raster`; `"INT1U"` on doubles with fractions aborts with `rcs_error_raster`; `"INT8S"` and `1L` abort with `rcs_error_argument`; `nodata = 300` with `INT1U`, `nodata = 0.5` with an integer type, `nodata = NA` and `nodata = c(0, 1)` abort with `rcs_error_argument`. Snapshot one message of each class.
+- [x] **A-T8 (red).** An explicit type with missing cells (D-A3 rule 5): `datatype = "INT2S"` on in-memory values 1–5 with missing cells is stored as `INT2S` with nodata −32768 and round-trips; `datatype = "INT1U"` on in-memory values that include 255 and missing cells aborts with `rcs_error_raster`; `datatype = "INT1U"` on in-memory values 0–255 without missing cells is stored with no NoData tag (`r_type` has no `nodata`).
+- [x] **A-T9 (red).** Layout, on a 1,100 × 1,100 `sim_landcover()`: `terra::describe()` shows `Block=512x512`, `COMPRESSION=DEFLATE`, `LAYOUT=COG` and overviews; the overviews hold only the class codes of the raster (WP1's method), on WP1's raster where averaging would give other values. Red: block size or resampling of GDAL's defaults (state which in the comment after running).
+- [x] **A-T10 (red).** `gdal = c("COMPRESS=LZW", "BLOCKSIZE=256")` gives `COMPRESSION=LZW` and `Block=256x256` and keeps the other defaults; `gdal = c("blocksize=256")` equals `"BLOCKSIZE=256"`; the order of `gdal` does not change the MD5; `gdal = "COMPRESS"`, `gdal = 1` and `gdal = NA_character_` abort with `rcs_error_argument`.
+- [x] **A-T11 (red).** `sim_landcover(legend = TRUE)` is accepted. The staging folder holds exactly the data file (no `.aux.xml`, listed with `all.files = TRUE`). The layer's `r_type` has `values` 1:5, `levels` the five labels and `levels_name` `"label"`. The MD5 and the version equal those of `sim_landcover()` without the legend. A round trip of `columns_to_json()` / `columns_from_json()` keeps the three fields with their types. `x` still has its levels afterwards. Red: categorical layers abort.
+- [x] **A-T12 (red).** Bad legends abort with `rcs_error_raster`: a duplicated code, a missing label. A category table with a third column informs once, naming the dropped column (snapshot), and stores the active one; with `terra::activeCat(x) <- 2` the second label column is the one stored.
+- [x] **A-T13 (red).** `raster_open(be, path, columns = <spec>)` returns a categorical raster: `terra::is.factor()` is `TRUE`, `terra::cats()` equals the legend, `terra::datatype()` is `INT1U`. With `intersects`, the cropped raster keeps the categories. Without `columns`, the raster holds codes. The folder of the file holds no new file after opening. A three-layer raster with one categorical layer restores that layer only.
+- [x] **A-T14 (red).** Staging. After staging a file-backed and an in-memory raster, R's `tempdir()` holds no new `spat_*` file and the staging folder holds only the data file; `terra::terraOptions(print = FALSE)$tempdir` is what it was before, also after a staging that aborts (`datatype = "INT1U"` with a value of 300). With `disk_free()` mocked (`local_mocked_bindings()`) to return 1, staging a file-backed raster warns with class `rcs_warning_staging_space` and still writes; mocked to `NA`, and for an in-memory raster, no warning. Snapshot the warning with the folder masked.
+- [x] **A-T15 (red; dropped under the fallback branch).** The path taken, seen by mocking `raster_write_translate()` and `raster_write_terra()` (or the names WP3 is told to use: fix them here and in WP3) with counting wrappers: the translate path for `sim_landcover(file = )` unchanged; the terra path for an in-memory raster, a renamed one, a cropped one, one layer of a three-layer file, and one with a legend whose source has other layer names. Both paths read back with equal values, type, NoData tag and names.
+- [x] **A-T16 (red + guard).** Determinism: two stagings give the same MD5 and version for (a) file-backed `INT1U` with `nodata = 0` and a legend, (b) in-memory `INT1U`, (c) `FLT4S`. Another `nodata` gives another version.
+- [x] **A-T17 (red), `test-write.R` / `test-read.R`.** Through the public functions, with a primary and a local secondary: `store_write(st, sim_landcover(file = , legend = TRUE), "grids/cover", …, nodata = 0)`, then `store_read()`: categorical, `INT1U`, edge cells missing, values equal as codes; the same from the secondary; `store_read(intersects = <box>)` keeps the categories. The manifest file read from disk (`jsonlite`) holds for the layer: type `INT1U`, nodata 0, resolution, dim, values and levels. A second identical write uploads nothing. `datatype`, `nodata` or `gdal` given with a data frame aborts with `rcs_error_argument` (snapshot one).
+- [x] **A-T18 (red), `test-check.R`.** The serialization check passes for the write of A-T17 (reference cells equal to nodata count as missing; codes compared with codes) and for `datatype = "FLT4S"` on in-memory doubles; `store_check(st, "grids/cover", x = <the raster>)` reports `"ok"`; with one cell of the reference changed inside the sampled cells (set `n` to the number of cells of a small raster) it reports `"failed"`.
+- [x] **A-T19 (red), `test-inspect.R`.** Snapshot of `store_describe()` for the dataset of A-T17: the layer line shows the cells, `nodata 0` and `5 classes`. A plain float raster shows neither addition (guard on the existing snapshot text).
+- [x] **A-T20 (level `full`, GCS; skipped otherwise; written, not run).** Extend "a raster opens from GCS through /vsigs/": a staged `sim_landcover(file = , legend = TRUE)` with `nodata = 0`, opened with `columns` and `intersects`, is categorical, `INT1U`, with equal values.
+- [x] **Edits to existing tests** (the only ones allowed; plus those on WP1's list that follow from the same decisions):
   - **A-E1.** "integer layers are stored as integers": the expected type becomes the one D-A2 rule 3 gives for that raster (compute it from the values in the test; do not hard-code a guess).
   - **A-E2.** "raster_stage() aborts on unusable rasters": the categorical expectation and its snapshot are removed; A-T11 replaces them. Every other expectation stays.
   - **A-E3.** Snapshots that show a raster's version, bytes or the layer description: regenerated only after WP3, by the code writer, and reviewed by WP3-V line by line.
   - **A-E4.** Tests that compare a raster file's bytes or MD5 with a fixed value: none are expected; any found by WP1 are reported, not edited.
-- [ ] Run `testthat::test_local(filter = "raster")`, then `^write$`, `^read$`, `check`, `inspect`, `integration`, `hooks`, `schema` separately. Report each new test red or green with the first line of its failure, the edited tests, and `session closed`.
+- [x] Run `testthat::test_local(filter = "raster")`, then `^write$`, `^read$`, `check`, `inspect`, `integration`, `hooks`, `schema` separately. Report each new test red or green with the first line of its failure, the edited tests, and `session closed`.
 
 #### WP2-V. Red verification (verifier, fresh session)
 
-- [ ] Read only the test diff, D-A1–D-A14, the D-A10 branch in "Results" and note 0004. Check that the tests encode the decisions, that no test depends on another test's state, that every folder is under `withr::local_tempdir()`, and that no test uses data other than `rcs_sim_*()`.
-- [ ] Check the edits to existing tests against A-E1–A-E4 and WP1's list: nothing else was removed or weakened.
-- [ ] Run the same filters. Every red test fails for the reason in its comment, not for a setup error; every guard passes; every untouched existing test passes. `git diff --stat -- R/` is empty.
-- [ ] PASS or FAIL with reasons, then `session closed`.
+- [x] Read only the test diff, D-A1–D-A14, the D-A10 branch in "Results" and note 0004. Check that the tests encode the decisions, that no test depends on another test's state, that every folder is under `withr::local_tempdir()`, and that no test uses data other than `rcs_sim_*()`.
+- [x] Check the edits to existing tests against A-E1–A-E4 and WP1's list: nothing else was removed or weakened.
+- [x] Run the same filters. Every red test fails for the reason in its comment, not for a setup error; every guard passes; every untouched existing test passes. `git diff --stat -- R/` is empty.
+- [x] PASS or FAIL with reasons, then `session closed`.
 
 #### WP3. Code for Part A (code writer)
 
 Files: `R/raster.R`, `R/write.R` (the three arguments, their checks, `stage_raster()`, roxygen), `R/read.R` (pass the columns to `raster_open()`), `R/check.R` (D-A9), `R/inspect.R` (D-A8), `R/schema.R` (`"values"` in the two field lists; the `r_type` table in the roxygen), `R/utils.R` (`disk_free()`), `DESCRIPTION` (`ps` in `Suggests`).
 
-- [ ] D-A1–D-A13, with these internal functions in `R/raster.R`, each with a comment or `@noRd` block: `raster_datatype(x, datatype, nodata)` (D-A2, D-A4), `raster_nodata(x, datatype, nodata)` (D-A3), `raster_source_nodata(x)` (WP1's method), `raster_gdal_options(datatype, gdal)` (D-A5), `raster_legend(x)` (D-A6; a list per layer or `NULL`), `raster_is_file_view(x)` (WP1's condition), `raster_write()`, `raster_write_translate()`, `raster_write_terra()` (D-A10, D-A11). Update the header comment of the file (the rules list) to the new rules.
-- [ ] Roxygen of `store_write()`: the three arguments; in the raster bullet of the details, the type rule, the nodata rule (with the sentence that cells holding the nodata value read back as missing), the default options and how `gdal` overrides them, categorical layers, that only COG is written, that a raster written before this version gets a new version when written again, and the staging note (temp files below `rcs.staging_dir`; free room of about twice the output; the warning). Roxygen of `store_read()`: a categorical raster is returned with its categories. Do not run `devtools::document()` yet (WP5 does).
-- [ ] Run `testthat::test_local(filter = "raster")` and the regression filters of WP2 until green. Do not edit tests, except to regenerate the snapshots of A-E3 (`testthat::snapshot_accept()` for those files only), listing every changed snapshot line in the report.
-- [ ] Report: diff summary, counts per filter, the snapshot changes, `session closed`.
+- [x] D-A1–D-A13, with these internal functions in `R/raster.R`, each with a comment or `@noRd` block: `raster_datatype(x, datatype, nodata)` (D-A2, D-A4), `raster_nodata(x, datatype, nodata)` (D-A3), `raster_source_nodata(x)` (WP1's method), `raster_gdal_options(datatype, gdal)` (D-A5), `raster_legend(x)` (D-A6; a list per layer or `NULL`), `raster_is_file_view(x)` (WP1's condition), `raster_write()`, `raster_write_translate()`, `raster_write_terra()` (D-A10, D-A11). Update the header comment of the file (the rules list) to the new rules.
+- [x] Roxygen of `store_write()`: the three arguments; in the raster bullet of the details, the type rule, the nodata rule (with the sentence that cells holding the nodata value read back as missing), the default options and how `gdal` overrides them, categorical layers, that only COG is written, that a raster written before this version gets a new version when written again, and the staging note (temp files below `rcs.staging_dir`; free room of about twice the output; the warning). Roxygen of `store_read()`: a categorical raster is returned with its categories. Do not run `devtools::document()` yet (WP5 does).
+- [x] Run `testthat::test_local(filter = "raster")` and the regression filters of WP2 until green. Do not edit tests, except to regenerate the snapshots of A-E3 (`testthat::snapshot_accept()` for those files only), listing every changed snapshot line in the report.
+- [x] Report: diff summary, counts per filter, the snapshot changes, `session closed`.
 
 #### WP3-V. Green verification (verifier, fresh session)
 
-- [ ] Read the `R/` diff with no prior conclusions against D-A1–D-A13. Look for: a pass over all cells where rule 2 of D-A2 should avoid one; `x` modified by the caller's reference (levels removed from the user's object); terra's temp folder not restored after an error; an `.aux.xml` that can survive; nodata left to terra's default; options applied in the order given; `raster_open()` writing next to the file; bare `stop()` / `warning()` / `message()`.
-- [ ] Review every changed snapshot line (A-E3): each change follows from a decision.
-- [ ] Run, each separately, reporting counts and failures verbatim: `raster`, `^write$`, `^read$`, `check`, `inspect`, `schema`, `integration`, `hooks`, `sim`, `catalog`, `^sync$`.
-- [ ] Mutation check, in the R session only (never edit files), with `local_mocked_bindings()` or `assignInNamespace()`:
+- [x] Read the `R/` diff with no prior conclusions against D-A1–D-A13. Look for: a pass over all cells where rule 2 of D-A2 should avoid one; `x` modified by the caller's reference (levels removed from the user's object); terra's temp folder not restored after an error; an `.aux.xml` that can survive; nodata left to terra's default; options applied in the order given; `raster_open()` writing next to the file; bare `stop()` / `warning()` / `message()`.
+- [x] Review every changed snapshot line (A-E3): each change follows from a decision.
+- [x] Run, each separately, reporting counts and failures verbatim: `raster`, `^write$`, `^read$`, `check`, `inspect`, `schema`, `integration`, `hooks`, `sim`, `catalog`, `^sync$`.
+- [x] Mutation check, in the R session only (never edit files), with `local_mocked_bindings()` or `assignInNamespace()`:
   - `raster_datatype()` always returns `"INT4S"`: A-T1, A-T2, A-T4, A-T5 must fail.
   - `raster_nodata()` always returns `NULL`: A-T1, A-T4, A-T6 must fail.
   - `raster_gdal_options()` returns `character()`: A-T9, A-T10 must fail.
   - `raster_legend()` returns `NULL` for every layer: A-T11, A-T13, A-T17, A-T19 must fail.
   - `raster_is_file_view()` always `FALSE` (when the translate path is in use): A-T15 must fail; every other raster test must still pass.
   Report which tests failed; a mutation no test catches is reported as a gap.
-- [ ] PASS or FAIL, then `session closed`.
+- [x] PASS or FAIL, then `session closed`.
 
 #### WP4. Measurement (verifier, own session; after WP3-V; parallel with WP5-docs)
 
 Script in the agent's scratchpad; nothing written to `bench/` or `output/`. Simulated data only.
 
-- [ ] Build a file-backed `INT1U` raster of 25,000 × 25,000 cells in EPSG:32636 at 10 m, stripped, LZW, without a NoData tag: a 250 × 250 raster of whole numbers 0–27 (seeded), enlarged 100 times with `terra::disagg(filename = , datatype = "INT1U")`.
-- [ ] Stage it with `raster_stage(nodata = 0)` into a staging folder of its own, with a legend of 27 classes. While it runs, a background process (`callr::r_bg()`, development only) records every 0.2 s the total size of the files below the staging folder and of new files in R's `tempdir()` outside it. Record: seconds, output bytes, peak bytes in the staging folder, peak bytes outside it. Remove terra's temp files between runs (`terra::tmpFiles(remove = TRUE)`), so one run does not count another's files.
-- [ ] The same for the raster read into memory (`terra::rast()` then `+ 0L`, or `terra::toMemory()`), which takes the terra path.
-- [ ] Check the staged file: `Type=Byte`, `NoData Value=0`, `Block=512x512`, overviews, and equal values against the source on 1e5 random cells.
-- [ ] Expected: output within 1.5 times the source file; nothing new outside the staging folder; peak in the staging folder at most 2 times the output on the translate path. The terra path's peak is reported as measured (about 3.6 times in note 0004); it is documented, not a failure.
-- [ ] Report the table, PASS or FAIL against the expectations, `session closed`. On FAIL the orchestrator routes back to WP3.
+- [x] Build a file-backed `INT1U` raster of 25,000 × 25,000 cells in EPSG:32636 at 10 m, stripped, LZW, without a NoData tag: a 250 × 250 raster of whole numbers 0–27 (seeded), enlarged 100 times with `terra::disagg(filename = , datatype = "INT1U")`.
+- [x] Stage it with `raster_stage(nodata = 0)` into a staging folder of its own, with a legend of 27 classes. While it runs, a background process (`callr::r_bg()`, development only) records every 0.2 s the total size of the files below the staging folder and of new files in R's `tempdir()` outside it. Record: seconds, output bytes, peak bytes in the staging folder, peak bytes outside it. Remove terra's temp files between runs (`terra::tmpFiles(remove = TRUE)`), so one run does not count another's files.
+- [x] The same for the raster read into memory (`terra::rast()` then `+ 0L`, or `terra::toMemory()`), which takes the terra path.
+- [x] Check the staged file: `Type=Byte`, `NoData Value=0`, `Block=512x512`, overviews, and equal values against the source on 1e5 random cells.
+- [x] Expected: output within 1.5 times the source file; nothing new outside the staging folder; peak in the staging folder at most 2 times the output on the translate path. The terra path's peak is reported as measured (about 3.6 times in note 0004); it is documented, not a failure.
+- [x] Report the table, PASS or FAIL against the expectations, `session closed`. On FAIL the orchestrator routes back to WP3.
 
 #### WP5-docs. Documentation for Part A (writer; after WP3-V; parallel with WP4)
 
 Files: `vignettes/geospatial.Rmd`, `README.Rmd` (only if it describes raster types), `.docs/plans/0001-rcs-package.md` (section "Rasters", the `r_type` notes; mark the edits "(changed in plan 0006)").
 
-- [ ] In the raster section of `vignettes/geospatial.Rmd`: a class map made from `rcs_sim_raster()[["cover"]]` with levels, written with `nodata`, read back with its categories and with `intersects`; one paragraph on the data type rule, one on `gdal =` (ZSTD as the example), one on staging room. Vignettes write only below `tempdir()`.
-- [ ] Render the edited vignette to a folder under `tempdir()` with `rmarkdown::render()`; it must run without error. Run `devtools::build_readme()` if `README.Rmd` changed.
-- [ ] Report the files changed, the render results, `session closed`.
+- [x] In the raster section of `vignettes/geospatial.Rmd`: a class map made from `rcs_sim_raster()[["cover"]]` with levels, written with `nodata`, read back with its categories and with `intersects`; one paragraph on the data type rule, one on `gdal =` (ZSTD as the example), one on staging room. Vignettes write only below `tempdir()`.
+- [x] Render the edited vignette to a folder under `tempdir()` with `rmarkdown::render()`; it must run without error. Run `devtools::build_readme()` if `README.Rmd` changed.
+- [x] Report the files changed, the render results, `session closed`.
 
 #### WP5. Release A (orchestrator + one writer)
 
-- [ ] The orchestrator fills in "Results" for Part A (WP1 facts, verdicts and counts, the WP4 table) before the writer commits. If Part B does not run (WP0), it leaves the status `active` and writes why.
-- [ ] One writer:
+- [x] The orchestrator fills in "Results" for Part A (WP1 facts, verdicts and counts, the WP4 table) before the writer commits. If Part B does not run (WP0), it leaves the status `active` and writes why.
+- [x] One writer (ticked before the commit so that the commit holds the final plan; the push was added on the owner's instruction):
   - sets the version of D-A14 in `DESCRIPTION`;
   - runs `devtools::document()` and checks that only the expected `man/` files changed (`store_write.Rd`, `store_read.Rd`, and any other the diff explains);
   - runs `testthat::test_local(filter = "raster|^write$|^read$|check|inspect")` once more;
   - stages explicit paths only (the changed `R/*.R`, `tests/testthat/*.R`, `tests/testthat/_snaps/*.md`, `man/*.Rd`, `DESCRIPTION`, the edited vignette, `README.Rmd` and `README.md` if changed, `.docs/plans/0001-rcs-package.md`, this plan);
   - commits with no email address and no AI attribution, for example `Plan 0006, part A: rasters keep the smallest data type, carry nodata and a class legend, COG options through gdal =, disk-safe staging; version 0.0.0.900x`;
   - does **not** push; reports the commit hash, `git status` (clean), and `session closed`.
-- [ ] The orchestrator reports to the owner in a few bullets: what changed, the tests with counts, the WP4 table, whether Part B runs.
+- [x] The orchestrator reports to the owner in a few bullets: what changed, the tests with counts, the WP4 table, whether Part B runs.
 
 ### Part B. Primary-only writes (only when plan 0005 is done)
 
@@ -318,11 +318,308 @@ Not blocking. The orchestrator records any new ones here for the owner.
 - Reading a `.qml` legend into a data frame is left to the downstream project.
 - Time series (a multi-band stack or a cube format) are out of scope (note 0004).
 - A translate path for rasters that are a renamed or subset view of one file would cut the terra path's peak (about 3.6 times the output). Not in this plan.
+- (WP3-V) A layer name with a leading space reads back without it on the terra path. Should `raster_stage()` abort on layer names with leading or trailing whitespace?
+- (WP3-V) A source with a rotated geotransform, which terra cannot read, is staged as a rotated COG. Should `raster_stage()` abort when `terra::is.rotated(x)`?
+- (WP3-V) Time and units of layers (`terra::time()`, `terra::units()`) are not stored (AM10). Should they go into `r_type` later?
+- (WP3-V) A legend whose codes include the nodata value is stored unchanged (code 0 "outside" with `nodata = 0`).
+- (WP3) For a source without band descriptions the layer is named after the file, so the same cells under another file name give another MD5 and version (AM9).
 
 ## Results
 
-(Filled in by the orchestrator: WP0 facts, WP1 and WP6 facts and the D-A10 branch, then each WP's verdict and counts, and the WP4 table.)
+### WP0 (2026-11-27)
+
+- `git status` clean at `70536ad`.
+- `DESCRIPTION`: version `0.0.0.9004`. Part A is released as `0.0.0.9005` (D-A14).
+- Plan 0005: status `draft`. Only Part A runs (WP1–WP5); Part B (WP6–WP9) waits for plan 0005.
+- During WP1, plan 0005 was revised by another session and committed as `3ea82ea` (still `draft`; it also names version `0.0.0.9005`). Rechecked after WP2: `draft`, `DESCRIPTION` still `0.0.0.9004`.
+
+### WP1, survey A (2026-11-27)
+
+Versions: R 4.6.2, terra 1.9.50, sf 1.1.3, GDAL 3.12.1, ps 1.9.3 (installed, not yet in `DESCRIPTION`). No repository file changed. Session closed.
+
+**D-A10 branch: TRANSLATE PATH IN USE.** Layer names are kept, the output is deterministic (same MD5 on two runs), no category data stays in the TIFF. A-T15 and the translate half of A-T14 stay.
+
+Six facts contradict a decision or a test (C1–C6, item 11). The owner accepted all six recommendations on 2026-11-27. **Amendments, which govern over the text of the decisions above:**
+
+- **AM1 (D-A5).** The default is `PREDICTOR=2` for an integer type and `PREDICTOR=3` for a float type, not `PREDICTOR=YES`.
+- **AM2 (D-A2 rule 2).** "File-backed" means `!any(terra::inMemory(x))` and `all(nzchar(terra::sources(x, bands = TRUE)$source))`; then all layers have the same `terra::datatype()` and it is one of the seven. The same test decides "file-backed" in D-A3 rule 3 and D-A12.
+- **AM3 (D-A10).** The translate path is used only when `raster_is_file_view(x)` is `TRUE` **and** every source NoData tag is `NA` or equal to the chosen nodata (`all(is.na(tags) | tags == nodata)`; with no chosen nodata, every tag must be `NA`). Otherwise the terra path. With no nodata value the translate call passes `-a_nodata none`. After the call the `.aux.xml` is deleted and `file.exists(file)` is checked (abort otherwise).
+- **AM4 (D-A11, D-A6).** terra's temp folder during `raster_write()` is a subfolder `terra/` of the staging temp folder, created first and removed after the write; the "exactly one file" assertion is made after that removal.
+- **AM5 (D-A3 rules 5 and 6, D-A10).** "No NoData tag" means "no finite NoData value": the terra path passes `NAflag = NaN` (the file then shows `NoData Value=nan`), the translate path passes `-a_nodata none`. Tests check that `raster_source_nodata()` of the staged file is `NA` and that `r_type` has no `nodata`, not the absence of a `NoData Value` line. "The same NoData tag" on both paths (D-A10) means the same finite value, or none.
+- **AM6 (A-T12, D-A6).** The legend checks live in one internal function `raster_legend_check(codes, labels, layer)` (aborts with `rcs_error_raster`), called by `raster_legend()`. A-T12 tests the missing label through a raster, and the duplicated code by calling `raster_legend_check()` directly.
+- **AM7 (AM3, session flags; found in WP3, taken by default on the owner's instruction of 2026-11-27 to apply the recommended decision).** terra treats both the source tag and a session flag as missing (tag −1 with flag 9: both read as `NA`). The translate path is used only when `raster_is_file_view(x)` and every finite session flag **and** every finite source tag equals the chosen nodata (none of either when there is no nodata).
+- **AM8 (points the decisions left open; taken by default the same way).**
+  - D-A3 rules 2 and 3: a raster where some layers have a flag or tag and others have none aborts with `rcs_error_raster` and asks for `nodata =`.
+  - D-A2 rule 3 with a known nodata (argument, flag or tag): the type is the first whose range holds the values and that nodata (in-memory 0–5 with `nodata = 0` is `INT1U`).
+  - D-A5: a key given twice in `gdal` (in any case) aborts with `rcs_error_argument`; keys are emitted in upper case.
+  - D-A7: the code column of a restored legend is named `value` (`code` when the label column is itself `value`).
+- **AM9 (D-A10, D-A2 rule 2; found by WP3-V round 1, taken by default the same way).** Three cases where the translate path wrote a file that differs from `x`:
+  - **Names (MF1).** A source without band descriptions (usual for GeoTIFFs of other software) is named by terra after its file, and `gdal_translate` writes no description, so the staged file's layer was named `part-<version>`. Rule: on the translate path the staged file must read back with `names(x)`. The band descriptions are set to `names(x)` through an intermediate VRT in the staging temp folder (`<Description>` per band), provided the output stays deterministic (the same MD5 from two staging folders) and the VRT is removed before the one-file assertion. If that cannot be made to hold, a source whose bands lack a description takes the terra path.
+  - **CRS (MF2).** The translate path also requires the CRS of `x` to equal the CRS of the file (`terra::crs(x) == terra::crs(terra::rast(file))`); a CRS set in the session goes to the terra path.
+  - **Scale and offset (MF3).** A raster with a scale or offset, in `x` (`terra::scoff(x)` not 1 and 0) or in a source band (the file's scale / offset, also when opened with `raw = TRUE`), never takes the translate path, and D-A2 rule 2 does not apply to it: the type comes from rules 1, 3 and 4, and the terra path writes the values as `x` reads them.
+- **AM10 (found by WP3-V round 2, taken by default the same way).**
+  - **Side files (D-A6).** terra writes `<file>.aux.json` for a raster with `terra::time()` or `terra::units()`, which made the one-file assertion abort. Both write functions delete `<file>.aux.xml` and `<file>.aux.json`. Time and units of layers are not stored; the roxygen of `store_write()` says so.
+  - **VRT bands (AM9, names).** `raster_named_vrt()` counts only the bands with a `band=` attribute (a mask band inside `<MaskBand>` is not one). When the count still differs from the layers, the terra path is taken instead of an internal error.
+  - **Source tag of a scaled layer (D-A3 rule 3, AM9).** The source NoData tag is in stored units, so it is ignored for a layer whose `terra::scoff(x)` is not 1 and 0; rules 4–6 then apply. It stays valid for a scaled source opened with `raw = TRUE`.
+  - **Source overviews (D-A5, D-A10).** `OVERVIEWS=IGNORE_EXISTING` joins the default options, so the translate path builds its own overviews with the resampling of D-A5 instead of copying the source's.
+- **AM11 (AM10, time and units; found in WP3 round 3, taken by default the same way).** terra writes time and units into the TIFF itself (band metadata), not only into `.aux.json`, and they change the bytes. So the file is written from a copy of `x` without time and units (`x` keeps them); they change neither the file nor the version. Accepted limit: band metadata that a source file holds itself (time, units, a colour table) is carried when the file is copied on the translate path, as GDAL copies it; the roxygen of `store_write()` says so.
+- **AM12 (found by the GCS tests, taken by default the same way).** GDAL caches the listing of a `/vsigs/` folder for the whole process, so after a raster has been read from a bucket, a version written later (`part-<new version>.tif`) "does not exist" until R restarts. Rule: when `raster_open()` cannot open a path on a backend that is not local, it clears GDAL's VSI cache (`terra::clearVSIcache()`) and tries once more; only a second failure aborts. File names carry the version, so a cached path never has stale content.
+- **Fixed names** (WP2 and WP3): `raster_write_translate(source, file, datatype, nodata, options)` and `raster_write_terra(x, file, datatype, nodata, options)`; `raster_stage()` gets `datatype = NULL, nodata = NULL, gdal = NULL` after `dir`.
+
+1. **Source NoData tag.** `terra::describe(file, options = "json")` parsed with jsonlite, `bands[[i]]$noDataValue` (`NULL` when absent; the string `"NaN"` for a `nan` tag). Same result from `sf::gdal_utils("info", …, "-json")`. `terra::NAflag()` was `NaN` for every file. terra applies the source tag on read (cells equal to it are already `NA` in `x`). Function:
+
+   ```r
+   # Input: a SpatRaster. Output: double, one per layer: the finite NoData tag of
+   # the layer's source band; NA when none, not finite, or the layer is in memory.
+   raster_source_nodata <- function(x) {
+     src <- terra::sources(x, bands = TRUE)          # one row per layer: sid, source, bands
+     out <- rep(NA_real_, nrow(src))
+     for (f in unique(src$source[nzchar(src$source)])) {
+       info <- jsonlite::fromJSON(
+         paste(terra::describe(f, options = "json"), collapse = "\n"),
+         simplifyVector = FALSE
+       )
+       tags <- vapply(info$bands, function(b) {
+         v <- b$noDataValue
+         if (is.null(v)) NA_real_ else suppressWarnings(as.numeric(v))
+       }, numeric(1))
+       rows <- which(src$source == f)
+       out[rows] <- tags[src$bands[rows]]
+     }
+     out[!is.finite(out)] <- NA_real_
+     out
+   }
+   ```
+
+   Session flag (D-A3 rule 2): `terra::NAflag(x)` has one value per source, not per layer; per layer: `s <- terra::sources(x, bands = TRUE); terra::NAflag(x)[match(s$sid, unique(s$sid))]`. In memory, `NAflag(x) <- 9` is applied at once and `NAflag()` then returns `NaN`: rule 2 can fire only for file-backed rasters. Test files with an exact tag: `sf::gdal_utils("translate", f0, f, options = c("-co", "COMPRESS=LZW", "-a_nodata", "<value>" | "none"))`.
+
+2. **File-backed detection.** `terra::sources(x, bands = TRUE)` is a data frame `sid`, `source`, `bands`, one row per layer; `source` is `""` in memory. `crop()` and `x * 1L` give an in-memory raster (`datatype()` `""`). `terra::datatype()` keeps the file's type after `toMemory()` and after `x[1] <- 300` (C2). `levels<-` renames the layer to the label column. Condition for "an unchanged view of one file":
+
+   ```r
+   raster_is_file_view <- function(x) {
+     src <- terra::sources(x, bands = TRUE)
+     file <- unique(src$source)
+     if (length(file) != 1L || !nzchar(file) || any(terra::inMemory(x)) || any(terra::window(x))) {
+       return(FALSE)
+     }
+     if (!identical(as.integer(src$bands), seq_len(terra::nlyr(x)))) {
+       return(FALSE)
+     }
+     ref <- tryCatch(terra::rast(file), error = function(e) NULL)
+     !is.null(ref) &&
+       terra::nlyr(ref) == terra::nlyr(x) &&
+       identical(dim(ref), dim(x)) &&
+       identical(as.vector(terra::ext(ref)), as.vector(terra::ext(x))) &&
+       identical(names(ref), names(x))
+   }
+   ```
+
+   `TRUE` for: read from a file, `x[[1:3]]`, `NAflag<-` set, `levels<-` set and the name restored. `FALSE` for: one layer, renamed, cropped, computed, `c()` of two files, a window, reordered layers, `toMemory()`.
+
+3. **Translate path.** The call:
+
+   ```r
+   sf::gdal_utils(
+     "translate", source, file,
+     options = c(
+       "-of", "COG", "-ot", "Byte",
+       "-a_nodata", sprintf("%.17g", nodata),   # "-a_nodata", "none" when there is no value
+       "-norat",
+       as.vector(rbind("-co", options))         # options sorted, KEY=VALUE
+     ),
+     quiet = TRUE
+   )
+   unlink(paste0(file, ".aux.xml"))
+   ```
+
+   - Result on a stripped LZW `INT1U` source without a tag: `Type=Byte`, `NoData Value=0`, `Block=512x512`, `LAYOUT=COG`, `COMPRESSION=DEFLATE`, overviews `550x550, 275x275`, `OVERVIEW_RESAMPLING=NEAREST`, band descriptions kept (also `"beta gamma"`, `"délta_3"`), values identical to the terra path (bytes differ).
+   - A source with its own `.aux.xml` holding categories: `-norat` does **not** prevent `<file>.aux.xml`; the TIFF's MD5 is unchanged; deleting the side file (D-A10) is enough. `config_options = c(GDAL_PAM_ENABLED = "NO")` in the call avoids it altogether.
+   - `sf::gdal_utils()` returned `TRUE` for a missing source with no output: check `file.exists(file)` after the call. A bad option value warns and writes with defaults.
+   - Without `-a_nodata` the source tag is copied. Use `sprintf("%.17g", nodata)`, not `format()`.
+
+4. **Removing levels.** `copy <- x; levels(copy) <- NULL` reads no cells, leaves `x`, the source file and its folder unchanged, keeps the names, and `raster_is_file_view(copy)` is `TRUE`. Same MD5 as from a raster that never had levels; no `.aux.xml`. Legend of layer `i`:
+
+   ```r
+   table <- terra::cats(x, layer = i)[[1]]
+   active <- terra::activeCat(x, layer = i)   # 1-based among the label columns: column active + 1
+   codes <- table[[1]]; labels <- as.character(table[[active + 1L]])
+   levels_name <- names(table)[[active + 1L]]
+   dropped <- setdiff(names(table)[-1], levels_name)
+   ```
+
+   - Always pass `layer = i` to `activeCat()`. The table is not sorted by code: sort it. The label column can be numeric: `as.character()`.
+   - `levels(x) <-` and `activeCat(x) <-` rename the layer to the active label column; set `names(x)` after them (helper `sim_landcover(legend = TRUE)`, A-T12).
+   - `terra::is.int()` is `FALSE` for a categorical layer, and stays `FALSE` after the levels are removed when the cells were doubles. "Counts as integer" (D-A6) is `terra::is.int(x) | terra::is.factor(x)`; the helper builds whole numbers with `terra::as.int()`.
+   - terra itself refuses a duplicated code, an `NA` code and a fractional code; it accepts an `NA` label, duplicated labels, negative codes (C6).
+
+5. **Restoring levels.** `set.cats()` works in place and renames the layer, so:
+
+   ```r
+   nms <- names(r)
+   invisible(terra::set.cats(r, layer = i, value = <data.frame: value, <levels_name>>))
+   names(r) <- nms
+   ```
+
+   Nothing is written next to the file (also read-only). `crop()` keeps the categories and the names. `terra::datatype()` is `INT1U` on the uncropped raster and `""` after a crop: A-T13 and A-T17 assert the type on the uncropped read only. Multi-layer with one categorical layer works.
+
+6. **Codes in the check.** `terra::extract(x, cells, raw = TRUE)`: a numeric matrix of codes, one column per layer (index `a[, j]`). Without `raw`, a factor of labels. `FLT4S` relative differences were at most 4.9e-08, inside D-A9's 1e-6.
+
+7. **Temp folder.** Read `old <- terra::terraOptions(print = FALSE)$tempdir`; set `terra::terraOptions(tempdir = dir, print = FALSE)` (the folder must exist, else a warning and no change); restore in `on.exit()`, which also works after an error. The `spat_*.tif` intermediate moves with it. terra does **not** delete the intermediate after the write (C4); `unlink()` removes it. Small rasters write no intermediate at all. GDAL writes `<output>.ovr.tmp` next to the output on both paths and removes it.
+
+8. **Free space.** `ps::ps_disk_usage(path)$available` is free bytes on Windows; it errors for a missing folder.
+
+   ```r
+   disk_free <- function(path) {
+     if (!requireNamespace("ps", quietly = TRUE)) {
+       return(NA_real_)
+     }
+     while (!dir.exists(path) && dirname(path) != path) path <- dirname(path)
+     tryCatch(as.numeric(ps::ps_disk_usage(path)$available[[1]]), error = function(e) NA_real_)
+   }
+   ```
+
+9. **Overview resampling test.** Read a level with `terra::rast(file, opts = "OVERVIEW_LEVEL=0")` and take its distinct values; or `grepl("OVERVIEW_RESAMPLING=NEAREST", terra::describe(file), fixed = TRUE)`. Always write `terra::describe()` (testthat masks `describe`). The plain `sim_landcover()` does not tell the methods apart; this raster does (codes 0, 40, …, 200):
+
+   ```r
+   big <- rcs_sim_raster(seed = 1, nrow = 1100, ncol = 1100)[["cover"]]
+   lc <- terra::as.int(big)
+   v <- matrix(as.vector(terra::values(lc)), nrow = 1100, byrow = TRUE)
+   v[c(1:2, 1099:1100), ] <- 0L; v[, c(1:2, 1099:1100)] <- 0L
+   terra::values(lc) <- as.vector(t(v))
+   x <- lc * 40L; names(x) <- "cover"
+   ```
+
+   - NEAREST: the overview holds exactly the codes. Current code (0.0.0.9004): 184 distinct values.
+   - Current code writes `LAYOUT=COG`, `COMPRESSION=LZW`, `OVERVIEW_RESAMPLING=CUBIC`, `Block=512x512`, `Type=Int32`. So in A-T9 the red reasons are the **resampling (CUBIC)** and the **compression (LZW)**; `Block=512x512` and `LAYOUT=COG` are guards. A 60 × 80 raster gets no overviews.
+   - A file "with no NoData tag" (helper `sim_landcover(file = )`) needs two steps: `terra::writeRaster(x, tmp, datatype = "INT1U", gdal = "COMPRESS=LZW")`, then `sf::gdal_utils("translate", tmp, file, options = c("-a_nodata", "none", "-co", "COMPRESS=LZW"), quiet = TRUE)`.
+
+10. **Existing tests and snapshots.** No test compares a raster file's bytes, MD5 or version with a fixed value; no snapshot shows a raster version, bytes or `raster layer (…)`.
+    - **A-E1:** `test-raster.R:103`, `rep("INT4S", 3)`: the values are −103 to 103, so `INT2S`; compute it from `terra::minmax(x, compute = TRUE)`.
+    - **A-E2:** `test-raster.R:243-245` and `:255` (the categorical expectation and its snapshot call); `_snaps/raster.md:20-27` (the `stage_sim_raster(categorical)` block). Lines 11–18 stay.
+    - **A-E3, A-E4:** none found.
+    - **Other, from D-A7 and the new arguments:** `test-hooks.R:16-18` pins the formals of `raster_stage` (`…, "history", "dir"`): the three new arguments are appended after `dir`, in the order `datatype`, `nodata`, `gdal` (orchestrator's choice; the plan fixed no position; no positional call changes). `test-hooks.R:19`: `raster_open` becomes `c("be", "path", "intersects", "columns")`.
+    - Guards, no edit: `test-raster.R:58` (`FLT8S`), `:93`, `:39-42`; `test-inspect.R:360`; the raster tests in `test-write.R`, `test-read.R`, `test-check.R`, `test-integration.R`, `test-auth.R`, `test-schema.R`.
+
+11. **Contradictions** (fact; decision; recommendation of the investigator and the orchestrator):
+    - **C1.** `PREDICTOR=YES` makes `terra::writeRaster(filetype = "COG")` fail whenever terra processes on disk (large rasters): `PREDICTOR=YES is not supported` on its GTiff intermediate. D-A5. Recommendation: `PREDICTOR=2` for integer types, `PREDICTOR=3` for float types; same bytes as `YES`, works on both paths.
+    - **C2.** `terra::datatype()` still reports `INT1U` after `toMemory()` or `x[1] <- 300`, so D-A2 rule 2 as written can pick a type that does not hold the values. Recommendation: rule 2 also requires `!any(terra::inMemory(x))` and `all(nzchar(terra::sources(x, bands = TRUE)$source))`.
+    - **C3.** On the translate path `-a_nodata` only relabels: source tag 0 with `nodata = 255` (or a session flag 3) gives a file where the source's missing cells are 0 again. D-A10. Recommendation: translate only when `raster_is_file_view(x)` and every source tag is `NA` or equal to the chosen nodata; otherwise the terra path.
+    - **C4.** terra leaves `spat_*.tif` in its temp folder; D-A11 puts it in the folder D-A6 asserts to hold exactly one file. Recommendation: terra's temp folder is a subfolder `terra/` of the staging temp folder, removed before the assertion.
+    - **C5.** The terra path cannot write "no tag": `NAflag = NaN` writes `NoData Value=nan` (all values read back); leaving it out writes 255 for `INT1U`. D-A3 rules 5 and 6, D-A10. Recommendation: "no tag" means "no finite NoData value"; the terra path passes `NAflag = NaN`; tests check `raster_source_nodata()` is `NA` and that `r_type` has no `nodata`.
+    - **C6.** A `SpatRaster` with a duplicated code cannot be built (terra refuses). A-T12. Recommendation: A-T12 tests the missing label through a raster and the duplicated code on the internal validator given a table.
+
+### WP2, red tests A (2026-11-27)
+
+- Report checked against the steps: 23 new tests in `test-raster.R` (A-T1–A-T16, A-T20 appended to the GCS test), `test-write.R` and `test-read.R` (A-T17), `test-check.R` (A-T18), `test-inspect.R` (A-T19); helper `sim_landcover()` in `helper-sim.R`. 19 red, 4 guards green (A-T3, A-T5 `INT4S`, A-T16 b, A-T19 plain). A-T20 not run (level `full`).
+- Edits to existing tests: A-E1 (`INT2S`, computed), A-E2 (test and `_snaps/raster.md` block), `test-hooks.R` formals of `raster_stage` and `raster_open`. Nothing else.
+- Counts (tests pass / fail / skip): `raster` 15 / 19 / 1; `^write$` 55 / 2 / 0; `^read$` 23 / 1 / 0; `check` 13 / 2 / 0; `inspect` 24 / 1 / 0; `integration` 13 / 0 / 0; `hooks` 1 / 1 / 0; `schema` 24 / 0 / 0. The only failing tests that are not new are the two edited ones.
+- No snapshot entry was created by a red test; five snapshots appear at the green step (A-T7 two, A-T12, A-T14, A-T17, A-T19).
+- Notes for WP3: the A-T14 warning snapshot masks the staging folder as `<staging>`; check the mask catches the path as cli prints it. Additions beyond the plan's list: A-T15 also covers a whole three-layer file, a legend with the name restored, a source tag equal to the nodata (all translate) and AM3 (tag 0, `nodata = 255`: terra path); A-T11 pins a one-class legend as a JSON array; A-T18 expects `x * 1.001` to fail the `FLT4S` check.
+
+### WP2-V, red verification (2026-11-27)
+
+- **Round 1: FAIL**, one must-fix: A-T7's "doubles with fractions" raster was already outside the `INT1U` range, so the all-integer rule of D-A4 was untested. Everything else passed (decisions encoded, independence, allowed edits, red reasons, nothing under `R/`).
+- **WP2 round 2** (same writer, `test-raster.R` only): A-T7 uses fractions inside 0–1 and `whole + 0.5`. Added by the orchestrator's decision, to close gaps the verifier named: terra's temp folder lies below the staging folder during the write (AM4; mocks `raster_write_terra()`); `raster_gdal_options()` defaults per type, sorted, replaced by key in any case (AM1); a 600 × 600 `FLT8S` file shows `PREDICTOR=3` and `OVERVIEW_RESAMPLING=AVERAGE`; different NoData tags or session flags abort without `nodata` (D-A3 rules 2 and 3); A-T12 asserts exactly one message naming only the dropped column (columns `name_en`, `name_fr`).
+- **Round 2: PASS**, no must-fix. `raster`: 15 pass / 23 fail (22 new red + A-E1) / 1 skip (GCS). No `*.new.md`; `_snaps/` shows only the A-E2 removal; nothing changed under `R/`, `man/`, `DESCRIPTION`, `vignettes/`.
+- Notes kept for WP3-V: the flag case of the D-A3 test has no cell under a flag (A-T6 covers that); the `raster_gdal_options()` unit test has no `skip_if_not_installed("terra")` (it calls no terra function).
+
+### WP3, code A (2026-11-27)
+
+- Changed: `R/raster.R` (the named internals, plus helpers; `raster_stage()` and `raster_open()` with the new arguments), `R/write.R` (three arguments of `store_write()`, checks, `stage_raster()`, roxygen section "Rasters"), `R/read.R` (both callers pass the columns), `R/check.R` (D-A9), `R/inspect.R` (D-A8), `R/schema.R` (`"values"`), `R/utils.R` (`disk_free()`), `DESCRIPTION` (`ps` in `Suggests`). No test edited; `devtools::document()` not run; `Version` unchanged.
+- Counts (tests pass / fail / skip): `raster` 38 / 0 / 1 (GCS); `^write$` 57 / 0 / 0; `^read$` 24 / 0 / 0; `check` 15 / 0 / 0; `inspect` 25 / 0 / 0; `integration` 13 / 0 / 0; `hooks` 2 / 0 / 0; `schema` 24 / 0 / 0.
+- New snapshot blocks only (none changed): `_snaps/raster.md` (A-T7 two, A-T12, A-T14), `_snaps/write.md` (A-T17), `_snaps/inspect.md` (A-T19). No `*.new.md`.
+- One contradiction (AM7) and four open points (AM8), recorded above. A-T20 (GCS) not run.
+- Not exercised by a test: the translate path's abort when GDAL writes no file; the mixed-layer abort of AM8.
+
+### WP3-V, green verification (2026-11-27): three failed rounds, stopped
+
+- **Round 1: FAIL.** Tests green, the plan's five mutations caught. Three defects on the translate path, no test covering them: layer names of a source without band descriptions, a CRS set in the session, scale and offset. Settled as AM9; five tests added (WP2 round 3); code fixed (WP3 round 2).
+- **Round 2: FAIL.** AM9 fixes hold, 9 mutations caught, about 45 translate-path constructions agree with `x`. Four new defects: `.aux.json` for time / units aborts the one-file assertion (a regression against 0.0.0.9004), an undescribed source with a mask band aborts in the VRT step, a scaled layer with a source tag loses valid cells, source overviews are copied. Settled as AM10 (and AM11); four tests added and the options unit test edited (WP2 round 4); code fixed (WP3 round 3).
+- **Round 3: FAIL, in the tests only.** The code meets every decision and amendment checked (AM10 and AM11 confirmed in R; about 15 combined constructions agree with `x`; no pass over the cells under rule 2; roxygen true of the code; no change under `man/`; `Version` unchanged). Counts (tests pass / fail / skip): `raster` 47 / 0 / 1; `^write$` 57 / 0 / 0; `^read$` 24 / 0 / 0; `check` 15 / 0 / 0; `inspect` 25 / 0 / 0; `schema` 24 / 0 / 0; `integration` 13 / 0 / 0; `hooks` 2 / 0 / 0; `sim` 25 / 0 / 0; `catalog` 25 / 0 / 0; `^sync$` 27 / 0 / 1. Mutations 1–9, 11, 12 caught.
+  - **Must fix:** mutation 10 (`raster_remove_side_files()` a no-op) is caught by no test. Since AM11 strips time and units before the write, the AM10 time / units test no longer reaches the removal; the same test does not see `raster_drop_time_units()` removed either. The mutant is not equivalent: a file view whose source has an `.aux.xml` with categories then aborts on the one-file assertion.
+  - **Fix proposed by the verifier (tests only):** (1) stage a file view whose source has an `.aux.xml` with categories and expect exactly one file; (2) in the time / units test, expect the same MD5 and version as without time / units, and that `x` keeps them.
+  - Notes: the mask test does not assert the path; `OVERVIEWS=AUTO`, external `.ovr` and float overviews have no test (they work); `datatype = "INT2S"` on a view with a whole-number `scoff<-` aborts by D-A4; an in-memory raster with units is deep-copied for the write.
+- **Stopped** after the third failed round, as the plan's rules say. WP3 and WP3-V stay unticked; WP4, WP5-docs and WP5 have not started. Nothing is committed: the work is in the working tree (seven `R/` files, `DESCRIPTION`, seven test files, three snapshot files, this plan).
+
+### Owner's instruction after the stop (2026-11-27)
+
+- Three more verification rounds are allowed (rounds 4, 5 and 6).
+- The raster work (writing, windowed reads, versions) must also be tested on Google Cloud Storage, at test level `full`, before the release. If no bucket is configured, the orchestrator asks the owner for one.
+
+### WP3-V round 4 (2026-11-27): PASS
+
+- WP2 round 5 (`test-raster.R` only): new test "a file view whose source has a side file with categories is staged as one file"; the time / units test also expects the same MD5 and version as without time / units, and that `x` keeps them.
+- Round 4, fresh verifier, from a copy of the tests: `raster` 48 / 0 / 1 (GCS skip); `^write$` 57 / 0 / 0; `^read$` 24 / 0 / 0; `check` 15 / 0 / 0; `inspect` 25 / 0 / 0; `schema` 24 / 0 / 0; `hooks` 2 / 0 / 0; `integration` 13 / 0 / 0. All 13 mutations caught (the plan's five; temp-folder redirect; `raster_is_scaled()`; `raster_named_vrt()`; CRS comparison; `raster_remove_side_files()`; source tag of scaled layers; `OVERVIEWS=IGNORE_EXISTING`; `raster_drop_time_units()`). AM9–AM11 met in `R/raster.R`. No `*.new.md`; `man/` unchanged; `Version` 0.0.0.9004.
+- Notes: mutation 6 is caught only by the mocked temp-folder test; the mask test does not assert the path; `OVERVIEWS=AUTO`, external `.ovr` and float overviews have no test (checked by hand in round 3).
+
+### GCS tests (2026-11-27), bucket `gs://rcs-test`, level `full`
+
+- Set in the agent's session only: `RCS_TEST_LEVEL=full`, `RCS_TEST_GCS=gs://rcs-test`; gcloud application-default login. Each test writes under its own `rcs-test-<random>/` prefix and deletes it.
+- New file `tests/testthat/test-raster-gcs.R`, six tests: (1) class map to a bucket primary with a local secondary: type, nodata, COG layout and MD5 of the bucket object, manifest fields, whole and windowed read through `/vsigs/`, identical rewrite uploads nothing, another nodata is another version, describe / check / status; (2) a raster replaced after it was read is read again in the same session; (3) in-memory rasters: `INT1U` with 255, `FLT4S`, `FLT8S`, `COMPRESS=ZSTD`; (4) a replaced class map is a new version and the old one stays readable with its legend (`history = TRUE`); (5) a 1,100 × 1,100 class map is a tiled COG with NEAREST overviews and a window reads back equal; (6) a bucket secondary of a local primary gets the same MD5 and version.
+- First run: `raster-gcs` 5 / 1 / 0 (70 s); `^raster$` 49 / 0 / 0 (the A-T20 block ran); `backend-gcs` 22 / 0 / 0; `auth` 30 / 0 / 0.
+- The failure is a code defect (test 2), settled as AM12.
+- Not measurable: `rcs_trace()` counts `bytes_down` only in `be_get()`, not GDAL's range requests, so "a window downloads less than the file" cannot be asserted; the tests assert one `file_open` and no whole-file download.
+- Bucket afterwards: only `demo/` (13 objects, there before); no `rcs-test-*` prefix left.
+
+### WP3 round 4, AM12 (2026-11-27)
+
+- `raster_open()` (`R/raster.R`): when `terra::rast()` fails on a `/vsi…` path it calls `terra::clearVSIcache()` and tries once more; a second failure aborts with the same `rcs_error_backend` error. Nothing is cleared before a first open; a local path aborts at once. A raster opened lazily before a clear still reads.
+- Level `full`, `gs://rcs-test`: `raster-gcs` 6 / 0 / 0; `^raster$` 49 / 0 / 0; `^read$` 24 / 0 / 0. Bucket clean afterwards.
+
+### WP4, measurement (2026-11-27): PASS
+
+Simulated `INT1U` raster, 25,000 × 25,000 cells (625e6), EPSG:32636 at 10 m, stripped, LZW, no NoData tag; staged with `raster_stage(nodata = 0)` and a 27-class legend; disk polled every 0.2 s. R 4.6.2, terra 1.9.50, GDAL 3.12.1.
+
+| Run | Path | Seconds | Source bytes | Output bytes | Peak in staging folder | New files outside it | Peak / output |
+|---|---|---|---|---|---|---|---|
+| File-backed, legend set, name restored | translate | 14.6 | 41,723,308 | 6,864,904 | 9,400,923 | 0 | 1.37 |
+| In memory (`terra::toMemory()`) | terra | 38.9 | (in memory) | 6,864,904 | 24,422,396 | 0 | 3.56 |
+| In memory, repeated | terra | 37.2 | (in memory) | 6,864,904 | 24,422,396 | 0 | 3.56 |
+| Extra: file-backed, layer renamed | terra | 23.4 | 41,723,308 | 6,864,908 | 24,487,944 | 0 | 3.57 |
+
+- Staged file, all runs: `Type=Byte`, `NoData Value=0`, `Block=512x512`, `LAYOUT=COG`, `COMPRESSION=DEFLATE`, `PREDICTOR=2`, `OVERVIEW_RESAMPLING=NEAREST`, six overview levels holding only the codes 1–27; equal values on 1e5 random cells; manifest with type, nodata, resolution, dim, values, levels.
+- Expectations: output / source 0.165 (limit 1.5): PASS. Nothing new outside the staging folder: PASS. Translate peak 1.37 times the output (limit 2): PASS. Terra peak 3.56 times, as in note 0004 (documented, not a criterion).
+- Translate peak is `part.tif` plus `part.tif.ovr.tmp`; terra peak adds `terra/spat_*.tif` (15 MB, DEFLATE, Byte), all below the staging temp folder.
+- Observed: holding the raster in memory costs RAM, not staging room (terra keeps doubles: 4.66 GB for this raster, the R process reached 9.6 GB, and Windows grew the pagefile by about 10 GB). A national map must be written file-backed. No pass over the cells on the translate path. The free-space check did not warn (52.5 GB free, 83 MB estimated).
+
+### WP5-docs (2026-11-27)
+
+- `vignettes/geospatial.Rmd`: new subsection "Class maps: categories and nodata" in "Rasters" (class map with levels, `nodata = 0`, read back with categories and with `intersects`; paragraphs on data type, nodata, file options with ZSTD, room for staging). Rendered under `tempdir()` without error or warning; the chunks print `INT1U`, the five labels and a missing edge cell.
+- `.docs/plans/0001-rcs-package.md`: two additions marked "(changed in plan 0006)". `README.Rmd`: no change needed.
+
+### Rounds 5 and 6, and the release (2026-11-27)
+
+- **Round 5** (fresh verifier; AM12, the GCS test file, the docs): code, tests and state PASS; **FAIL on the docs**. AM12 confirmed on the bucket by hand (same connection; a second connection that only reads; old versions; a missing object; lazy handles; no cache clear on a successful first open). Three mutation spot-checks on the GCS tests caught. Level `full`, `gs://rcs-test` (tests pass / fail / skip): `raster-gcs` 6 / 0 / 0; `^raster$` 49 / 0 / 0; `backend-gcs` 22 / 0 / 0; `auth` 30 / 0 / 0; `^read$` 24 / 0 / 0; `^write$` 57 / 0 / 0; `check` 15 / 0 / 0; `inspect` 25 / 0 / 0; `^sync$` 28 / 0 / 0. Default level, `raster`: 48 pass, 7 skips (GCS). Bucket: only `demo/`. The false statement: "free room of about twice the output" for the terra path. Docs round 2 corrected the staging paragraph (vignette and roxygen), the rule for the default nodata, and the scale / offset exception.
+- **Round 6** (fresh verifier; the three texts): everything true of the code and of WP4 except one phrase, **FAIL**: "an unchanged view of one file is copied by GDAL" is false for a source file that itself holds a scale or an offset (it is written by terra). `raster` 48 pass / 7 skips; `^write$` 57 pass; the vignette renders without error or warning.
+- **Docs round 3:** "without a scale or an offset" added in the roxygen of `store_write()`, the vignette and the plan 0001 bullet; only `#'` lines changed in `R/write.R`; the vignette renders. Round 6 was the last round the owner allowed. Because the owner asked for the work to be committed and pushed before another agent starts on the code base, this wording was checked by the orchestrator by reading the three texts, not by a seventh verifier. This is the one item of Part A not confirmed by a separate verifier.
+- **Owner's instruction (2026-11-27):** commit Part A and push.
+- Not covered by a GCS test (verified by hand in round 5): no cache clear on a successful first open; a missing bucket object after the retry; the stale listing through a second connection. "Only the needed tiles fetched" cannot be measured with `rcs_trace()`.
 
 ## Outcome
 
-(Filled in at WP9, or at WP5 when Part B waits for plan 0005.)
+**Part A is done and released as `0.0.0.9005` (2026-11-27). Part B waits for plan 0005 (`draft`); this plan stays `active`.**
+
+What `store_write()` of a `SpatRaster` does now:
+
+- keeps the source file's data type, or picks the smallest type that holds the values and the nodata value; `datatype =` overrides;
+- carries a NoData value: `nodata =`, else a flag set in the session, else the source file's tag, else a default;
+- writes a COG with `COMPRESS=DEFLATE`, `PREDICTOR=2` / `3`, `BLOCKSIZE=512`, `BIGTIFF=IF_SAFER`, `OVERVIEWS=IGNORE_EXISTING`, `OVERVIEW_RESAMPLING=NEAREST` / `AVERAGE`; `gdal =` overrides by key;
+- accepts categorical layers: codes in the TIFF, the legend in the manifest, restored by `store_read()`, no side file;
+- stages below `rcs.staging_dir` only: an unchanged view of one file is copied by GDAL (peak 1.4 times the output), anything else goes through terra (peak 3.6 times); a warning when the drive looks too small;
+- reads a replaced raster from a bucket again in the same session (AM12).
+
+Against the acceptance criteria of note 0004:
+
+| Criterion | Result |
+|---|---|
+| `INT1U` map gives a `Byte` COG with NoData 0, 512 tiles, NEAREST overviews, size close to the source | Met on a simulated 25,000 × 25,000 map (output 0.165 times the source) and on the bucket |
+| `store_read(intersects = )` returns type, NoData and categories, fetching only the needed tiles from `gs://` | Type, NoData and categories met on the bucket. The tiles fetched cannot be measured; no whole-file download happens |
+| The manifest records type, nodata, resolution, dimensions, legend | Met |
+| Peak staging use documented and under about 2 times the output | Met on the GDAL-copy path (1.37). The terra path is 3.56 and is documented |
+| `locations = "primary"` | Part B, not started |
+| Deterministic MD5 and version | Met, on both paths and on the bucket |
+| Tests for `INT1U` with NoData and a legend; `INT4S` / `FLT4S` keep their type | Met |
+
+The decisions changed during execution are the amendments AM1–AM12 in "Results". The owner should read AM9 (names, CRS, scale and offset on the GDAL-copy path), AM10 and AM11 (time and units are not stored) and AM12.
+
+For the national maps (11.8e9 cells): write each map straight from `terra::rast(file)` with `nodata = 0`, not from memory. A map held in memory needs RAM for all its cells as doubles. Setting a legend with `levels<-` and then restoring `names()` keeps the GDAL-copy path.

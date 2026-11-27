@@ -14,9 +14,10 @@ hook_signatures <- list(
   geo_cells_touched = c("x", "h3_res"),
   geo_covering = c("shape", "h3_res", "crs"),
   raster_stage = c(
-    "x", "dataset", "title", "description", "source", "inputs", "columns", "history", "dir"
+    "x", "dataset", "title", "description", "source", "inputs", "columns", "history", "dir",
+    "datatype", "nodata", "gdal"
   ),
-  raster_open = c("be", "path", "intersects"),
+  raster_open = c("be", "path", "intersects", "columns"),
   files_row_groups = c("be", "paths"),
   files_read_row_groups = c("be", "path", "row_groups", "columns"),
   resolve_dataset = c("st", "dataset", "index", "call"),

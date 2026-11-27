@@ -53,7 +53,10 @@ normalisation (a tibble and a data frame are alike, geometries are
 compared as WKB, times as instants). Geospatial data without key and
 without a column \code{.rcs_id} are geocoded again to find the row
 identifiers, which matches only a dataset written in one call (not
-after an \code{update}). For a raster, \code{n} random cells are compared.
+after an \code{update}). For a raster, \code{n} random cells are compared as a
+read returns them: a categorical layer by its codes, cells of \code{x} that
+hold the dataset's NoData value as missing, and a layer stored in
+single precision (\code{FLT4S}) within a relative difference of \code{1e-6}.
 \code{\link[=store_write]{store_write()}} runs this check on the staged files before it uploads
 them.
 \item Without \code{x}, an integrity check of each location: every file of the

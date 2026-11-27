@@ -47,6 +47,40 @@ sim_raster <- function() {
   rcs_sim_raster(seed = 1, nrow = 100, ncol = 100)
 }
 
+# A simulated class map (plan 0006): the layer `cover` of `rcs_sim_raster()`
+# as whole numbers 1-5, named `cover`, with a band of `0` two cells wide
+# around the edge ("outside the map").
+#   * `file`: the map is written there as a plain stripped LZW `INT1U` GeoTIFF
+#     without a NoData tag, and returned file-backed. terra alone always
+#     writes a tag, so the tag is removed by a second step.
+#   * `legend = TRUE`: the classes 1-5 get labels. `levels<-` renames the
+#     layer to the label column, so the name is set again afterwards.
+sim_landcover_labels <- c("water", "forest", "crop", "grass", "bare")
+
+sim_landcover <- function(nrow = 60, ncol = 80, seed = 1, file = NULL, legend = FALSE) {
+  testthat::skip_if_not_installed("terra")
+  x <- terra::as.int(rcs_sim_raster(seed = seed, nrow = nrow, ncol = ncol)[["cover"]])
+  v <- matrix(as.integer(terra::values(x)), nrow = nrow, byrow = TRUE)
+  v[c(1:2, nrow - 1, nrow), ] <- 0L
+  v[, c(1:2, ncol - 1, ncol)] <- 0L
+  terra::values(x) <- as.vector(t(v))
+  names(x) <- "cover"
+  if (!is.null(file)) {
+    tmp <- withr::local_tempfile(fileext = ".tif")
+    terra::writeRaster(x, tmp, datatype = "INT1U", gdal = "COMPRESS=LZW")
+    sf::gdal_utils(
+      "translate", tmp, file,
+      options = c("-a_nodata", "none", "-co", "COMPRESS=LZW"), quiet = TRUE
+    )
+    x <- terra::rast(file)
+  }
+  if (legend) {
+    levels(x) <- data.frame(value = 1:5, label = sim_landcover_labels)
+    names(x) <- "cover"
+  }
+  x
+}
+
 # The cell of points as hex strings, by h3o alone: longitude first here,
 # latitude first in h3o.
 ref_cell_hex <- function(lon, lat, res) {

@@ -202,6 +202,58 @@ test_that("a raster is compared by sampled cells", {
   expect_error(store_check(s$st, "grid", x = s$x), class = "rcs_error_argument")
 })
 
+# Plan 0006: types, nodata, options, legend, staging
+
+test_that("a class map is compared as codes, with the nodata cells of x counted as missing", {
+  # A-T18. Red: unused argument `nodata` of `store_write()`.
+  skip_below_level("default")
+  skip_if_not_installed("terra")
+  s <- local_written_store(secondaries = 0L)
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  n <- terra::ncell(x)
+  # the check of the write itself (`check = TRUE`) passes: the zeros of `x`
+  # are missing in the file, and `x` holds labels where the file holds codes
+  expect_no_error(suppressMessages(store_write(
+    s$st, x, "grids/cover",
+    title = "Cover", description = "Simulated class map.", nodata = 0
+  )))
+  expect_true("grids/cover" %in% s$st$primary$catalog$dataset)
+  out <- suppressMessages(store_check(s$st, "grids/cover", x = x, n = n))
+  expect_identical(out$status, "ok")
+  # the same map in memory, without and with its legend
+  plain <- sim_landcover(nrow = 12, ncol = 16)
+  expect_identical(suppressMessages(store_check(s$st, "grids/cover", x = plain, n = n))$status, "ok")
+
+  # one cell with another class: every cell is sampled, so it is found
+  changed <- plain
+  cell <- terra::cellFromRowCol(changed, 6, 8)
+  old <- as.vector(terra::values(changed))[[cell]]
+  expect_gt(old, 0)
+  changed[cell] <- if (old == 1L) 2L else 1L
+  levels(changed) <- data.frame(value = 1:5, label = sim_landcover_labels)
+  names(changed) <- "cover"
+  out <- suppressMessages(store_check(s$st, "grids/cover", x = changed, n = n, error = FALSE))
+  expect_identical(out$status, "failed")
+})
+
+test_that("a raster stored as FLT4S passes the check against its doubles", {
+  # A-T18. Red: unused argument `datatype` of `store_write()`.
+  skip_below_level("default")
+  skip_if_not_installed("terra")
+  s <- local_written_store(secondaries = 0L)
+  r <- rcs_sim_raster(seed = 1, nrow = 12, ncol = 16)
+  expect_no_error(suppressMessages(store_write(
+    s$st, r, "grid", title = "Grid", description = "Simulated raster.", datatype = "FLT4S"
+  )))
+  entry <- s$st$primary$catalog[s$st$primary$catalog$dataset == "grid", ]
+  expect_identical(columns_from_json(entry$columns)$type, rep("FLT4S", 3))
+  out <- suppressMessages(store_check(s$st, "grid", x = r, n = terra::ncell(r)))
+  expect_identical(out$status, "ok")
+  # a difference larger than single precision is still found
+  out <- suppressMessages(store_check(s$st, "grid", x = r * 1.001, n = terra::ncell(r), error = FALSE))
+  expect_identical(out$status, "failed")
+})
+
 test_that("the sampled rows taken from the Arrow table equal those of the whole row group restored", {
   # The former path of check_file_rows(): restore a whole row group, then
   # take the rows. The values compared by the check are identical; `[` on a

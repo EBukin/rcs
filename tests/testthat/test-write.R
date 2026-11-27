@@ -1133,6 +1133,77 @@ test_that("a raster is written, replaced, and cannot be updated", {
   })
 })
 
+# Plan 0006: types, nodata, options, legend, staging
+
+test_that("a class map is written with its type, nodata and legend in every manifest", {
+  # A-T17. Red: unused argument `nodata` of `store_write()`.
+  skip_below_level("default")
+  skip_if_not_installed("terra")
+  s <- local_store(secondaries = 1L)
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  write <- function(...) {
+    suppressMessages(store_write(
+      s$st, x, "grids/cover",
+      title = "Cover", description = "Simulated class map.", nodata = 0, ...
+    ))
+  }
+  first <- write()
+  expect_identical(first$uploaded, c(1, 1))
+  expect_store_valid(s$st)
+  version <- s$st$primary$catalog$version
+  expect_identical(s$st$secondary[[1]]$catalog$version, version)
+
+  # the manifest, as it is on disk in every location
+  for (root in s$paths) {
+    manifest <- jsonlite::fromJSON(
+      file.path(root, manifest_path("grids/cover", version)),
+      simplifyVector = FALSE
+    )
+    layers <- jsonlite::fromJSON(manifest$entry$columns, simplifyVector = FALSE)
+    expect_length(layers, 1L)
+    layer <- layers[[1]]
+    expect_identical(layer$name, "cover")
+    expect_identical(layer$type, "INT1U")
+    expect_identical(layer$r_type$class, "SpatRaster")
+    expect_equal(layer$r_type$nodata, 0)
+    expect_equal(unlist(layer$r_type$resolution), terra::res(x))
+    expect_equal(unlist(layer$r_type$dim), c(12, 16))
+    expect_equal(unlist(layer$r_type$values), 1:5)
+    expect_identical(unlist(layer$r_type$levels), sim_landcover_labels)
+    expect_identical(layer$r_type$levels_name, "label")
+    # the stored file holds codes, with the NoData tag, and no side file
+    stored <- file.path(root, s$st$primary$files$path)
+    info <- terra::describe(stored)
+    expect_true(any(grepl("Type=Byte", info, fixed = TRUE)))
+    expect_true(any(grepl("NoData Value=0", info, fixed = TRUE)))
+    expect_identical(
+      sort(list.files(file.path(root, "grids/cover"), all.files = TRUE, no.. = TRUE)),
+      sort(basename(c(manifest_path("grids/cover", version), s$st$primary$files$path)))
+    )
+  }
+
+  # the same map again uploads nothing
+  second <- write(mode = "replace")
+  expect_identical(second$uploaded, c(0, 0))
+  expect_identical(s$st$primary$catalog$version, version)
+  expect_store_valid(s$st)
+})
+
+test_that("datatype, nodata and gdal apply to rasters only", {
+  # A-T17. Red: unused arguments of `store_write()` (an error without the
+  # class `rcs_error_argument`).
+  skip_below_level("default")
+  s <- local_store()
+  write <- function(...) {
+    store_write(s$st, sales_data(), "sales/plain", title = "Sales", description = "Simulated sales.", ...)
+  }
+  expect_error(write(datatype = "INT1U"), class = "rcs_error_argument")
+  expect_error(write(nodata = 0), class = "rcs_error_argument")
+  expect_error(write(gdal = "COMPRESS=ZSTD"), class = "rcs_error_argument")
+  expect_false("sales/plain" %in% s$st$primary$catalog$dataset)
+  expect_snapshot(write(nodata = 0), error = TRUE)
+})
+
 # Failures ----------------------------------------------------------------------
 
 test_that("a primary failing during upload changes no catalog; the repeated call sends only what is missing", {

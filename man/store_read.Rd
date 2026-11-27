@@ -81,8 +81,11 @@ the columns the package adds, the row identifier \code{.rcs_id} is dropped
 \verb{h3_p<r>} are returned.
 \item A raster is returned as a \code{terra::SpatRaster} opened through GDAL, so
 only the tiles needed are read; \code{intersects} crops it to the query's
-bounding box. Filters, \code{columns}, \code{geometry} and \code{exact} do not apply
-to rasters and abort.
+bounding box. A categorical layer is returned with its categories (the
+codes and labels recorded when it was written), also after a crop; the
+data type and the NoData value are those of the file, so cells holding
+the NoData value are missing. Filters, \code{columns}, \code{geometry} and \code{exact}
+do not apply to rasters and abort.
 }
 
 The location read from is, among the available locations that hold the

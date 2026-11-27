@@ -1,6 +1,6 @@
 Package: rcs
 Title: Catalog-First Cloud and Local Storage of Tabular and Geospatial Data
-Version: 0.0.0.9004
+Version: 0.0.0.9005
 Authors@R:
     person("Eduard", "Bukin", , "edwardbukin@gmail.com", role = c("aut", "cre", "cph"))
 Description: Stores tabular, geospatial vector and raster data in one store
@@ -44,6 +44,7 @@ Suggests:
     knitr,
     mirai,
     pkgload,
+    ps,
     rmarkdown,
     terra,
     testthat (>= 3.0.0)

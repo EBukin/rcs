@@ -18,6 +18,18 @@ values_equal <- function(a, b) {
     identical(a[!is.na(a)], b[!is.na(b)])
 }
 
+# The integer type of plan 0006, D-A2 rule 3, for values from `lo` to `hi`:
+# the first type whose range holds them and leaves its default NoData flag
+# free (D-A3 rule 4); `FLT8S` when none does.
+smallest_int_type <- function(lo, hi) {
+  ranges <- list(
+    INT1U = c(0, 254), INT2U = c(0, 65534), INT2S = c(-32767, 32767),
+    INT4U = c(0, 4294967294), INT4S = c(-2147483647, 2147483647)
+  )
+  fits <- vapply(ranges, function(r) lo >= r[[1]] && hi <= r[[2]], logical(1))
+  if (any(fits)) names(ranges)[[which(fits)[[1]]]] else "FLT8S"
+}
+
 test_that("raster_stage() writes one COG and describes it", {
   skip_if_not_installed("terra")
   x <- rcs_sim_raster(nrow = 12, ncol = 16)
@@ -100,7 +112,10 @@ test_that("integer layers are stored as integers", {
   x <- terra::as.int(rcs_sim_raster(nrow = 8, ncol = 9))
   dir <- withr::local_tempdir()
   out <- stage_sim_raster(x, dir = dir)
-  expect_identical(columns_from_json(out$entry$columns)$type, rep("INT4S", 3))
+  # the smallest type that holds the values (plan 0006, D-A2 rule 3)
+  range <- terra::minmax(x, compute = TRUE)
+  expected <- smallest_int_type(min(range), max(range))
+  expect_identical(columns_from_json(out$entry$columns)$type, rep(expected, 3))
   r <- raster_open(be_new(dir), out$files$path)
   expect_true(all(terra::is.int(r)))
   expect_true(values_equal(r, x))
@@ -240,10 +255,6 @@ test_that("raster_stage() aborts on unusable rasters", {
   names(repeated) <- c("a", "a", "b")
   expect_error(stage_sim_raster(repeated), class = "rcs_error_raster")
 
-  categorical <- terra::as.int(x[["cover"]])
-  levels(categorical) <- data.frame(id = 1:5, class = letters[1:5])
-  expect_error(stage_sim_raster(categorical), class = "rcs_error_raster")
-
   expect_error(stage_sim_raster(data.frame(a = 1)), class = "rcs_error_argument")
   expect_error(
     stage_sim_raster(x, columns = c(nothing = "No such layer.")),
@@ -252,7 +263,6 @@ test_that("raster_stage() aborts on unusable rasters", {
   expect_error(stage_sim_raster(x, dataset = "Bad Name"), class = "rcs_error_dataset_name")
 
   expect_snapshot(stage_sim_raster(no_crs), error = TRUE)
-  expect_snapshot(stage_sim_raster(categorical), error = TRUE)
 })
 
 test_that("raster functions need terra", {
@@ -304,4 +314,1258 @@ test_that("a raster opens from GCS through /vsigs/", {
   box <- sf::st_bbox(c(xmin = -27.1, ymin = 7.3, xmax = -26.5, ymax = 8.1), crs = sf::st_crs(4326))
   cropped <- raster_open(be, out$files$path, intersects = box)
   expect_true(values_equal(cropped, terra::crop(x, terra::ext(cropped))))
+
+  # Plan 0006, A-T20: a class map with nodata and a legend, opened with its
+  # columns. Red until WP3: unused argument `nodata`.
+  source <- withr::local_tempfile(fileext = ".tif")
+  map <- sim_landcover(file = source, legend = TRUE)
+  staged <- stage_sim_raster(map, dataset = "grids/cover", nodata = 0)
+  be_put(be, staged$staged, staged$files$path)
+  spec <- columns_from_json(staged$entry$columns)
+  whole <- raster_open(be, staged$files$path, columns = spec)
+  expect_true(terra::is.factor(whole))
+  expect_identical(terra::datatype(whole), "INT1U")
+  codes <- sim_landcover()
+  codes[codes == 0] <- NA
+  expect_true(all(is.na(terra::values(whole)) == is.na(terra::values(codes))))
+  expect_equal(as.vector(terra::values(whole)), as.vector(terra::values(codes)))
+  part <- raster_open(be, staged$files$path, intersects = box, columns = spec)
+  expect_true(terra::is.factor(part))
+  expect_identical(as.character(terra::cats(part)[[1]]$label), sim_landcover_labels)
+  expect_equal(
+    as.vector(terra::values(part)),
+    as.vector(terra::values(terra::crop(codes, terra::ext(part))))
+  )
+})
+
+# Plan 0006: types, nodata, options, legend, staging ---------------------------
+#
+# Each test states why it fails before the code of plan 0006 exists ("Red"),
+# or that it passes already ("Guard").
+
+# The finite NoData tag of each band of a GeoTIFF; NA when there is none or it
+# is not finite (`NoData Value=nan`). Read here with GDAL alone, so that the
+# tests do not depend on the package's own reader.
+nodata_tag <- function(file) {
+  info <- jsonlite::fromJSON(
+    paste(terra::describe(file, options = "json"), collapse = "\n"),
+    simplifyVector = FALSE
+  )
+  tags <- vapply(info$bands, function(band) {
+    value <- band$noDataValue
+    if (is.null(value)) NA_real_ else suppressWarnings(as.numeric(value))
+  }, numeric(1))
+  tags[!is.finite(tags)] <- NA_real_
+  tags
+}
+
+# Lines of `gdalinfo` for a file.
+gdal_info <- function(file) {
+  terra::describe(file)
+}
+
+expect_info <- function(info, text) {
+  expect_true(any(grepl(text, info, fixed = TRUE)), label = paste0("gdalinfo shows '", text, "'"))
+}
+
+# The `r_type` of layer `i` of a staged raster.
+staged_r_type <- function(out, i = 1L) {
+  columns_from_json(out$entry$columns)$r_type[[i]]
+}
+
+staged_type <- function(out) {
+  columns_from_json(out$entry$columns)$type
+}
+
+# As `values_equal()`, for a categorical raster: terra returns its codes as
+# doubles, so the codes are compared by value, not by storage type.
+codes_equal <- function(a, b) {
+  a <- unname(terra::values(a))
+  b <- unname(terra::values(b))
+  identical(dim(a), dim(b)) && identical(is.na(a), is.na(b)) &&
+    all(a[!is.na(a)] == b[!is.na(b)])
+}
+
+# The cells holding `0` become missing.
+zero_as_missing <- function(x) {
+  x[x == 0] <- NA
+  x
+}
+
+# A small class map whose cell `i` holds `value`.
+landcover_with <- function(value, i = 40L) {
+  x <- sim_landcover(nrow = 12, ncol = 16)
+  x[i] <- value
+  x
+}
+
+# A source file with an exact NoData tag (or none: `tag = "none"`).
+write_source <- function(x, file, datatype, tag = "none") {
+  tmp <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(x, tmp, datatype = datatype, gdal = "COMPRESS=LZW")
+  sf::gdal_utils(
+    "translate", tmp, file,
+    options = c("-a_nodata", as.character(tag), "-co", "COMPRESS=LZW"), quiet = TRUE
+  )
+  terra::rast(file)
+}
+
+spat_files <- function() {
+  list.files(tempdir(), pattern = "^spat_", recursive = TRUE, all.files = TRUE)
+}
+
+test_that("in-memory whole numbers with missing cells are stored as INT1U with nodata 255", {
+  # A-T1. Red: the type is INT4S and no nodata is recorded.
+  skip_if_not_installed("terra")
+  x <- zero_as_missing(sim_landcover(nrow = 12, ncol = 16))
+  expect_true(terra::is.int(x))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(staged_type(out), "INT1U")
+  expect_equal(staged_r_type(out)$nodata, 255)
+  expect_identical(nodata_tag(out$staged), 255)
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), "INT1U")
+  expect_true(values_equal(r, x))
+})
+
+test_that("the integer type follows the range of the values", {
+  # A-T2. Red: every integer raster is stored as INT4S (the last case, which
+  # expects INT4S, fails on its nodata alone).
+  skip_if_not_installed("terra")
+  cases <- list(
+    list(value = 254L, type = "INT1U", nodata = 255),
+    list(value = 255L, type = "INT2U", nodata = 65535),
+    list(value = -5L, type = "INT2S", nodata = -32768),
+    list(value = 70000L, type = "INT4U", nodata = 4294967295),
+    list(value = -70000L, type = "INT4S", nodata = -2147483648)
+  )
+  for (case in cases) {
+    x <- landcover_with(case$value)
+    dir <- withr::local_tempdir()
+    out <- stage_sim_raster(x, dir = dir)
+    expect_identical(staged_type(out), case$type, info = case$type)
+    expect_equal(staged_r_type(out)$nodata, case$nodata, info = case$type)
+    expect_identical(nodata_tag(out$staged), case$nodata, info = case$type)
+    r <- raster_open(be_new(dir), out$files$path)
+    expect_identical(terra::datatype(r), case$type, info = case$type)
+    expect_true(values_equal(r, x), info = case$type)
+  }
+})
+
+test_that("in-memory doubles stay FLT8S, without nodata, and round-trip exactly", {
+  # A-T3. Guard.
+  skip_if_not_installed("terra")
+  x <- rcs_sim_raster(nrow = 12, ncol = 16)
+  x[["height"]][5] <- NA
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(staged_type(out), rep("FLT8S", 3))
+  expect_null(staged_r_type(out)$nodata)
+  expect_identical(nodata_tag(out$staged), rep(NA_real_, 3))
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_true(values_equal(r, x))
+})
+
+test_that("a Byte file written with nodata = 0 stays Byte and its zeros read as missing", {
+  # A-T4. Red: unused argument `nodata`.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"))
+  expect_identical(terra::datatype(x), "INT1U")
+  expect_identical(nodata_tag(terra::sources(x)), NA_real_)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  info <- gdal_info(out$staged)
+  expect_info(info, "Type=Byte")
+  expect_info(info, "NoData Value=0")
+  expect_identical(staged_type(out), "INT1U")
+  expect_equal(staged_r_type(out)$nodata, 0)
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), "INT1U")
+  edge <- terra::cellFromRowCol(r, c(1, 2, 59, 60, 30, 30), c(40, 40, 40, 40, 1, 80))
+  expect_true(all(is.na(terra::values(r)[edge])))
+  expect_true(values_equal(r, zero_as_missing(sim_landcover())))
+})
+
+test_that("a file-backed FLT4S source stays FLT4S", {
+  # A-T5. Red: stored as FLT8S.
+  skip_if_not_installed("terra")
+  file <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(rcs_sim_raster(nrow = 12, ncol = 16), file, datatype = "FLT4S")
+  x <- terra::rast(file)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(staged_type(out), rep("FLT4S", 3))
+  expect_null(staged_r_type(out)$nodata)
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), rep("FLT4S", 3))
+  expect_true(values_equal(r, x))
+})
+
+test_that("a file-backed INT4S source with small values stays INT4S", {
+  # A-T5. Guard: the type of the source is kept, not narrowed (D-A2 rule 2).
+  skip_if_not_installed("terra")
+  file <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(sim_landcover(nrow = 12, ncol = 16), file, datatype = "INT4S")
+  x <- terra::rast(file)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(staged_type(out), "INT4S")
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), "INT4S")
+  expect_true(values_equal(r, x))
+})
+
+test_that("nodata comes from the argument, then a flag set in the session, then the source's tag", {
+  # A-T6. Red: the source is widened to INT4S and no nodata is recorded; then
+  # unused argument `nodata`.
+  skip_if_not_installed("terra")
+  cells <- landcover_with(-1L)
+  cells[41] <- -1L
+  file <- withr::local_tempfile(fileext = ".tif")
+  x <- write_source(cells, file, datatype = "INT2S", tag = -1)
+  expect_identical(nodata_tag(file), -1)
+  expect_identical(sum(is.na(terra::values(x))), 2L)
+
+  # the source's tag is kept and recorded
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(staged_type(out), "INT2S")
+  expect_equal(staged_r_type(out)$nodata, -1)
+  expect_identical(nodata_tag(out$staged), -1)
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), x))
+
+  # a flag set in the session wins over the source's tag
+  flagged <- terra::rast(file)
+  terra::NAflag(flagged) <- 9
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(flagged, dir = dir)
+  expect_identical(staged_type(out), "INT2S")
+  expect_equal(staged_r_type(out)$nodata, 9)
+  expect_identical(nodata_tag(out$staged), 9)
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), flagged))
+
+  # the argument wins over both
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(flagged, dir = dir, nodata = 7)
+  expect_equal(staged_r_type(out)$nodata, 7)
+  expect_identical(nodata_tag(out$staged), 7)
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), flagged))
+})
+
+test_that("an explicit datatype is used, and values or nodata that do not fit abort", {
+  # A-T7. Red: unused argument `datatype`.
+  skip_if_not_installed("terra")
+  doubles <- rcs_sim_raster(nrow = 12, ncol = 16)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(doubles, dir = dir, datatype = "FLT4S")
+  expect_identical(staged_type(out), rep("FLT4S", 3))
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), rep("FLT4S", 3))
+  expect_equal(unname(terra::values(r)), unname(terra::values(doubles)), tolerance = 1e-6)
+
+  too_large <- landcover_with(300L)
+  whole <- sim_landcover(nrow = 12, ncol = 16)
+  # doubles with fractions inside the range of INT1U: only the "all integer"
+  # rule of D-A4 refuses them
+  fractions <- doubles[["moisture"]]
+  limits <- as.vector(terra::minmax(fractions, compute = TRUE))
+  expect_true(limits[[1]] > 0 && limits[[2]] < 1)
+  expect_error(stage_sim_raster(too_large, datatype = "INT1U"), class = "rcs_error_raster")
+  expect_error(stage_sim_raster(fractions, datatype = "INT1U"), class = "rcs_error_raster")
+  expect_error(stage_sim_raster(whole + 0.5, datatype = "INT1U"), class = "rcs_error_raster")
+  expect_error(stage_sim_raster(whole, datatype = "INT8S"), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(whole, datatype = 1L), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(whole, datatype = "INT1U", nodata = 300), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(whole, nodata = 0.5), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(whole, nodata = NA), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(whole, nodata = c(0, 1)), class = "rcs_error_argument")
+
+  expect_snapshot(stage_sim_raster(too_large, datatype = "INT1U"), error = TRUE)
+  expect_snapshot(stage_sim_raster(whole, datatype = "INT8S"), error = TRUE)
+})
+
+test_that("an explicit integer type gets its default nodata only when cells are missing", {
+  # A-T8. Red: unused argument `datatype`.
+  skip_if_not_installed("terra")
+  with_missing <- zero_as_missing(sim_landcover(nrow = 12, ncol = 16))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(with_missing, dir = dir, datatype = "INT2S")
+  expect_identical(staged_type(out), "INT2S")
+  expect_equal(staged_r_type(out)$nodata, -32768)
+  expect_identical(nodata_tag(out$staged), -32768)
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), with_missing))
+
+  # a value equal to the default flag, with missing cells: no flag is free
+  flag_taken <- with_missing
+  flag_taken[40] <- 255L
+  expect_error(stage_sim_raster(flag_taken, datatype = "INT1U"), class = "rcs_error_raster")
+
+  # every value of the type in use and no missing cell: no nodata at all
+  full <- sim_landcover(nrow = 16, ncol = 16)
+  terra::values(full) <- 0:255
+  expect_true(terra::is.int(full))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(full, dir = dir, datatype = "INT1U")
+  expect_identical(staged_type(out), "INT1U")
+  expect_null(staged_r_type(out)$nodata)
+  expect_identical(nodata_tag(out$staged), NA_real_)
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_false(anyNA(terra::values(r)))
+  expect_true(values_equal(r, full))
+})
+
+test_that("the file is a DEFLATE COG in 512 blocks whose overviews hold class codes only", {
+  # A-T9. Red: the compression is LZW and the overviews are resampled with
+  # CUBIC (values between the codes), as 0.0.0.9004 writes them; the type is
+  # Int32. Guards: `LAYOUT=COG`, `Block=512x512` and the presence of overviews.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 1100, ncol = 1100) * 40L
+  names(x) <- "cover"
+  expect_true(terra::is.int(x))
+  codes <- seq(0, 200, by = 40)
+  expect_setequal(unique(as.vector(terra::values(x))), codes)
+  out <- stage_sim_raster(x)
+  info <- gdal_info(out$staged)
+  expect_info(info, "LAYOUT=COG")
+  expect_info(info, "Block=512x512")
+  expect_info(info, "Overviews: 550x550")
+  expect_info(info, "Type=Byte")
+  expect_info(info, "COMPRESSION=DEFLATE")
+  expect_info(info, "PREDICTOR=2")
+  expect_info(info, "OVERVIEW_RESAMPLING=NEAREST")
+  overview <- terra::rast(out$staged, opts = "OVERVIEW_LEVEL=0")
+  expect_equal(dim(overview)[1:2], c(550, 550))
+  expect_in(unique(stats::na.omit(as.vector(terra::values(overview)))), codes)
+})
+
+test_that("gdal = replaces the defaults by key, whatever its order and case", {
+  # A-T10. Red: unused argument `gdal`.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 600, ncol = 600)
+  a <- stage_sim_raster(x, gdal = c("COMPRESS=LZW", "BLOCKSIZE=256"))
+  info <- gdal_info(a$staged)
+  expect_info(info, "COMPRESSION=LZW")
+  expect_info(info, "Block=256x256")
+  # the other defaults stay
+  expect_info(info, "LAYOUT=COG")
+  expect_info(info, "PREDICTOR=2")
+  expect_info(info, "OVERVIEW_RESAMPLING=NEAREST")
+  expect_info(info, "Type=Byte")
+  # the order given does not change the file
+  b <- stage_sim_raster(x, gdal = c("BLOCKSIZE=256", "COMPRESS=LZW"))
+  expect_identical(b$files$md5, a$files$md5)
+  expect_identical(b$entry$version, a$entry$version)
+  # keys are compared in upper case
+  upper <- stage_sim_raster(x, gdal = "BLOCKSIZE=256")
+  lower <- stage_sim_raster(x, gdal = "blocksize=256")
+  expect_info(gdal_info(lower$staged), "Block=256x256")
+  expect_info(gdal_info(lower$staged), "COMPRESSION=DEFLATE")
+  expect_identical(lower$files$md5, upper$files$md5)
+  # and an option changes the bytes
+  plain <- stage_sim_raster(x)
+  expect_false(identical(plain$files$md5, upper$files$md5))
+
+  small <- sim_landcover(nrow = 12, ncol = 16)
+  expect_error(stage_sim_raster(small, gdal = "COMPRESS"), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(small, gdal = 1), class = "rcs_error_argument")
+  expect_error(stage_sim_raster(small, gdal = NA_character_), class = "rcs_error_argument")
+})
+
+test_that("a categorical layer is stored as codes, with its legend in the entry", {
+  # A-T11. Red: categorical layers abort ("Categorical layers cannot be
+  # stored").
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  # no side file (`.aux.xml`), no temp file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+
+  r_type <- staged_r_type(out)
+  expect_identical(r_type$class, "SpatRaster")
+  expect_equal(r_type$values, 1:5)
+  expect_identical(r_type$levels, sim_landcover_labels)
+  expect_identical(r_type$levels_name, "label")
+  expect_identical(staged_type(out), "INT1U")
+
+  # the file is the one of the same map without its legend
+  plain <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16))
+  expect_identical(out$files$md5, plain$files$md5)
+  expect_identical(out$entry$version, plain$entry$version)
+  expect_null(staged_r_type(plain)$values)
+  expect_false(identical(out$entry$columns, plain$entry$columns))
+
+  # the legend survives the JSON of the entry with its types
+  spec <- columns_from_json(out$entry$columns)
+  again <- columns_from_json(columns_to_json(spec))
+  expect_identical(again$r_type, spec$r_type)
+  expect_true(is.numeric(r_type$values))
+  expect_type(r_type$levels, "character")
+  expect_type(r_type$levels_name, "character")
+  # also a legend of one class: `values` and `levels` stay arrays
+  one <- columns_spec(
+    name = "cover", type = "INT1U",
+    r_type = list(list(
+      class = "SpatRaster", resolution = c(1, 1), dim = c(2L, 2L),
+      values = 7, levels = "water", levels_name = "label"
+    ))
+  )
+  json <- columns_to_json(one)
+  expect_match(json, '"values":[7]', fixed = TRUE)
+  expect_match(json, '"levels":["water"]', fixed = TRUE)
+  expect_equal(columns_from_json(json)$r_type[[1]]$values, 7)
+
+  # the caller's raster keeps its categories
+  expect_true(terra::is.factor(x))
+  expect_identical(as.character(terra::cats(x)[[1]]$label), sim_landcover_labels)
+  expect_identical(names(x), "cover")
+})
+
+test_that("a legend with a missing label or a repeated code aborts", {
+  # A-T12 (AM6). Red: the raster aborts today as well, with the same class,
+  # for being categorical, so that expectation is a guard; the red reason is
+  # `raster_legend_check()`, which does not exist yet.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16)
+  levels(x) <- data.frame(value = 1:5, label = c("water", NA, "crop", "grass", "bare"))
+  names(x) <- "cover"
+  expect_error(stage_sim_raster(x), class = "rcs_error_raster")
+  # terra refuses to build a raster with a repeated code: the check is called
+  # with a table.
+  expect_error(
+    raster_legend_check(c(1, 1, 2), c("water", "forest", "crop"), "cover"),
+    class = "rcs_error_raster"
+  )
+  expect_error(
+    raster_legend_check(c(1, 2, 3), c("water", NA, "crop"), "cover"),
+    class = "rcs_error_raster"
+  )
+  expect_no_error(raster_legend_check(c(1, 2, 3), c("water", "forest", "crop"), "cover"))
+})
+
+test_that("the active label column is the legend; the other columns are dropped with a message", {
+  # A-T12. Red: categorical layers abort.
+  skip_if_not_installed("terra")
+  french <- c("eau", "foret", "culture", "herbe", "nu")
+  x <- sim_landcover(nrow = 12, ncol = 16)
+  # column names that do not contain each other, so that a message naming
+  # one cannot be taken for the other
+  levels(x) <- data.frame(value = 1:5, name_en = sim_landcover_labels, name_fr = french)
+  names(x) <- "cover"
+  staging_messages <- function(x) {
+    seen <- character()
+    withCallingHandlers(
+      stage_sim_raster(x),
+      message = function(m) {
+        seen <<- c(seen, conditionMessage(m))
+        invokeRestart("muffleMessage")
+      }
+    )
+    seen
+  }
+  expect_message(out <- stage_sim_raster(x), "name_fr", fixed = TRUE)
+  # one message, naming the dropped column and not the one kept
+  said <- staging_messages(x)
+  expect_length(said, 1L)
+  expect_match(said, "name_fr", fixed = TRUE)
+  expect_no_match(said, "name_en", fixed = TRUE)
+  expect_identical(staged_r_type(out)$levels_name, "name_en")
+  expect_identical(staged_r_type(out)$levels, sim_landcover_labels)
+  expect_equal(staged_r_type(out)$values, 1:5)
+  expect_snapshot(out <- stage_sim_raster(x))
+
+  terra::activeCat(x) <- 2
+  names(x) <- "cover"
+  expect_message(out <- stage_sim_raster(x), "name_en", fixed = TRUE)
+  said <- staging_messages(x)
+  expect_length(said, 1L)
+  expect_match(said, "name_en", fixed = TRUE)
+  expect_no_match(said, "name_fr", fixed = TRUE)
+  expect_identical(staged_r_type(out)$levels_name, "name_fr")
+  expect_identical(staged_r_type(out)$levels, french)
+  expect_equal(staged_r_type(out)$values, 1:5)
+})
+
+test_that("raster_open() restores the categories from the entry's columns", {
+  # A-T13. Red: categorical layers abort at staging; then unused argument
+  # `columns` of `raster_open()`.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  spec <- columns_from_json(out$entry$columns)
+  be <- be_new(dir)
+  before <- list.files(dir, recursive = TRUE, all.files = TRUE)
+
+  r <- raster_open(be, out$files$path, columns = spec)
+  expect_true(terra::is.factor(r))
+  legend <- terra::cats(r)[[1]]
+  expect_named(legend, c("value", "label"))
+  expect_equal(legend$value, 1:5)
+  expect_identical(as.character(legend$label), sim_landcover_labels)
+  expect_identical(names(r), "cover")
+  expect_identical(terra::datatype(r), "INT1U")
+  expect_true(codes_equal(r, sim_landcover()))
+
+  # a crop keeps the categories
+  box <- sf::st_bbox(c(xmin = -27.1, ymin = 7.3, xmax = -26.5, ymax = 8.1), crs = sf::st_crs(4326))
+  cropped <- raster_open(be, out$files$path, intersects = box, columns = spec)
+  expect_lt(terra::ncell(cropped), terra::ncell(r))
+  expect_true(terra::is.factor(cropped))
+  expect_identical(as.character(terra::cats(cropped)[[1]]$label), sim_landcover_labels)
+  expect_identical(names(cropped), "cover")
+  expect_true(codes_equal(cropped, terra::crop(sim_landcover(), terra::ext(cropped))))
+
+  # without the columns the raster holds codes
+  codes <- raster_open(be, out$files$path)
+  expect_false(terra::is.factor(codes))
+  expect_true(values_equal(codes, sim_landcover()))
+
+  # opening writes nothing next to the file
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), before)
+})
+
+test_that("raster_open() restores the categories of the one categorical layer among several", {
+  # A-T13. Red: categorical layers abort at staging.
+  skip_if_not_installed("terra")
+  other <- terra::as.int(rcs_sim_raster(nrow = 12, ncol = 16)[[c("height", "moisture")]])
+  x <- c(other[["height"]], sim_landcover(nrow = 12, ncol = 16, legend = TRUE), other[["moisture"]])
+  expect_identical(names(x), c("height", "cover", "moisture"))
+  expect_identical(terra::is.factor(x), c(FALSE, TRUE, FALSE))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  spec <- columns_from_json(out$entry$columns)
+  expect_null(spec$r_type[[1]]$values)
+  expect_equal(spec$r_type[[2]]$values, 1:5)
+  expect_null(spec$r_type[[3]]$values)
+  r <- raster_open(be_new(dir), out$files$path, columns = spec)
+  expect_identical(names(r), names(x))
+  expect_identical(terra::is.factor(r), c(FALSE, TRUE, FALSE))
+  expect_identical(as.character(terra::cats(r)[[2]]$label), sim_landcover_labels)
+  expect_true(codes_equal(r, x))
+})
+
+test_that("staging leaves no temp file and restores terra's temp folder, also after an abort", {
+  # A-T14. Red: unused argument `datatype` (the staging that must abort with
+  # `rcs_error_raster`). The expectations before it are guards: small rasters
+  # get no intermediate file from terra.
+  skip_if_not_installed("terra")
+  terra_tempdir <- terra::terraOptions(print = FALSE)$tempdir
+  spat_before <- spat_files()
+
+  file_backed <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"))
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(file_backed, dir = dir)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_identical(terra::terraOptions(print = FALSE)$tempdir, terra_tempdir)
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(sim_landcover(), dir = dir)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_identical(terra::terraOptions(print = FALSE)$tempdir, terra_tempdir)
+
+  dir <- withr::local_tempdir()
+  expect_error(
+    stage_sim_raster(landcover_with(300L), dir = dir, datatype = "INT1U"),
+    class = "rcs_error_raster"
+  )
+  expect_identical(terra::terraOptions(print = FALSE)$tempdir, terra_tempdir)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), character())
+
+  expect_identical(spat_files(), spat_before)
+})
+
+test_that("terra's temp folder lies below the staging folder while the file is written", {
+  # A-T14 (AM4, D-A11). Red: `raster_write_terra()` does not exist yet (object
+  # not found). Small rasters get no intermediate file from terra, so the
+  # folder terra is given is recorded at the time of the write.
+  skip_if_not_installed("terra")
+  by_terra <- raster_write_terra
+  full_path <- function(path) tolower(normalizePath(path, winslash = "/", mustWork = FALSE))
+  seen <- character()
+  existed <- logical()
+  local_mocked_bindings(
+    raster_write_terra = function(...) {
+      folder <- terra::terraOptions(print = FALSE)$tempdir
+      seen <<- c(seen, full_path(folder))
+      existed <<- c(existed, dir.exists(folder))
+      by_terra(...)
+    }
+  )
+  before <- terra::terraOptions(print = FALSE)$tempdir
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16), dir = dir)
+
+  expect_length(seen, 1L)
+  expect_true(existed)
+  # below the staging folder, so not R's `tempdir()`, terra's default
+  expect_true(startsWith(seen, paste0(full_path(dir), "/")))
+  expect_false(identical(seen, full_path(before)))
+  expect_false(identical(seen, full_path(tempdir())))
+  # restored, and removed with everything but the data file
+  expect_identical(terra::terraOptions(print = FALSE)$tempdir, before)
+  expect_false(dir.exists(seen))
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+})
+
+test_that("the default options follow the type, are sorted by key, and gdal = replaces them by key", {
+  # D-A5, AM1. Red: `raster_gdal_options()` does not exist yet.
+  key_of <- function(options) toupper(sub("=.*$", "", options))
+  value_of <- function(options, key) sub("^[^=]*=", "", options[key_of(options) == key])
+
+  whole <- raster_gdal_options("INT1U", NULL)
+  expect_setequal(whole, c(
+    "BIGTIFF=IF_SAFER", "BLOCKSIZE=512", "COMPRESS=DEFLATE",
+    "OVERVIEWS=IGNORE_EXISTING", "OVERVIEW_RESAMPLING=NEAREST", "PREDICTOR=2"
+  ))
+  for (type in c("INT2U", "INT2S", "INT4U", "INT4S")) {
+    expect_identical(raster_gdal_options(type, NULL), whole, info = type)
+  }
+  for (type in c("FLT4S", "FLT8S")) {
+    float <- raster_gdal_options(type, NULL)
+    expect_setequal(float, c(
+      "BIGTIFF=IF_SAFER", "BLOCKSIZE=512", "COMPRESS=DEFLATE",
+      "OVERVIEWS=IGNORE_EXISTING", "OVERVIEW_RESAMPLING=AVERAGE", "PREDICTOR=3"
+    ))
+    expect_identical(key_of(float), sort(key_of(float), method = "radix"), info = type)
+  }
+  expect_identical(key_of(whole), sort(key_of(whole), method = "radix"))
+
+  # a key given replaces the default of that key, in any case; others are added
+  given <- raster_gdal_options("INT1U", c("zstd_level=9", "compress=ZSTD", "Predictor=1"))
+  expect_setequal(
+    key_of(given),
+    c("BIGTIFF", "BLOCKSIZE", "COMPRESS", "OVERVIEWS", "OVERVIEW_RESAMPLING", "PREDICTOR", "ZSTD_LEVEL")
+  )
+  expect_identical(value_of(given, "COMPRESS"), "ZSTD")
+  expect_identical(value_of(given, "PREDICTOR"), "1")
+  expect_identical(value_of(given, "ZSTD_LEVEL"), "9")
+  expect_identical(value_of(given, "BLOCKSIZE"), "512")
+  expect_identical(value_of(given, "OVERVIEW_RESAMPLING"), "NEAREST")
+  expect_identical(key_of(given), sort(key_of(given), method = "radix"))
+  # the order given does not change the result
+  expect_identical(
+    raster_gdal_options("INT1U", c("Predictor=1", "compress=ZSTD", "zstd_level=9")),
+    given
+  )
+})
+
+test_that("a float raster is written with the floating-point predictor and averaged overviews", {
+  # D-A5, AM1. Red: 0.0.0.9004 writes LZW without a predictor and resamples
+  # the overviews with CUBIC. Guards: `LAYOUT=COG`, `Block=512x512`,
+  # `Type=Float64`.
+  skip_if_not_installed("terra")
+  x <- rcs_sim_raster(nrow = 600, ncol = 600)
+  out <- stage_sim_raster(x)
+  info <- gdal_info(out$staged)
+  expect_info(info, "LAYOUT=COG")
+  expect_info(info, "Block=512x512")
+  expect_info(info, "Type=Float64")
+  expect_info(info, "Overviews: 300x300")
+  expect_info(info, "COMPRESSION=DEFLATE")
+  expect_info(info, "PREDICTOR=3")
+  expect_info(info, "OVERVIEW_RESAMPLING=AVERAGE")
+  expect_identical(staged_type(out), rep("FLT8S", 3))
+  expect_true(values_equal(terra::rast(out$staged), x))
+})
+
+test_that("layers with different NoData tags or session flags need nodata =", {
+  # D-A3 rules 2 and 3. Red: 0.0.0.9004 stages such a raster without an error
+  # (`expect_error()` sees none); then unused argument `nodata`.
+  skip_if_not_installed("terra")
+  first <- landcover_with(-1L)
+  names(first) <- "first"
+  second <- sim_landcover(nrow = 12, ncol = 16, seed = 2)
+  second[41] <- -2L
+  names(second) <- "second"
+  folder <- withr::local_tempdir()
+  source_of <- function(x, name, tag = "none") {
+    write_source(x, file.path(folder, name), datatype = "INT2S", tag = tag)
+  }
+
+  # two sources whose NoData tags differ (rule 3)
+  tags <- c(source_of(first, "a.tif", tag = -1), source_of(second, "b.tif", tag = -2))
+  expect_identical(names(tags), c("first", "second"))
+  expect_identical(unname(colSums(is.na(terra::values(tags)))), c(1, 1))
+  expect_error(stage_sim_raster(tags), class = "rcs_error_raster")
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(tags, dir = dir, nodata = -9)
+  expect_identical(staged_type(out), rep("INT2S", 2))
+  expect_identical(nodata_tag(out$staged), c(-9, -9))
+  expect_equal(staged_r_type(out, 1)$nodata, -9)
+  expect_equal(staged_r_type(out, 2)$nodata, -9)
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), tags))
+  # the same tag in both sources is kept
+  same <- c(source_of(first, "c.tif", tag = -1), source_of(second, "d.tif", tag = -1))
+  out <- stage_sim_raster(same)
+  expect_identical(nodata_tag(out$staged), c(-1, -1))
+
+  # two sources without tags, with different flags set in the session (rule 2)
+  flag_a <- source_of(first, "e.tif")
+  flag_b <- source_of(second, "f.tif")
+  terra::NAflag(flag_a) <- 9
+  terra::NAflag(flag_b) <- 8
+  flags <- c(flag_a, flag_b)
+  expect_identical(terra::NAflag(flags), c(9, 8))
+  expect_error(stage_sim_raster(flags), class = "rcs_error_raster")
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(flags, dir = dir, nodata = -9)
+  expect_identical(nodata_tag(out$staged), c(-9, -9))
+  expect_true(values_equal(raster_open(be_new(dir), out$files$path), flags))
+})
+
+test_that("staging a file-backed raster warns when the staging drive looks too small", {
+  # A-T14. Red: `disk_free()` does not exist yet, so the mock fails.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"))
+  dir <- withr::local_tempdir()
+  local_mocked_bindings(disk_free = function(path) 1)
+  expect_warning(out <- stage_sim_raster(x, dir = dir), class = "rcs_warning_staging_space")
+  # it warns and still writes
+  expect_true(file.exists(out$staged))
+  expect_true(values_equal(terra::rast(out$staged), x))
+  mask <- function(lines) {
+    gsub(paste0("[^ '\"`]*", basename(dir), "[^ '\"`]*"), "<staging>", lines)
+  }
+  expect_snapshot(out <- stage_sim_raster(x, dir = dir), transform = mask)
+  # no check for a raster in memory
+  expect_no_warning(stage_sim_raster(sim_landcover(), dir = dir))
+  # no warning when the free space is unknown
+  local_mocked_bindings(disk_free = function(path) NA_real_)
+  expect_no_warning(stage_sim_raster(x, dir = dir))
+})
+
+test_that("an unchanged view of one file is translated; everything else is written by terra", {
+  # A-T15 (AM3). Red: `raster_write_translate()` and `raster_write_terra()` do
+  # not exist yet (object not found).
+  skip_if_not_installed("terra")
+  translate <- raster_write_translate
+  by_terra <- raster_write_terra
+  calls <- character()
+  local_mocked_bindings(
+    raster_write_translate = function(...) {
+      calls <<- c(calls, "translate")
+      translate(...)
+    },
+    raster_write_terra = function(...) {
+      calls <<- c(calls, "terra")
+      by_terra(...)
+    }
+  )
+  test_env <- environment()
+  path_of <- function(x, ...) {
+    calls <<- character()
+    dir <- withr::local_tempdir(.local_envir = test_env)
+    out <- stage_sim_raster(x, dir = dir, ...)
+    list(calls = calls, out = out, r = terra::rast(out$staged), tag = nodata_tag(out$staged))
+  }
+  file <- withr::local_tempfile(fileext = ".tif")
+  x <- sim_landcover(file = file)
+
+  # the file as it is, also with a legend set on it
+  view <- path_of(x, nodata = 0)
+  expect_identical(view$calls, "translate")
+  expect_identical(path_of(x)$calls, "translate")
+  expect_identical(path_of(sim_landcover(file = file, legend = TRUE), nodata = 0)$calls, "translate")
+
+  # in memory
+  memory <- path_of(sim_landcover(), nodata = 0)
+  expect_identical(memory$calls, "terra")
+  # renamed
+  renamed <- terra::rast(file)
+  names(renamed) <- "landcover"
+  expect_identical(path_of(renamed)$calls, "terra")
+  # cropped
+  cropped <- terra::crop(terra::rast(file), terra::ext(-28, -26, 7, 8))
+  expect_identical(path_of(cropped)$calls, "terra")
+  # one layer of a three-layer file
+  three <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(rcs_sim_raster(nrow = 12, ncol = 16), three)
+  expect_identical(path_of(terra::rast(three)[["cover"]])$calls, "terra")
+  expect_identical(path_of(terra::rast(three))$calls, "translate")
+  # a legend on a file whose layer has another name
+  other_name <- sim_landcover()
+  names(other_name) <- "lc"
+  other_file <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(other_name, other_file, datatype = "INT1U")
+  labelled <- terra::rast(other_file)
+  levels(labelled) <- data.frame(value = 1:5, label = sim_landcover_labels)
+  names(labelled) <- "cover"
+  expect_identical(path_of(labelled)$calls, "terra")
+
+  # both paths give the same raster
+  expect_true(values_equal(view$r, memory$r))
+  expect_identical(terra::datatype(view$r), "INT1U")
+  expect_identical(terra::datatype(memory$r), "INT1U")
+  expect_identical(view$tag, 0)
+  expect_identical(memory$tag, 0)
+  expect_identical(names(view$r), "cover")
+  expect_identical(names(memory$r), "cover")
+  expect_identical(staged_r_type(view$out), staged_r_type(memory$out))
+
+  # AM3: a source whose NoData tag differs from the nodata chosen is written
+  # by terra, and its missing cells stay missing
+  tagged_file <- withr::local_tempfile(fileext = ".tif")
+  tagged <- write_source(sim_landcover(), tagged_file, datatype = "INT1U", tag = 0)
+  expect_identical(nodata_tag(tagged_file), 0)
+  expect_identical(sum(is.na(terra::values(tagged))), 544L)
+  other_flag <- path_of(tagged, nodata = 255)
+  expect_identical(other_flag$calls, "terra")
+  expect_identical(other_flag$tag, 255)
+  expect_equal(staged_r_type(other_flag$out)$nodata, 255)
+  expect_true(values_equal(other_flag$r, tagged))
+  # the same tag (kept from the source, or given) is translated
+  kept <- path_of(tagged)
+  expect_identical(kept$calls, "translate")
+  expect_identical(kept$tag, 0)
+  expect_true(values_equal(kept$r, tagged))
+  expect_identical(path_of(tagged, nodata = 0)$calls, "translate")
+})
+
+test_that("staging an in-memory class map twice gives the same file", {
+  # A-T16 (b). Guard: deterministic today as well (as INT4S).
+  skip_if_not_installed("terra")
+  a <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16))
+  b <- stage_sim_raster(sim_landcover(nrow = 12, ncol = 16))
+  expect_identical(a$files$md5, b$files$md5)
+  expect_identical(a$entry$version, b$entry$version)
+})
+
+test_that("staging is deterministic for every type, nodata and legend; another nodata is another version", {
+  # A-T16 (a), (c). Red: unused argument `nodata`.
+  skip_if_not_installed("terra")
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  a <- stage_sim_raster(x, nodata = 0)
+  b <- stage_sim_raster(x, nodata = 0)
+  expect_identical(staged_type(a), "INT1U")
+  expect_identical(a$files$md5, b$files$md5)
+  expect_identical(a$entry$version, b$entry$version)
+  expect_identical(a$entry$columns, b$entry$columns)
+
+  doubles <- rcs_sim_raster(nrow = 12, ncol = 16)
+  a <- stage_sim_raster(doubles, datatype = "FLT4S")
+  b <- stage_sim_raster(doubles, datatype = "FLT4S")
+  expect_identical(staged_type(a), rep("FLT4S", 3))
+  expect_identical(a$files$md5, b$files$md5)
+  expect_identical(a$entry$version, b$entry$version)
+
+  memory <- sim_landcover(nrow = 12, ncol = 16)
+  zero <- stage_sim_raster(memory, nodata = 0)
+  other <- stage_sim_raster(memory, nodata = 255)
+  expect_false(identical(zero$files$md5, other$files$md5))
+  expect_false(identical(zero$entry$version, other$entry$version))
+})
+
+# AM9: what the staged file must share with `x` when `x` is a view of a file --
+
+# The class map as a file whose band has no description, as other software
+# writes it: terra then names the layer after the file. The description is
+# dropped by way of a VRT.
+write_undescribed <- function(file, nrow = 12, ncol = 16) {
+  folder <- withr::local_tempdir()
+  described <- file.path(folder, "described.tif")
+  sim_landcover(nrow = nrow, ncol = ncol, file = described)
+  vrt <- file.path(folder, "plain.vrt")
+  sf::gdal_utils("translate", described, vrt, options = c("-of", "VRT"), quiet = TRUE)
+  lines <- readLines(vrt)
+  writeLines(lines[!grepl("<Description>", lines, fixed = TRUE)], vrt)
+  sf::gdal_utils("translate", vrt, file, options = c("-co", "COMPRESS=LZW"), quiet = TRUE)
+  terra::rast(file)
+}
+
+# Counting wrappers around the two ways to write the file, as in A-T15. The
+# returned function gives the paths taken since its last call.
+local_write_paths <- function(frame = parent.frame()) {
+  translate <- raster_write_translate
+  by_terra <- raster_write_terra
+  calls <- character()
+  local_mocked_bindings(
+    raster_write_translate = function(...) {
+      calls <<- c(calls, "translate")
+      translate(...)
+    },
+    raster_write_terra = function(...) {
+      calls <<- c(calls, "terra")
+      by_terra(...)
+    },
+    .env = frame
+  )
+  function() {
+    taken <- calls
+    calls <<- character()
+    taken
+  }
+}
+
+test_that("a source without band descriptions is staged with the names of x", {
+  # AM9, names (MF1). Red: the file is copied by GDAL without a band
+  # description, so the staged layer is named after the staged file
+  # (`part-<version>`), not `cropmap_2020`. The path taken is not asserted.
+  skip_if_not_installed("terra")
+  folder <- withr::local_tempdir()
+  file <- file.path(folder, "cropmap_2020.tif")
+  x <- write_undescribed(file)
+  expect_false(any(grepl("Description", gdal_info(file), fixed = TRUE)))
+  expect_identical(names(x), "cropmap_2020")
+  expect_identical(names(terra::rast(file)), "cropmap_2020")
+  expect_identical(terra::datatype(x), "INT1U")
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  expect_identical(columns_from_json(out$entry$columns)$name, "cropmap_2020")
+  expect_identical(staged_type(out), "INT1U")
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(names(r), names(x))
+  expect_identical(terra::datatype(r), "INT1U")
+  expect_identical(nodata_tag(out$staged), 0)
+  expect_true(values_equal(r, zero_as_missing(sim_landcover(nrow = 12, ncol = 16))))
+
+  # deterministic: the same file from another staging folder
+  again <- stage_sim_raster(x, nodata = 0)
+  expect_identical(again$files$md5, out$files$md5)
+  expect_identical(again$entry$version, out$entry$version)
+
+  # with a legend, the name set back to the one terra gave the layer
+  labelled <- terra::rast(file)
+  levels(labelled) <- data.frame(value = 1:5, label = sim_landcover_labels)
+  names(labelled) <- "cropmap_2020"
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(labelled, dir = dir, nodata = 0)
+  spec <- columns_from_json(out$entry$columns)
+  expect_identical(spec$name, "cropmap_2020")
+  r <- raster_open(be_new(dir), out$files$path, columns = spec)
+  expect_identical(names(r), "cropmap_2020")
+  expect_true(terra::is.factor(r))
+  expect_identical(as.character(terra::cats(r)[[1]]$label), sim_landcover_labels)
+  expect_true(codes_equal(r, zero_as_missing(sim_landcover(nrow = 12, ncol = 16))))
+})
+
+test_that("a CRS set in the session is the CRS of the staged file", {
+  # AM9, CRS (MF2). Red: the raster counts as an unchanged view of its file,
+  # so GDAL copies the file and it keeps the CRS of the source (EPSG:4326),
+  # while the entry records the CRS of `x`.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"))
+  terra::crs(x) <- "EPSG:3857"
+  expect_false(any(terra::inMemory(x)))
+  expect_true(sf::st_crs(terra::crs(x)) == sf::st_crs(3857))
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(paths(), "terra")
+  expect_true(sf::st_crs(out$entry$crs) == sf::st_crs(3857))
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_true(sf::st_crs(terra::crs(r)) == sf::st_crs(terra::crs(x)))
+  expect_true(sf::st_crs(terra::crs(r)) == sf::st_crs(out$entry$crs))
+  expect_identical(as.vector(terra::ext(r)), as.vector(terra::ext(x)))
+  expect_true(values_equal(r, x))
+})
+
+test_that("a scale and offset set in the session are applied to the values written", {
+  # AM9, scale and offset (MF3 a). Red: GDAL copies the file, so it reads
+  # back with the stored codes 0-5, not the 1-11 that `x` reads.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"))
+  terra::scoff(x) <- cbind(2, 1)
+  expect_false(any(terra::inMemory(x)))
+  expect_equal(range(terra::values(x)), c(1, 11))
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(paths(), "terra")
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(names(r), "cover")
+  expect_equal(as.vector(terra::values(r)), as.vector(terra::values(x)))
+})
+
+test_that("a source with a scale and offset is staged with the values x reads", {
+  # AM9, scale and offset (MF3 b). Red: GDAL copies the file (the path is
+  # "translate") and the entry records `INT1U`, the type of the stored codes,
+  # for a raster that reads fractions. The values themselves already read
+  # back equal today, because GDAL copies the scale and offset too: a guard.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  folder <- withr::local_tempdir()
+  plain <- file.path(folder, "plain.tif")
+  sim_landcover(nrow = 12, ncol = 16, file = plain)
+  scaled <- file.path(folder, "scaled.tif")
+  sf::gdal_utils(
+    "translate", plain, scaled,
+    options = c("-a_scale", "0.1", "-a_offset", "0.05", "-co", "COMPRESS=LZW"), quiet = TRUE
+  )
+  x <- terra::rast(scaled)
+  expect_equal(as.vector(terra::scoff(x)), c(0.1, 0.05))
+  expect_equal(range(terra::values(x)), c(0.05, 0.55))
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(paths(), "terra")
+  expect_identical(staged_type(out), "FLT8S")
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(terra::datatype(r), "FLT8S")
+  expect_equal(as.vector(terra::values(r)), as.vector(terra::values(x)))
+})
+
+test_that("a scaled source opened raw is staged with its raw values", {
+  # AM9, scale and offset (MF3 c). Red: GDAL copies the file with its scale
+  # and offset, so it reads back as 0.05-0.55, not the 0-5 that `x` reads.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  folder <- withr::local_tempdir()
+  plain <- file.path(folder, "plain.tif")
+  sim_landcover(nrow = 12, ncol = 16, file = plain)
+  scaled <- file.path(folder, "scaled.tif")
+  sf::gdal_utils(
+    "translate", plain, scaled,
+    options = c("-a_scale", "0.1", "-a_offset", "0.05", "-co", "COMPRESS=LZW"), quiet = TRUE
+  )
+  x <- terra::rast(scaled, raw = TRUE)
+  expect_false(any(terra::inMemory(x)))
+  expect_equal(range(terra::values(x)), c(0, 5))
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(paths(), "terra")
+  expect_identical(staged_type(out), "INT1U")
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_equal(as.vector(terra::scoff(r)), c(1, 0))
+  expect_equal(as.vector(terra::values(r)), as.vector(terra::values(x)))
+  expect_true(values_equal(r, sim_landcover(nrow = 12, ncol = 16)))
+})
+
+# AM10: side files, mask bands, scaled tags, source overviews -----------------
+
+test_that("layers with time or units are staged as one file", {
+  # AM10, side files. Red: terra writes `part.tif.aux.json` for a raster with
+  # time or units, and staging aborts with the internal error "Staging a
+  # raster must leave one file, not part.tif and part.tif.aux.json."
+  skip_if_not_installed("terra")
+  expect_one_file <- function(x) {
+    dir <- withr::local_tempdir()
+    out <- stage_sim_raster(x, dir = dir)
+    expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+    r <- raster_open(be_new(dir), out$files$path)
+    expect_identical(names(r), names(x))
+    expect_true(values_equal(r, x))
+    out
+  }
+  # AM11: time and units are not stored, so the file is the one of the same
+  # raster without them
+  expect_same_file <- function(out, plain) {
+    reference <- stage_sim_raster(plain)
+    expect_identical(out$files$md5, reference$files$md5)
+    expect_identical(out$entry$version, reference$entry$version)
+  }
+  dates <- as.Date("2020-01-01") + 0:2
+  units <- c("m", "class", "share")
+
+  timed <- rcs_sim_raster(nrow = 12, ncol = 16)
+  terra::time(timed) <- dates
+  out <- expect_one_file(timed)
+  expect_same_file(out, rcs_sim_raster(nrow = 12, ncol = 16))
+  # the caller's raster keeps its time
+  expect_identical(terra::time(timed), dates)
+
+  with_units <- rcs_sim_raster(nrow = 12, ncol = 16)
+  terra::units(with_units) <- units
+  out <- expect_one_file(with_units)
+  expect_same_file(out, rcs_sim_raster(nrow = 12, ncol = 16))
+  expect_identical(terra::units(with_units), units)
+
+  # a renamed view of a file, which terra writes
+  file <- withr::local_tempfile(fileext = ".tif")
+  terra::writeRaster(rcs_sim_raster(nrow = 12, ncol = 16), file)
+  view <- terra::rast(file)
+  names(view) <- c("first", "second", "third")
+  terra::time(view) <- dates
+  expect_false(any(terra::inMemory(view)))
+  out <- expect_one_file(view)
+  renamed <- terra::rast(file)
+  names(renamed) <- c("first", "second", "third")
+  expect_same_file(out, renamed)
+  expect_identical(terra::time(view), dates)
+})
+
+test_that("a file view whose source has a side file with categories is staged as one file", {
+  # AM10, side files (mutation gap of WP3-V round 3). Green against the code
+  # of AM10 / AM11. GDAL copies the file (translate path) and writes
+  # `part.tif.aux.xml` from the source's side file; without its removal
+  # staging aborts on the one-file assertion.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  folder <- withr::local_tempdir()
+  file <- file.path(folder, "classes.tif")
+  terra::writeRaster(sim_landcover(nrow = 12, ncol = 16, legend = TRUE), file, datatype = "INT1U")
+  expect_true(file.exists(paste0(file, ".aux.xml")))
+  x <- terra::rast(file)
+  expect_true(terra::is.factor(x))
+  expect_identical(names(x), "cover")
+  expect_identical(as.character(terra::cats(x)[[1]][[2]]), sim_landcover_labels)
+  before <- list.files(folder, recursive = TRUE, all.files = TRUE)
+  before_md5 <- md5_file(file.path(folder, before))
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir)
+  expect_identical(paths(), "translate")
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  r_type <- staged_r_type(out)
+  expect_equal(r_type$values, 1:5)
+  expect_identical(r_type$levels, sim_landcover_labels)
+  expect_identical(staged_type(out), "INT1U")
+
+  # the file holds codes; the legend comes back from the entry's columns
+  be <- be_new(dir)
+  codes <- raster_open(be, out$files$path)
+  expect_false(terra::is.factor(codes))
+  expect_true(codes_equal(codes, x))
+  r <- raster_open(be, out$files$path, columns = columns_from_json(out$entry$columns))
+  expect_true(terra::is.factor(r))
+  expect_identical(names(r), "cover")
+  expect_true(codes_equal(r, x))
+  expect_true(codes_equal(r, sim_landcover(nrow = 12, ncol = 16)))
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+
+  # the source and its side file are as they were
+  expect_identical(list.files(folder, recursive = TRUE, all.files = TRUE), before)
+  expect_identical(md5_file(file.path(folder, before)), before_md5)
+  expect_true(terra::is.factor(x))
+})
+
+test_that("a source with a mask band and no band description is staged with the names of x", {
+  # AM10, VRT bands. Red: internal error "A VRT of 1 band was expected, not
+  # of 2." (the mask band is counted as a band). The path taken is not
+  # asserted.
+  skip_if_not_installed("terra")
+  folder <- withr::local_tempdir()
+  described <- file.path(folder, "described.tif")
+  sim_landcover(nrow = 12, ncol = 16, file = described)
+  vrt <- file.path(folder, "plain.vrt")
+  sf::gdal_utils("translate", described, vrt, options = c("-of", "VRT"), quiet = TRUE)
+  lines <- readLines(vrt)
+  writeLines(lines[!grepl("<Description>", lines, fixed = TRUE)], vrt)
+  file <- file.path(folder, "masked_2020.tif")
+  sf::gdal_utils(
+    "translate", vrt, file,
+    options = c("-mask", "1", "-co", "COMPRESS=LZW"),
+    config_options = c(GDAL_TIFF_INTERNAL_MASK = "YES"), quiet = TRUE
+  )
+  info <- gdal_info(file)
+  expect_info(info, "Mask Flags: PER_DATASET")
+  expect_false(any(grepl("Description", info, fixed = TRUE)))
+  expect_false(file.exists(paste0(file, ".msk")))
+  x <- terra::rast(file)
+  expect_identical(names(x), "masked_2020")
+  expect_identical(terra::datatype(x), "INT1U")
+  expected <- as.vector(terra::values(x))
+  expected[expected == 0] <- NA
+
+  dir <- withr::local_tempdir()
+  out <- stage_sim_raster(x, dir = dir, nodata = 0)
+  expect_identical(list.files(dir, recursive = TRUE, all.files = TRUE), out$files$path)
+  expect_identical(columns_from_json(out$entry$columns)$name, "masked_2020")
+  expect_identical(staged_type(out), "INT1U")
+  r <- raster_open(be_new(dir), out$files$path)
+  expect_identical(names(r), names(x))
+  expect_identical(terra::datatype(r), "INT1U")
+  got <- as.vector(terra::values(r))
+  expect_identical(is.na(got), is.na(expected))
+  expect_equal(got, expected)
+})
+
+test_that("the source's NoData tag is not taken for a layer with a scale or offset", {
+  # AM10, source tag of a scaled layer. Red: the tag 0, which is in stored
+  # units, is recorded as nodata (`r_type$nodata` is 0) and written, so the
+  # valid cells that read 0 come back missing.
+  skip_if_not_installed("terra")
+  folder <- withr::local_tempdir()
+  plain <- file.path(folder, "plain.tif")
+  sim_landcover(nrow = 12, ncol = 16, file = plain)
+  expect_reads_as_x <- function(x) {
+    values <- as.vector(terra::values(x))
+    # the setup: missing cells, and valid cells that read 0
+    expect_true(anyNA(values))
+    expect_true(any(values == 0, na.rm = TRUE))
+    dir <- withr::local_tempdir()
+    out <- stage_sim_raster(x, dir = dir)
+    expect_false(isTRUE(staged_r_type(out)$nodata == 0))
+    got <- as.vector(terra::values(raster_open(be_new(dir), out$files$path)))
+    expect_identical(is.na(got), is.na(values))
+    expect_equal(got, values)
+    expect_identical(sum(got == 0, na.rm = TRUE), sum(values == 0, na.rm = TRUE))
+  }
+
+  # a source with the tag 0 and a scale and offset: stored 1 reads 0
+  scaled <- file.path(folder, "scaled.tif")
+  sf::gdal_utils(
+    "translate", plain, scaled,
+    options = c("-a_nodata", "0", "-a_scale", "0.5", "-a_offset", "-0.5", "-co", "COMPRESS=LZW"),
+    quiet = TRUE
+  )
+  expect_identical(nodata_tag(scaled), 0)
+  expect_reads_as_x(terra::rast(scaled))
+
+  # a source with the tag 0, and an offset set in the session
+  tagged <- file.path(folder, "tagged.tif")
+  sf::gdal_utils(
+    "translate", plain, tagged,
+    options = c("-a_nodata", "0", "-co", "COMPRESS=LZW"), quiet = TRUE
+  )
+  shifted <- terra::rast(tagged)
+  terra::scoff(shifted) <- cbind(1, -1)
+  expect_false(any(terra::inMemory(shifted)))
+  expect_reads_as_x(shifted)
+})
+
+test_that("the overviews of the source are not copied", {
+  # AM10, source overviews. Red: GDAL copies the AVERAGE overviews of the
+  # source, so the staged overview holds values between the class codes, the
+  # file differs from the one staged from a source without overviews, and
+  # `OVERVIEWS=IGNORE_EXISTING` is not among the default options.
+  skip_if_not_installed("terra")
+  paths <- local_write_paths()
+  codes <- seq(0, 200, by = 40)
+  map <- sim_landcover(nrow = 1100, ncol = 1100) * 40L
+  names(map) <- "cover"
+  # the same cells under the same file name in two folders
+  source_in <- function(folder) {
+    file <- file.path(folder, "map.tif")
+    tmp <- withr::local_tempfile(fileext = ".tif")
+    terra::writeRaster(map, tmp, datatype = "INT1U", gdal = "COMPRESS=LZW")
+    sf::gdal_utils(
+      "translate", tmp, file,
+      options = c("-a_nodata", "none", "-co", "COMPRESS=LZW"), quiet = TRUE
+    )
+    file
+  }
+  plain <- source_in(withr::local_tempdir())
+  averaged <- source_in(withr::local_tempdir())
+  expect_identical(md5_file(averaged), md5_file(plain))
+  # `gdal_addo()` prints its progress
+  utils::capture.output(sf::gdal_addo(averaged, overviews = c(2L, 4L), method = "AVERAGE"))
+  expect_info(gdal_info(averaged), "Overviews: 550x550, 275x275")
+  expect_false(any(grepl("Overviews", gdal_info(plain), fixed = TRUE)))
+  source_overview <- terra::rast(averaged, opts = "OVERVIEW_LEVEL=0")
+  expect_false(all(unique(as.vector(terra::values(source_overview))) %in% codes))
+
+  expect_true("OVERVIEWS=IGNORE_EXISTING" %in% raster_gdal_options("INT1U", NULL))
+
+  out <- stage_sim_raster(terra::rast(averaged), nodata = 0)
+  expect_identical(paths(), "translate")
+  info <- gdal_info(out$staged)
+  expect_info(info, "Overviews: 550x550")
+  expect_info(info, "OVERVIEW_RESAMPLING=NEAREST")
+  overview <- terra::rast(out$staged, opts = "OVERVIEW_LEVEL=0")
+  expect_equal(dim(overview)[1:2], c(550, 550))
+  expect_in(unique(stats::na.omit(as.vector(terra::values(overview)))), codes[codes != 0])
+  expect_true(values_equal(terra::rast(out$staged), zero_as_missing(map)))
+
+  # the file of the same cells staged from the source without overviews
+  reference <- stage_sim_raster(terra::rast(plain), nodata = 0)
+  expect_identical(paths(), "translate")
+  expect_identical(out$files$md5, reference$files$md5)
+  expect_identical(out$entry$version, reference$entry$version)
 })

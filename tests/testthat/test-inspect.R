@@ -340,6 +340,55 @@ test_that("print() of a geospatial description and of its index table", {
   }, transform = scrub(dirname(fx$primary)))
 })
 
+# Plan 0006: types, nodata, options, legend, staging
+
+test_that("a class map is described with its cells, nodata and classes", {
+  # A-T19. Red: `r_type_text()` shows the cells only; then unused argument
+  # `nodata` of `store_write()`.
+  skip_if_not_installed("terra")
+  r_type <- list(
+    class = "SpatRaster", resolution = c(1, 1), dim = c(12L, 16L),
+    nodata = 0, values = 1:5, levels = sim_landcover_labels, levels_name = "label"
+  )
+  expect_identical(r_type_text(r_type), "raster layer (12 x 16 cells, nodata 0, 5 classes)")
+  expect_identical(
+    r_type_text(r_type[c("class", "resolution", "dim", "nodata")]),
+    "raster layer (12 x 16 cells, nodata 0)"
+  )
+  expect_identical(
+    r_type_text(r_type[c("class", "resolution", "dim", "values", "levels", "levels_name")]),
+    "raster layer (12 x 16 cells, 5 classes)"
+  )
+
+  root <- withr::local_tempdir()
+  st <- suppressMessages(store_connect(file.path(root, "primary"), create = TRUE))
+  x <- sim_landcover(nrow = 12, ncol = 16, file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  suppressMessages(store_write(
+    st, x, "grids/cover",
+    title = "Cover", description = "Simulated class map.", nodata = 0
+  ))
+  d <- store_describe(st, "grids/cover")
+  expect_identical(d$columns$name, "cover")
+  expect_identical(d$columns$type, "INT1U")
+  expect_identical(d$columns$r_type, "raster layer (12 x 16 cells, nodata 0, 5 classes)")
+  fix_catalogs(st)
+  local_snapshot_output()
+  expect_snapshot(print(store_describe(st, "grids/cover")), transform = scrub(root))
+})
+
+test_that("a plain raster is described by its cells alone", {
+  # A-T19. Guard: neither addition appears when nothing is recorded.
+  skip_if_not_installed("terra")
+  root <- withr::local_tempdir()
+  st <- suppressMessages(store_connect(file.path(root, "primary"), create = TRUE))
+  suppressMessages(store_write(
+    st, rcs_sim_raster(nrow = 12, ncol = 16), "grids/plain",
+    title = "Plain", description = "Simulated raster."
+  ))
+  d <- store_describe(st, "grids/plain")
+  expect_identical(d$columns$r_type, rep("raster layer (12 x 16 cells)", 3))
+})
+
 test_that("inspection makes no backend call and opens no data file after connecting", {
   fx <- local_test_store(partial = TRUE)
   st <- store_connect(fx$primary, fx$secondary)

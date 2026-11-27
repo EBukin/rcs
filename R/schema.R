@@ -535,6 +535,13 @@ new_file_rows <- function(dataset, version, path, partition_values, rows, bytes,
 #' | ordered factor | the same with `ordered = TRUE` |
 #' | plain list column | `list(class = "list")` |
 #' | raster layer | `list(class = "SpatRaster", resolution = c(x, y), dim = c(nrow, ncol))` |
+#' | raster layer with a NoData value | the same, then `nodata = <number>` |
+#' | categorical raster layer | the same, then `values = <codes>, levels = <labels>, levels_name = "<label column>"` |
+#'
+#' The fields `levels`, `values`, `resolution` and `dim` are JSON arrays
+#' whatever their length. `nodata` is absent when the file has no NoData
+#' value; `values` (numbers, sorted) and `levels` (character) have one
+#' length and one order.
 #'
 #' `columns_spec()` builds the tibble, `columns_to_json()` serialises it and
 #' `columns_from_json()` parses the string of an entry. A round trip is
@@ -569,7 +576,7 @@ columns_to_json <- function(spec) {
   items <- lapply(seq_len(nrow(spec)), function(i) {
     r_type <- spec$r_type[[i]]
     if (!is.null(r_type)) {
-      for (field in intersect(names(r_type), c("levels", "resolution", "dim"))) {
+      for (field in intersect(names(r_type), c("levels", "values", "resolution", "dim"))) {
         r_type[[field]] <- I(r_type[[field]])
       }
     }
@@ -591,7 +598,7 @@ columns_from_json <- function(json) {
     if (is.null(r_type)) {
       return(NULL)
     }
-    for (field in intersect(names(r_type), c("levels", "resolution", "dim"))) {
+    for (field in intersect(names(r_type), c("levels", "values", "resolution", "dim"))) {
       r_type[[field]] <- unlist(r_type[[field]]) %||% character()
     }
     r_type

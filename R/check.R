@@ -24,7 +24,10 @@
 #'   compared as WKB, times as instants). Geospatial data without key and
 #'   without a column `.rcs_id` are geocoded again to find the row
 #'   identifiers, which matches only a dataset written in one call (not
-#'   after an `update`). For a raster, `n` random cells are compared.
+#'   after an `update`). For a raster, `n` random cells are compared as a
+#'   read returns them: a categorical layer by its codes, cells of `x` that
+#'   hold the dataset's NoData value as missing, and a layer stored in
+#'   single precision (`FLT4S`) within a relative difference of `1e-6`.
 #'   [store_write()] runs this check on the staged files before it uploads
 #'   them.
 #' * Without `x`, an integrity check of each location: every file of the
@@ -465,6 +468,7 @@ check_raster_values <- function(be, entry, files, x, n) {
   if (!inherits(x, "SpatRaster")) {
     cli::cli_abort("{.arg x} must be a {.cls SpatRaster} for a raster dataset.", class = "rcs_error_argument", call = NULL)
   }
+  spec <- columns_from_json(entry$columns)
   rows <- lapply(files$path, function(path) {
     r <- tryCatch(terra::rast(be_gdal_path(be, path)), error = function(e) NULL)
     if (is.null(r)) {
@@ -476,12 +480,29 @@ check_raster_values <- function(be, entry, files, x, n) {
       problem <- "its layers or cells differ from x"
     } else {
       cells <- withr::with_preserve_seed(sample.int(terra::ncell(x), min(n, terra::ncell(x))))
-      a <- terra::extract(r, cells)
-      b <- terra::extract(x, cells)
-      same <- vapply(seq_along(a), function(j) {
-        va <- as.numeric(a[[j]])
-        vb <- as.numeric(b[[j]])
-        identical(is.na(va), is.na(vb)) && all(va[!is.na(va)] == vb[!is.na(vb)])
+      # `raw = TRUE`: the codes of a categorical layer, never its labels
+      a <- as.matrix(terra::extract(r, cells, raw = TRUE))
+      b <- as.matrix(terra::extract(x, cells, raw = TRUE))
+      same <- vapply(seq_len(ncol(a)), function(j) {
+        va <- as.numeric(a[, j])
+        vb <- as.numeric(b[, j])
+        # what a read returns: cells of `x` holding the NoData value are missing
+        layer <- match(names(r)[[j]], spec$name)
+        nodata <- if (!is.na(layer)) spec$r_type[[layer]][["nodata"]]
+        if (!is.null(nodata)) {
+          vb[!is.na(vb) & vb == nodata] <- NA
+        }
+        if (!identical(is.na(va), is.na(vb))) {
+          return(FALSE)
+        }
+        va <- va[!is.na(va)]
+        vb <- vb[!is.na(vb)]
+        if (!is.na(layer) && identical(spec$type[[layer]], "FLT4S")) {
+          # single precision rounds the doubles of `x`
+          all(abs(va - vb) <= 1e-6 * pmax(1, abs(vb)))
+        } else {
+          all(va == vb)
+        }
       }, logical(1))
       if (!all(same)) {
         problem <- paste0("layer", if (sum(!same) > 1) "s", " ", paste(names(r)[!same], collapse = ", "), " differ from x")

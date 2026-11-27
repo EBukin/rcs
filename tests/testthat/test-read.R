@@ -331,6 +331,53 @@ test_that("rasters are read as SpatRaster, cropped by intersects, and refuse tab
   expect_match(out[[1]], "grids/sim (raster)", fixed = TRUE)
 })
 
+# Plan 0006: types, nodata, options, legend, staging
+
+test_that("a class map is read back categorical, with its type and missing cells, from every location", {
+  # A-T17. Red: unused argument `nodata` of `store_write()`.
+  skip_below_level("default")
+  skip_if_not_installed("terra")
+  root <- withr::local_tempdir()
+  paths <- file.path(root, c("primary", "copy"))
+  st <- suppressMessages(store_connect(paths[[1]], secondary = paths[[2]], create = TRUE))
+  x <- sim_landcover(file = withr::local_tempfile(fileext = ".tif"), legend = TRUE)
+  suppressMessages(store_write(
+    st, x, "grids/cover",
+    title = "Cover", description = "Simulated class map.", nodata = 0
+  ))
+  # what a read returns: the codes, with the cells outside the map missing
+  codes <- as.vector(terra::values(sim_landcover()))
+  codes[codes == 0] <- NA
+  box <- sf::st_as_sfc(sf::st_bbox(c(xmin = -28, ymin = 7, xmax = -27, ymax = 8), crs = sf::st_crs(4326)))
+
+  # from the connection, from the primary alone and from the secondary alone
+  connections <- list(st, store_connect(paths[[1]]), store_connect(paths[[2]]))
+  for (connection in connections) {
+    got <- suppressMessages(store_read(connection, "grids/cover"))
+    expect_s4_class(got, "SpatRaster")
+    expect_identical(names(got), "cover")
+    expect_true(terra::is.factor(got))
+    legend <- terra::cats(got)[[1]]
+    expect_equal(legend$value, 1:5)
+    expect_identical(as.character(legend$label), sim_landcover_labels)
+    expect_identical(terra::datatype(got), "INT1U")
+    values <- as.vector(terra::values(got))
+    expect_identical(is.na(values), is.na(codes))
+    expect_equal(values, codes)
+
+    cropped <- suppressMessages(store_read(connection, "grids/cover", intersects = box))
+    expect_lt(terra::ncell(cropped), terra::ncell(got))
+    expect_true(terra::is.factor(cropped))
+    expect_identical(as.character(terra::cats(cropped)[[1]]$label), sim_landcover_labels)
+    expect_equal(
+      as.vector(terra::values(cropped)),
+      as.vector(terra::values(terra::crop(got, terra::ext(cropped))))
+    )
+  }
+  # reading wrote nothing next to the files
+  expect_length(list.files(paths, pattern = "aux\\.xml$", recursive = TRUE, all.files = TRUE), 0L)
+})
+
 # Through the public functions only --------------------------------------------
 
 test_that("filters on a difftime column compare in the column's own units", {

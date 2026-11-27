@@ -380,3 +380,40 @@
         path  partition  rows  size
         ... and 1 more.
 
+# a class map is described with its cells, nodata and classes
+
+    Code
+      print(store_describe(st, "grids/cover"))
+    Output
+      -- grids/cover -----------------------------------------------------------------
+      Cover
+      Simulated class map.
+      
+      Kind        raster
+      Version     <version>
+      Rows        192
+      Files       1
+      Size        1.2 kB
+      Key         -
+      Partition   -
+      Sorted by   -
+      Source      -
+      Inputs      -
+      CRS         WGS 84 (EPSG:4326)
+      Extent      xmin -30, ymin 6, xmax -24, ymax 9
+      History     not set (the connection's setting applies)
+      Created     2026-01-31 12:00:00 UTC
+      Updated     2026-01-31 12:00:00 UTC
+      Written by  R 4.6.2, rcs 0.0.0.9000
+      
+      Locations:
+        primary    <root>/primary
+      
+      Columns (1):
+        name   type   r_type                                             description
+        cover  INT1U  raster layer (12 x 16 cells, nodata 0, 5 classes)
+      
+      Files (1):
+        path                                   partition  rows    size
+        grids/cover/part-<version>.tif  {}          192  5.7 kB
+

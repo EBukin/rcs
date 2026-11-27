@@ -23,7 +23,10 @@ store_write(
   columns = NULL,
   check = TRUE,
   rows_per_group = 50000L,
-  crs = NULL
+  crs = NULL,
+  datatype = NULL,
+  nodata = NULL,
+  gdal = NULL
 )
 }
 \arguments{
@@ -87,6 +90,19 @@ before anything is uploaded (see \code{\link[=store_check]{store_check()}}).}
 a lazy DuckDB table (anything \code{\link[sf:st_crs]{sf::st_crs()}} accepts, e.g. \code{4326});
 required for such a table, ignored otherwise (an \code{sf} object carries
 its own).}
+
+\item{datatype}{For a raster: \code{NULL} to keep the source's data type or
+choose the smallest one that holds the values, or one of \code{"INT1U"},
+\code{"INT2U"}, \code{"INT2S"}, \code{"INT4U"}, \code{"INT4S"}, \code{"FLT4S"}, \code{"FLT8S"} (see
+"Rasters"). Aborts for any other data.}
+
+\item{nodata}{For a raster: \code{NULL}, or the one number that marks missing
+cells in the file. Cells holding it are missing when read back (see
+"Rasters"). Aborts for any other data.}
+
+\item{gdal}{For a raster: \code{NULL}, or a character vector of \code{KEY=VALUE}
+creation options of GDAL's COG driver, which replace the defaults by
+key (see "Rasters"). Aborts for any other data.}
 }
 \value{
 A tibble with one row per location, invisibly: \code{location},
@@ -122,11 +138,89 @@ not given, is taken from the cells. Columns \verb{h3_p<r>} are written as
 they are; with \code{partition = "h3"} one named as the chosen partition
 column must hold the same cells, and then serves as it. Raw and
 prepared data give the same version.
-\item A raster is written as one Cloud Optimized GeoTIFF; it cannot be
-partitioned or updated.
+\item A raster is written as one Cloud Optimized GeoTIFF (COG), the only
+raster format; it cannot be partitioned or updated (see "Rasters").
 \item A lazy table on a DuckDB connection is a \code{table}, or \code{geospatial} when
 it has a column \code{geometry} (see "DuckDB input").
 }
+}
+
+\section{Rasters}{
+
+A \code{SpatRaster} is written as one Cloud Optimized GeoTIFF. All its layers
+get one data type and one NoData value, as a GeoTIFF requires.
+\itemize{
+\item \strong{Data type.} \code{datatype}, when given: one of \code{"INT1U"}, \code{"INT2U"},
+\code{"INT2S"}, \code{"INT4U"}, \code{"INT4S"}, \code{"FLT4S"}, \code{"FLT8S"}; an integer type
+needs whole numbers inside its range, else the write aborts. Otherwise
+a raster read from files keeps the type of its source (a Byte map stays
+\code{INT1U}, an \code{FLT4S} file stays \code{FLT4S}); the type is then found with no
+pass over the cells. This does not hold for a raster with a scale or an
+offset (in the file or set with \code{terra::scoff()}), whose values are not
+the stored numbers. Otherwise whole numbers get the smallest integer
+type that holds them and the nodata value,
+and anything else \code{FLT8S}: doubles in memory are never narrowed to
+\code{FLT4S} unless \code{datatype = "FLT4S"} asks for it (it rounds them to
+single precision).
+\item \strong{NoData.} \code{nodata}, when given: one number the data type can hold.
+Cells that hold this value are missing when read back; this is how a
+map whose \code{0} means "outside the map" is written (\code{nodata = 0}).
+Otherwise the value is a flag set in the session
+(\verb{terra::NAflag(x) <- }), else the NoData tag of the source file;
+layers that differ abort and ask for \code{nodata}. The tag of a source is
+not used for a layer with a scale or an offset, whose values are not
+the stored numbers the tag refers to. Otherwise an integer
+type chosen from the values gets its default value (\code{255} for \code{INT1U},
+\code{65535} for \code{INT2U}, \code{-32768} for \code{INT2S}, \code{4294967295} for \code{INT4U},
+\code{-2147483648} for \code{INT4S}), an integer type given or kept from the
+source gets it only when cells are missing (found by one pass over the
+cells, made only in this case), and a float type gets none: its missing
+cells are \code{NaN}.
+\item \strong{Creation options.} The defaults suit reads from a bucket:
+\code{COMPRESS=DEFLATE}, \code{PREDICTOR=2} (integer types) or \code{PREDICTOR=3}
+(float types), \code{BLOCKSIZE=512}, \code{BIGTIFF=IF_SAFER}, and overviews
+built anew, never copied from a source file
+(\code{OVERVIEWS=IGNORE_EXISTING}), with \code{OVERVIEW_RESAMPLING=NEAREST}
+(integer types) or \code{AVERAGE} (float types). \code{gdal} replaces a default of the same key and adds other keys
+of GDAL's COG driver, e.g. \code{gdal = c("COMPRESS=ZSTD", "LEVEL=9")}; keys
+are compared in upper case, a key given twice aborts, and the order
+given does not change the file. The options are kept in the file, not
+in the catalog.
+\item \strong{Categorical layers.} The codes are written to the file, and the
+legend (the codes with the labels of the active category, see
+\code{terra::activeCat()}) is recorded in the catalog; \code{\link[=store_read]{store_read()}}
+returns the layer with its categories. Other columns of the category
+table are dropped, with a message. Codes must be whole numbers and
+every code needs a label. No side file (\code{.aux.xml}) is written, and the
+same cells with and without a legend give the same file and version.
+\item \strong{Time and units.} The time and the units of layers (\code{terra::time()},
+\code{terra::units()}) are not stored: the file is written without them, so
+they change neither the file nor the version, and no side file
+(\code{.aux.json}) is written; \code{x} itself keeps them. Only metadata that a
+source file holds itself may be copied with it when GDAL copies the
+file (see "Staging" below).
+\item \strong{Staging.} A raster that is an unchanged view of one file without a
+scale or an offset (as \code{terra::rast(file)} returns it) is copied by
+GDAL without an intermediate file; any other raster (in memory,
+computed, cropped, renamed, a subset of layers, several files, with a
+scale or an offset, or with another CRS or NoData flag than the file)
+is written by terra, which
+first writes an intermediate file of two to three times the output
+when the raster is too large for memory. Every temporary file lies
+below \code{getOption("rcs.staging_dir")} (default \code{\link[=tempdir]{tempdir()}}), which
+needs free room of about one and a half times the output for a file
+copied by GDAL, and of about four times the output for a large raster
+written by terra. For a raster read from files, the write warns (class
+\code{rcs_warning_staging_space}) when that drive has less free room than
+twice the size of the source files (the ps package tells the free
+room; without it there is no check), and goes on; a raster in memory
+is not checked.
+}
+
+The same raster written with the same arguments gives the same file and
+the same version. A raster written with a version of the package before
+\verb{0.0.0.9005} gets a new version when it is written again, even with
+unchanged cells: the bytes of the file differ.
 }
 
 \section{DuckDB input}{

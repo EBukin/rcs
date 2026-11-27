@@ -273,6 +273,15 @@
       Error in `store_write()`:
       ! A raster is stored as one file: `partition` and `key` do not apply.
 
+# datatype, nodata and gdal apply to rasters only
+
+    Code
+      write(nodata = 0)
+    Condition
+      Error in `store_write()`:
+      ! `nodata` applies to rasters only.
+      x `x` is a tibble, not a <SpatRaster>.
+
 # a primary failing during upload changes no catalog; the repeated call sends only what is missing
 
     Code
