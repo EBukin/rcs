@@ -1,6 +1,6 @@
 # Copy on read to secondary locations; sync restricted to the datasets a secondary already holds
 
-- **Date:** 2026-11-26 (verified and revised 2026-11-27)
+- **Date:** 2026-11-26 (verified and revised 2026-11-27; version and preflight updated 2026-11-27 after plan 0006, parts A and C)
 - **Author:** Eduard Bukin
 - **Status:** draft
 
@@ -12,7 +12,7 @@ When this plan is done:
 2. **Part B (copy on read).** `store_read()` of the current version of a dataset that a reachable **local secondary of a non-local primary** lacks, or holds at an older version, first copies the whole dataset to that secondary with the existing copy code, with a progress bar and a message, then reads from the copy. It does not copy when the download exceeds 2 GB (`rcs.copy_on_read_max_bytes`), for old versions, or when the connection or the call turns it off. In every one of those cases it reads only what it needs from the primary and says how to copy. `store_sample()`, `store_glimpse()`, `store_open()` and `store_duckdb()` never copy.
 3. Every change is test-driven: the tests are written first and shown to fail for the stated reason (red), then the code makes them pass (green). A separate verifier confirms each step.
 4. The new code paths are shown to be efficient by work counters (`rcs_trace()`) and a short timing script. The full benchmark (`bench/`) is **not** re-run.
-5. Version `0.0.0.9005`, committed (not pushed) once everything is green.
+5. Version `0.0.0.9007`, committed (not pushed) once everything is green.
 
 Decision record: `.docs/notes/0003-local-copy-on-read-and-restricted-sync.md`. Read it first. The decisions below make it precise and, where the owner decided otherwise on 2026-11-27 (D-B1, D-A6, D-A7), replace it. Where handoff 0004 differs from this plan, the plan governs.
 
@@ -123,13 +123,13 @@ Part B, copy on read:
 - **D-B11. No eligible secondary.** With no secondary, or none passing D-B1's backend test, nothing changes from today: no message, no write anywhere.
 - **D-B12. Index tables.** A read whose `name` is an index table never copies.
 
-- **D-V. Version `0.0.0.9005`.** There is no NEWS.md; do not create one.
+- **D-V. Version `0.0.0.9007`.** There is no NEWS.md; do not create one.
 
 ## Steps
 
 ### WP0. Preflight (orchestrator, no code)
 
-- [ ] `git merge-base --is-ancestor 94bfd2d HEAD` succeeds (plan 0004's release is in the history) and `DESCRIPTION` says `0.0.0.9004`. Otherwise stop and report to the owner.
+- [ ] `git merge-base --is-ancestor 6953970 HEAD` succeeds (the releases of plan 0006, parts A and C, are in the history) and `DESCRIPTION` says `0.0.0.9006`. Otherwise stop and report to the owner. Plan 0006 changed `R/raster.R`, `R/write.R`, `R/read.R`, `R/check.R`, `R/inspect.R` and `R/schema.R` after this plan was verified: the line numbers given in "Context" for those files may have moved, so find each function by name.
 - [ ] `git status` is clean (the revised plan is committed). Otherwise ask the owner.
 - [ ] Set this plan's status to `active`.
 
@@ -307,11 +307,11 @@ Files and required edits:
 
 - [ ] The orchestrator fills in "Results" and "Outcome", and sets the status to `done`, before the writer commits, so both go in one commit.
 - [ ] One writer (Opus):
-  - sets `Version: 0.0.0.9005` in `DESCRIPTION`;
+  - sets `Version: 0.0.0.9007` in `DESCRIPTION`;
   - runs `devtools::document()` and checks that only the expected `man/` files changed (`store_read.Rd`, `store_sync.Rd`, `store_connect.Rd`, `store_sample.Rd`, `store_glimpse.Rd`, `store_open.Rd`, `store_duckdb.Rd`, `store_write.Rd`, `store_status.Rd`, `rcs-package.Rd`, and any other the diff explains);
   - runs `testthat::test_local(filter = "copy-on-read|^sync$|^read$")` once more; no `*.new.md` under `tests/testthat/_snaps/`;
   - stages explicit paths only (the changed `R/*.R`, `tests/testthat/*.R`, `tests/testthat/_snaps/*.md`, `man/*.Rd`, `DESCRIPTION`, `README.Rmd`, `README.md`, the edited vignettes and bench script, `.docs/plans/0001-rcs-package.md`, this plan);
-  - commits with no email address and no AI attribution, for example `Plan 0005: store_read() copies datasets up to 2 GB to local secondaries of a cloud primary; store_sync() refreshes only the datasets a secondary holds (all = TRUE for every dataset); version 0.0.0.9005`;
+  - commits with no email address and no AI attribution, for example `Plan 0005: store_read() copies datasets up to 2 GB to local secondaries of a cloud primary; store_sync() refreshes only the datasets a secondary holds (all = TRUE for every dataset); version 0.0.0.9007`;
   - does **not** push;
   - reports the commit hash, `git show --stat HEAD`, `git status` (clean), and `session closed`.
 - [ ] The orchestrator checks the `git show --stat HEAD` list against the expected paths, then reports to the owner in a few bullets: what changed in sync and in reads, the tests with counts, the WP6 table, open questions.

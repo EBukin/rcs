@@ -322,7 +322,7 @@ Not blocking. The orchestrator records any new ones here for the owner.
 - (Part C) `nodata = Inf` aborts with the message "must be `NULL` or one finite number, not a number".
 - (Part C) The `docs/` folder committed before this part (built at 0.0.0.9001) held local temp-folder paths and `docs/CLAUDE.html`. The rebuild removed them from the tree; they stay in the git history. Rewriting history is the owner's decision.
 - (Part C) `source("pkgdown/deploy.R")` builds nothing when sourced inside `callr`; `site_build()` has to be called there.
-- (Part C) Plan 0005 names version `0.0.0.9005`; it now needs `0.0.0.9007`.
+- ~~(Part C) Plan 0005 names version `0.0.0.9005`; it now needs `0.0.0.9007`.~~ Done 2026-11-27: plan 0005 names `0.0.0.9007`, and its preflight expects `6953970` and `0.0.0.9006`.
 - Reading a `.qml` legend into a data frame is left to the downstream project.
 - Time series (a multi-band stack or a cube format) are out of scope (note 0004).
 - A translate path for rasters that are a renamed or subset view of one file would cut the terra path's peak (about 3.6 times the output). Not in this plan.
