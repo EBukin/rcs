@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-27
 - **Author:** Eduard Bukin
-- **Status:** active
+- **Status:** done (2026-11-27). Parts A and C are released and pushed: `1ab08c9` (`0.0.0.9005`) and `6953970` (`0.0.0.9006`). Part B (primary-only writes) was not executed here: on the owner's instruction of 2026-11-27 it moved to plan 0005 as that plan's Part C, which is now the only place where it is specified. The text of Part B below is kept as a record and is not to be executed from this file.
 
 ## Goal
 
@@ -253,6 +253,8 @@ Files: `vignettes/geospatial.Rmd`, `README.Rmd` (only if it describes raster typ
 - [x] The orchestrator reports to the owner in a few bullets: what changed, the tests with counts, the WP4 table, whether Part B runs.
 
 ### Part B. Primary-only writes (only when plan 0005 is done)
+
+**Moved (2026-11-27): do not execute from here.** Part B is specified and executed in `.docs/plans/0005-copy-on-read-and-restricted-sync.md`, Part C, with its own identifiers; the boxes below stay unticked on purpose.
 
 #### WP6. Survey B (investigator, may run R; no edits to the repo; may run with WP1)
 
@@ -687,7 +689,7 @@ Website: rebuilt into `docs/` with `site_build()` of `pkgdown/deploy.R` (the fir
 
 ## Outcome
 
-**Part A is done and released as `0.0.0.9005` (2026-11-27). Part B waits for plan 0005 (`draft`); this plan stays `active`.**
+**This plan is `done` (2026-11-27).** Part A is released as `0.0.0.9005` (`1ab08c9`) and Part C as `0.0.0.9006` (`6953970`), both pushed. Part B (primary-only writes) moved to plan 0005, Part C, on the owner's instruction: "note that plan 5 should implement what plan 6 is waiting [for], part B in the plan 6". The row `locations = "primary"` in the table below is therefore open in plan 0005, not here.
 
 **Part C is done and released as `0.0.0.9006` (2026-11-27):** the colours of a layer's colour table are stored in the manifest next to the legend (`color_values`, `colors`) and restored by `store_read()`, without changing the file or its version; the help of `store_write()`, `store_read()` and `store_check()` and the vignette explain rasters for a user; the website is rebuilt. Corrections to the lines below, found while verifying the documentation: a session flag counts only for a raster read from files, and an integer type kept from the file or given with `datatype` gets a default NoData value only when cells are missing.
 
