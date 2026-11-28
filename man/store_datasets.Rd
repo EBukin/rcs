@@ -22,8 +22,10 @@ A tibble, one row per dataset, sorted by name: \code{dataset}, \code{kind},
 \code{title}, \code{rows}, \code{bytes}, \code{n_files}, \code{partition} (the partition
 columns, a list), \code{version}, \code{updated} (in the session's time zone),
 then one column \verb{in_<n>} per secondary location, numbered in connection
-order, holding \code{"same"}, \code{"differs"} or \code{"missing"} (\code{NA} when the
-location is unavailable). With \code{index = TRUE} a column \code{index_of} names
+order, holding \code{"same"}, \code{"differs"}, \code{"missing"} or \code{"primary only"}
+(a dataset kept in the primary only, see \code{\link[=store_write]{store_write()}}'s
+\code{locations}, that the location does not hold; \code{NA} when the location
+is unavailable). With \code{index = TRUE} a column \code{index_of} names
 the dataset an index table belongs to. The attribute \code{locations} holds
 the addresses: a named character vector with the names \code{primary} and
 \verb{in_<n>}.

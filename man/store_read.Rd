@@ -48,8 +48,9 @@ an earlier version kept in the history.}
 before reading (see "Copy to secondary locations"). \code{NULL} (the
 default) copies the current version when the connection's
 \code{copy_on_read} is \code{TRUE} and the bytes to download are at or under the
-limit. \code{TRUE} copies whatever the limit and the connection's setting,
-and copies an earlier version too, into the secondaries' history.
+limit, unless the dataset is kept in the primary only. \code{TRUE} copies
+whatever the limit, the connection's setting and where the dataset is
+kept, and copies an earlier version too, into the secondaries' history.
 \code{FALSE} never copies.}
 
 \item{exact}{\code{TRUE} tests the candidate rows of a spatial filter exactly,
@@ -112,7 +113,10 @@ and a local secondary that lacks the raster or holds an older version,
 the whole file is first copied to the secondary when it is at or under
 the size limit, and the raster, or its window, is then read from that
 copy. With \code{copy = FALSE}, a connection made with \code{copy_on_read = FALSE}, or a file above the limit, nothing is copied and the read stays
-on the bucket.
+on the bucket. A raster kept in the primary only
+(\code{store_write(locations = "primary")}) is never copied by a read
+unless \code{copy = TRUE}: while no local secondary holds it, every read,
+whole or a window, comes from the primary.
 \itemize{
 \item \strong{The whole raster.} \code{store_read(st, "name")} returns every layer,
 with the layer names, the data type and the NoData value of the file.
@@ -171,7 +175,13 @@ secondary lacks are sent, each verified by its MD5;
 are at or under the limit \code{getOption("rcs.copy_on_read_max_bytes")},
 2 GB (\code{2e9}) by default. Above it nothing is copied and a message
 says how to copy (\code{copy = TRUE}, or \code{\link[=store_sync]{store_sync()}} with
-\verb{datasets = }).
+\verb{datasets = });
+\item not a dataset kept in the primary only (written with
+\code{store_write(locations = "primary")}) to a secondary that lacks it,
+whatever its size. When every such secondary lacks it, the read comes
+from the primary and a message says so, with the hint
+\code{copy = TRUE}, which copies it. A secondary that already holds such a
+dataset is brought up to date as for any other dataset.
 }
 
 Filters, \code{columns} and \code{intersects} do not change the rule: the whole

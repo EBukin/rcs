@@ -71,7 +71,7 @@ for (i in 1:3) {
 }
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-prune/primary  1/1
-#>   files sent  13.7 kB  0.1s
+#>   files sent  13.7 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 #> ℹ Replacing "sales/daily": 100 rows in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-prune/primary  1/1
@@ -89,7 +89,7 @@ store_history(st, "sales/daily")
 #> # A tibble: 1 × 8
 #>   version    current written             replaced n_files  rows bytes
 #>   <chr>      <lgl>   <dttm>              <dttm>     <int> <dbl> <dbl>
-#> 1 19a32f7f8… TRUE    2026-11-27 18:51:37 NA             1   100 13734
+#> 1 19a32f7f8… TRUE    2026-11-27 21:24:14 NA             1   100 13734
 #> # ℹ 1 more variable: complete <lgl>
 unlink(root, recursive = TRUE)
 ```

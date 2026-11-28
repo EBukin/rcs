@@ -25,7 +25,8 @@ With \code{delete = TRUE} it restricts the deletions too, and a full name
 the source does not hold is accepted.}
 
 \item{all}{\code{TRUE} copies every dataset of the source to every target,
-including datasets a secondary does not hold. \code{FALSE} (the default)
+including datasets a secondary does not hold, but not the datasets kept
+in the primary only (see "Scope"). \code{FALSE} (the default)
 refreshes in a secondary only the datasets it already holds (see
 "Scope"). Cannot be combined with \code{datasets}.}
 
@@ -52,7 +53,8 @@ A tibble, invisibly, one row per target location: \code{location},
 \code{dry_run = TRUE}), the list columns \code{datasets} (copied, or to copy),
 \code{deleted} (deleted, or to delete), \code{kept} (not deleted from the primary
 without \code{force}) and \code{conflicts}; then the datasets left out by the
-default scope: \code{skipped} (a list column of names), \code{skipped_files} and
+scope (those kept in the primary only included): \code{skipped} (a list
+column of names), \code{skipped_files} and
 \code{skipped_bytes} (the files of those datasets the target lacks, and their
 size: at most what \code{all = TRUE} would send); then \code{files} (files sent,
 or to send), \code{bytes} and \code{seconds}. A status of \code{"same"} can go with
@@ -81,8 +83,13 @@ brought to the source's version, and nothing new is copied there. The
 call says which datasets were not copied to each secondary, with the
 number of files and the bytes a full sync would send at most (an empty
 secondary is named as such). \code{all = TRUE} copies every dataset of the
-source; \verb{datasets = } copies the named datasets, whether or not a
-secondary holds them. The primary, as a target (\code{from} a secondary),
+source, except the datasets kept in the primary only
+(\code{store_write(locations = "primary")}) to a secondary that does not hold
+them; they are listed apart among the datasets not copied. \verb{datasets = }
+copies the named datasets, whether or not a secondary holds them, those
+kept in the primary only included (the copy keeps that setting). A
+secondary that holds a primary-only dataset gets it refreshed like any
+other dataset it holds. The primary, as a target (\code{from} a secondary),
 always receives every dataset of the source.
 }
 

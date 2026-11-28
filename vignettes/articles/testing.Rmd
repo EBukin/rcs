@@ -72,7 +72,8 @@ available location again and checks, for each:
 5. every index table agrees with its dataset: every row identifier exists
    and every recorded main cell equals the row's `h3`;
 6. every secondary copy of a dataset either equals the primary's or is
-   reported as `missing` or `differs` by `store_status()`.
+   reported as `missing`, `primary only` or `differs` by
+   `store_status()`.
 
 It also checks that the connection object holds the catalogs that are
 stored, so that a function that changed a location updated the object in
@@ -261,6 +262,19 @@ tests themselves):
   dataset's index table and a raster copied whole; a failing copy that
   warns while the read goes on; a windowed read of a class map; and one
   test against a bucket primary at level `full`.
+- **Primary-only datasets** (`test-primary-only.R`): a write with
+  `locations = "primary"` lands in the primary only, contacts no
+  secondary and records the setting (for a geospatial dataset on its
+  index table too), which later writes keep until `locations = "all"`;
+  the status `primary only` in `store_status()`, `store_datasets()`, the
+  print and `store_describe()`; a secondary that already holds the
+  dataset left as it was, with one message; `store_sync()`, with and
+  without `all = TRUE`, leaving the dataset out, and `datasets = `
+  copying it; reads of a raster and of a class map window that never
+  copy it unless `copy = TRUE`, and one test against a bucket at level
+  `full`; no
+  notice of an empty secondary when the primary holds only such
+  datasets.
 
 ## DuckDB
 

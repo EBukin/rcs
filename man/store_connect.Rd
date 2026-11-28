@@ -72,8 +72,9 @@ again.
 initialises it with empty catalogs (as \code{\link[=store_create]{store_create()}} does, with the
 store's history default off).
 \item An available secondary that holds no dataset while the primary holds
-some prints a notice that it is empty, with the \code{\link[=store_sync]{store_sync()}} calls
-that fill it (\code{all = TRUE} for every dataset, \verb{datasets = } for some).
+some that are not kept in the primary only prints a notice that it is
+empty, with the \code{\link[=store_sync]{store_sync()}} calls that fill it (\code{all = TRUE} for
+every dataset, \verb{datasets = } for some).
 \code{\link[=store_refresh]{store_refresh()}} does not repeat it.
 }
 

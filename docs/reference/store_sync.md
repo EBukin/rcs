@@ -41,9 +41,10 @@ store_sync(
 - all:
 
   `TRUE` copies every dataset of the source to every target, including
-  datasets a secondary does not hold. `FALSE` (the default) refreshes in
-  a secondary only the datasets it already holds (see "Scope"). Cannot
-  be combined with `datasets`.
+  datasets a secondary does not hold, but not the datasets kept in the
+  primary only (see "Scope"). `FALSE` (the default) refreshes in a
+  secondary only the datasets it already holds (see "Scope"). Cannot be
+  combined with `datasets`.
 
 - to:
 
@@ -76,11 +77,12 @@ when the target holds a newer version of a dataset, `"behind"` when it
 failed, `"unavailable"`, or `"to sync"` with `dry_run = TRUE`), the list
 columns `datasets` (copied, or to copy), `deleted` (deleted, or to
 delete), `kept` (not deleted from the primary without `force`) and
-`conflicts`; then the datasets left out by the default scope: `skipped`
-(a list column of names), `skipped_files` and `skipped_bytes` (the files
-of those datasets the target lacks, and their size: at most what
-`all = TRUE` would send); then `files` (files sent, or to send), `bytes`
-and `seconds`. A status of `"same"` can go with skipped datasets.
+`conflicts`; then the datasets left out by the scope (those kept in the
+primary only included): `skipped` (a list column of names),
+`skipped_files` and `skipped_bytes` (the files of those datasets the
+target lacks, and their size: at most what `all = TRUE` would send);
+then `files` (files sent, or to send), `bytes` and `seconds`. A status
+of `"same"` can go with skipped datasets.
 
 ## Details
 
@@ -97,8 +99,13 @@ brought to the source's version, and nothing new is copied there. The
 call says which datasets were not copied to each secondary, with the
 number of files and the bytes a full sync would send at most (an empty
 secondary is named as such). `all = TRUE` copies every dataset of the
-source; `datasets = ` copies the named datasets, whether or not a
-secondary holds them. The primary, as a target (`from` a secondary),
+source, except the datasets kept in the primary only
+(`store_write(locations = "primary")`) to a secondary that does not hold
+them; they are listed apart among the datasets not copied. `datasets = `
+copies the named datasets, whether or not a secondary holds them, those
+kept in the primary only included (the copy keeps that setting). A
+secondary that holds a primary-only dataset gets it refreshed like any
+other dataset it holds. The primary, as a target (`from` a secondary),
 always receives every dataset of the source.
 
 ## Conflicts

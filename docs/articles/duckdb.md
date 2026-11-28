@@ -39,7 +39,7 @@ store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.2s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_write(st, rcs_sim_polygons(300, seed = 3), "shapes/polygons",
   title = "Polygons",
@@ -384,8 +384,10 @@ How it works:
   sorts them, and streamed into the Parquet files; R holds about one
   batch at a time. A progress bar shows the batches of a long write.
 - The files are staged, checked and land in every location as for any
-  other write; DuckDB never uploads. They are identical to those written
-  from the same rows collected into R, so both give the same version.
+  other write (in the primary only for a dataset kept there with
+  `locations = "primary"`); DuckDB never uploads. They are identical to
+  those written from the same rows collected into R, so both give the
+  same version.
 - Modes `"create"` and `"replace"` work; `"update"` aborts.
 - Types: integers, doubles, text, dates and logicals are stored as they
   are, `BIGINT` as 64-bit integers
@@ -530,7 +532,7 @@ store_write(st, sales, "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.2s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -587,8 +589,9 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 5.  When the work is ready to share, add a bucket as a secondary
-    location and copy the whole store there with
-    `store_sync(all = TRUE)` (see
+    location and copy the store there with `store_sync(all = TRUE)`
+    (every dataset except those kept in the primary only with
+    `locations = "primary"`; see
     [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md);
     a plain
     [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
@@ -601,8 +604,9 @@ st <- store_connect(path, secondary = "gs://my-bucket/store", create = TRUE)
 store_sync(st, all = TRUE)
 ```
 
-Afterwards every write reaches both locations, and reads, DuckDB views
-included, keep using the local copy.
+Afterwards every write reaches both locations (except writes with
+`locations = "primary"`), and reads, DuckDB views included, keep using
+the local copy.
 
 ## Buckets
 

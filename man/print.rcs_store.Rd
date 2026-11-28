@@ -23,8 +23,10 @@ Shows the locations with their backend and availability, the history
 setting, and the datasets grouped by folder: name, kind, rows, size,
 files, last update and, per secondary location, whether its copy is the
 same (\code{=}), differs (a not-equal sign, \code{!=} on a console without UTF-8)
-or is missing (a dash), and \verb{?} for an unavailable location. Works from
-the catalogs held by the connection.
+or is missing (a dash), \code{P} when it does not hold a dataset kept in the
+primary only (see \code{\link[=store_write]{store_write()}}'s \code{locations}; the legend names \code{P}
+only when the store holds such a dataset), and \verb{?} for an unavailable
+location. Works from the catalogs held by the connection.
 }
 \examples{
 root <- file.path(tempdir(), "rcs-example-print")

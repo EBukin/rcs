@@ -26,7 +26,8 @@ store_write(
   crs = NULL,
   datatype = NULL,
   nodata = NULL,
-  gdal = NULL
+  gdal = NULL,
+  locations = NULL
 )
 }
 \arguments{
@@ -122,18 +123,25 @@ same key (\code{COMPRESS=DEFLATE}, \code{PREDICTOR=2} or \code{3}, \code{BLOCKSI
 \code{BIGTIFF=IF_SAFER}, \code{OVERVIEWS=IGNORE_EXISTING},
 \code{OVERVIEW_RESAMPLING=NEAREST} or \code{AVERAGE}); other options are added.
 See "Rasters". Aborts for any other data.}
+
+\item{locations}{Where the dataset is kept (see "Primary-only
+datasets"): \code{"primary"} for the primary location only, \code{"all"} for
+every location, or \code{NULL} (the default) to keep the dataset's recorded
+setting (every location for a new dataset).}
 }
 \value{
 A tibble with one row per location, invisibly: \code{location},
 \code{role}, \code{status} (\code{"written"}, \code{"unchanged"}, \code{"same"} for a secondary
-that already held the version, \code{"behind"} or \code{"unavailable"}), \code{files}
-(files of the version), \code{uploaded} (files sent), \code{bytes} (bytes sent)
-and \code{seconds}. The attribute \code{version} holds the dataset's version.
+that already held the version, \code{"behind"}, \code{"unavailable"}, or
+\code{"primary only"} for a secondary left out by a primary-only write),
+\code{files} (files of the version; \code{NA} for a secondary not written to),
+\code{uploaded} (files sent), \code{bytes} (bytes sent) and \code{seconds}. The attribute \code{version} holds the dataset's version.
 }
 \description{
 Writes a table, an \code{sf} object or a \code{terra::SpatRaster} as one dataset of
-the store, in the primary location and in every available secondary one.
-The files are staged locally, checked, uploaded where they are missing,
+the store, in the primary location and in every available secondary one
+(in the primary only with \code{locations = "primary"}, see "Primary-only
+datasets"). The files are staged locally, checked, uploaded where they are missing,
 verified by MD5, and the catalogs of each location are switched to the
 new version last, so that readers always see either the old or the new
 version.
@@ -348,7 +356,8 @@ the batches unless \code{options(rcs.quiet = TRUE)}. For the duration of the
 call the connection runs with \code{preserve_insertion_order = true}, so that
 the rows reach R in the order the write asks for; the caller's setting is
 restored when the call ends, also after an error. DuckDB never uploads:
-the files are staged and land in every location as for any other write.
+the files are staged and land in the locations as for any other write
+(every location, unless the dataset is kept in the primary only).
 Staged files need free room equal to the output in
 \code{getOption("rcs.staging_dir")} (default \code{\link[=tempdir]{tempdir()}}); setting it to a
 folder on the store's drive avoids copying them across drives. The files
@@ -440,7 +449,44 @@ resolution.
 
 Writing the same data again gives the same version: the call reports the
 dataset as unchanged, uploads nothing to the primary, and only brings
-secondary locations that differ up to date.
+secondary locations that differ up to date (none for a primary-only
+write).
+}
+
+\section{Primary-only datasets}{
+
+\code{locations = "primary"} writes the dataset to the primary location only:
+no secondary is landed or even contacted, and each gets the status
+\code{"primary only"} in the result (an unavailable secondary too), with no
+warning and without counting as behind. The setting is recorded with the
+dataset (\code{primary_only} in its catalog entry and manifest, also for its
+index table) and kept by later writes that leave \code{locations} out, of any
+mode, until \code{locations = "all"} writes the dataset to every location
+again. A secondary that already holds the dataset is left as it is: a
+message names it and how to update it (\code{store_sync(st, datasets = )}).
+
+Where a dataset is kept does not change its files or its version: the
+setting is not written into the data files, so the same data written with
+and without it give the same version, and switching it for unchanged data
+changes only the catalog entry and sends no data file to the primary.
+Switching back with \code{locations = "all"} also copies the dataset to the
+secondaries that lack it.
+
+Elsewhere a primary-only dataset is treated thus:
+\itemize{
+\item \code{\link[=store_status]{store_status()}}, \code{\link[=store_datasets]{store_datasets()}} and the print of the connection
+(symbol \code{P}) report \code{"primary only"}, not \code{"missing"}, for a secondary
+that does not hold it;
+\item \code{\link[=store_sync]{store_sync()}} does not copy it to a secondary that does not hold it,
+also with \code{all = TRUE}; \code{store_sync(st, datasets = "<name>")} and
+\code{\link[=store_copy]{store_copy()}} copy it, and a secondary that holds it is refreshed by a
+plain \code{store_sync()} like any dataset it holds;
+\item \code{\link[=store_read]{store_read()}} does not copy it to a local secondary that lacks it,
+whatever its size, unless \code{copy = TRUE}.
+}
+
+Use it for data that should stay in the primary, typically a large raster
+in a bucket that is read a window at a time straight from there.
 }
 
 \section{History}{

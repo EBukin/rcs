@@ -83,7 +83,10 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #' the size limit, and the raster, or its window, is then read from that
 #' copy. With `copy = FALSE`, a connection made with `copy_on_read =
 #' FALSE`, or a file above the limit, nothing is copied and the read stays
-#' on the bucket.
+#' on the bucket. A raster kept in the primary only
+#' (`store_write(locations = "primary")`) is never copied by a read
+#' unless `copy = TRUE`: while no local secondary holds it, every read,
+#' whole or a window, comes from the primary.
 #'
 #' * **The whole raster.** `store_read(st, "name")` returns every layer,
 #'   with the layer names, the data type and the NoData value of the file.
@@ -139,7 +142,13 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   are at or under the limit `getOption("rcs.copy_on_read_max_bytes")`,
 #'   2 GB (`2e9`) by default. Above it nothing is copied and a message
 #'   says how to copy (`copy = TRUE`, or [store_sync()] with
-#'   `datasets = `).
+#'   `datasets = `);
+#' * not a dataset kept in the primary only (written with
+#'   `store_write(locations = "primary")`) to a secondary that lacks it,
+#'   whatever its size. When every such secondary lacks it, the read comes
+#'   from the primary and a message says so, with the hint
+#'   `copy = TRUE`, which copies it. A secondary that already holds such a
+#'   dataset is brought up to date as for any other dataset.
 #'
 #' Filters, `columns` and `intersects` do not change the rule: the whole
 #' dataset is copied, then read from the copy. A secondary whose version
@@ -193,8 +202,9 @@ read_target <- function(st, dataset, version = NULL, call = caller_env()) {
 #'   before reading (see "Copy to secondary locations"). `NULL` (the
 #'   default) copies the current version when the connection's
 #'   `copy_on_read` is `TRUE` and the bytes to download are at or under the
-#'   limit. `TRUE` copies whatever the limit and the connection's setting,
-#'   and copies an earlier version too, into the secondaries' history.
+#'   limit, unless the dataset is kept in the primary only. `TRUE` copies
+#'   whatever the limit, the connection's setting and where the dataset is
+#'   kept, and copies an earlier version too, into the secondaries' history.
 #'   `FALSE` never copies.
 #' @param exact `TRUE` tests the candidate rows of a spatial filter exactly,
 #'   on the sphere or in the plane as `exact_engine` says.
@@ -407,7 +417,9 @@ check_raster_read_args <- function(dataset, given, call) {
 #' version of `name` (with its index table) from the primary to each
 #' available local secondary of a primary that is not local, when the
 #' secondary lacks it, holds an older version, or holds the primary's
-#' version with another entry (plan 0005, D-B1 to D-B13). The decision uses
+#' version with another entry (plan 0005, D-B1 to D-B13); a secondary that
+#' lacks a dataset kept in the primary only gets it only with `copy = TRUE`
+#' (D-C6). The decision uses
 #' the catalogs held by `st`, so a read that needs no copy makes no backend
 #' call. When a copy is needed, the primary and each target are refreshed
 #' and the decision is taken again on the fresh catalogs before landing.
@@ -586,21 +598,29 @@ copy_targets <- function(st) {
 #'   that need files or a version), `entry_only` (addresses that hold the
 #'   primary's version and its files under another entry, D-B13), `newer`
 #'   (addresses holding another version updated later than the primary's),
-#'   `lacking` (`files_lacking()` per address of `copy` and `entry_only`),
-#'   `bytes` (the most bytes any of them lacks), `limit`, and `over` (the
-#'   bytes exceed the limit and `copy` is not `TRUE`).
+#'   `primary_only` (addresses that lack a dataset kept in the primary only,
+#'   left out unless `copy` is `TRUE`, plan 0005, D-C6), `all_primary_only`
+#'   (every address of `uris` is among them), `lacking` (`files_lacking()`
+#'   per address of `copy` and `entry_only`), `bytes` (the most bytes any of
+#'   them lacks), `limit`, and `over` (the bytes exceed the limit and `copy`
+#'   is not `TRUE`).
 #' @noRd
 copy_plan <- function(st, name, uris, copy, only = NULL) {
   unit <- sync_unit(st, st$primary, name)
   entry <- unit$sets[[1]]$entry
   plan <- list(
     unit = unit, copy = character(), entry_only = character(), newer = character(),
-    lacking = list(), bytes = 0
+    primary_only = character(), lacking = list(), bytes = 0
   )
   for (uri in uris) {
     target <- current_location(st, uri)
     if (!unit_needed(target, unit)) next
     held <- catalog_entry(target$catalog, name)
+    if (nrow(held) == 0 && isTRUE(entry[["primary_only"]]) && !isTRUE(copy)) {
+      # kept in the primary only: never copied by a read, whatever its size
+      plan$primary_only <- c(plan$primary_only, uri)
+      next
+    }
     same_version <- nrow(held) == 1 && identical(held$version, entry$version)
     if (nrow(held) == 1 && isTRUE(held$updated > entry$updated)) {
       # never replaced by a read: another version is named, the same
@@ -618,6 +638,7 @@ copy_plan <- function(st, name, uris, copy, only = NULL) {
     }
     plan$bytes <- max(plan$bytes, as.numeric(lacking$bytes))
   }
+  plan$all_primary_only <- length(uris) > 0 && all(uris %in% plan$primary_only)
   plan$limit <- as.numeric(rcs_option("rcs.copy_on_read_max_bytes"))
   plan$over <- plan$bytes > plan$limit && !isTRUE(copy)
   plan
@@ -627,9 +648,17 @@ copy_planned <- function(plan) {
   length(plan$copy) + length(plan$entry_only) > 0 && !plan$over
 }
 
-# The lines of a plan about what is not copied: a newer secondary left as
-# it is, and a copy above the limit.
+# The lines of a plan about what is not copied: a dataset kept in the
+# primary only that every eligible secondary lacks, a newer secondary left
+# as it is, and a copy above the limit.
 copy_plan_inform <- function(st, name, plan) {
+  if (isTRUE(plan$all_primary_only)) {
+    from <- st$primary$uri
+    rcs_inform(c(
+      i = "{.val {name}} is kept in the primary only; reading from {.path {from}}.",
+      " " = "Use {.code copy = TRUE} to copy it."
+    ))
+  }
   for (uri in plan$newer) {
     rcs_inform(c("!" = "{.path {uri}} holds a newer version of {.val {name}}; it is not replaced. See {.fn store_sync}."))
   }

@@ -3,10 +3,11 @@
 Writes a table, an `sf` object or a
 [`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
 as one dataset of the store, in the primary location and in every
-available secondary one. The files are staged locally, checked, uploaded
-where they are missing, verified by MD5, and the catalogs of each
-location are switched to the new version last, so that readers always
-see either the old or the new version.
+available secondary one (in the primary only with
+`locations = "primary"`, see "Primary-only datasets"). The files are
+staged locally, checked, uploaded where they are missing, verified by
+MD5, and the catalogs of each location are switched to the new version
+last, so that readers always see either the old or the new version.
 
 ## Usage
 
@@ -33,7 +34,8 @@ store_write(
   crs = NULL,
   datatype = NULL,
   nodata = NULL,
-  gdal = NULL
+  gdal = NULL,
+  locations = NULL
 )
 ```
 
@@ -175,13 +177,22 @@ store_write(
   `AVERAGE`); other options are added. See "Rasters". Aborts for any
   other data.
 
+- locations:
+
+  Where the dataset is kept (see "Primary-only datasets"): `"primary"`
+  for the primary location only, `"all"` for every location, or `NULL`
+  (the default) to keep the dataset's recorded setting (every location
+  for a new dataset).
+
 ## Value
 
 A tibble with one row per location, invisibly: `location`, `role`,
 `status` (`"written"`, `"unchanged"`, `"same"` for a secondary that
-already held the version, `"behind"` or `"unavailable"`), `files` (files
-of the version), `uploaded` (files sent), `bytes` (bytes sent) and
-`seconds`. The attribute `version` holds the dataset's version.
+already held the version, `"behind"`, `"unavailable"`, or
+`"primary only"` for a secondary left out by a primary-only write),
+`files` (files of the version; `NA` for a secondary not written to),
+`uploaded` (files sent), `bytes` (bytes sent) and `seconds`. The
+attribute `version` holds the dataset's version.
 
 ## Kinds
 
@@ -415,8 +426,9 @@ duration of the call the connection runs with
 `preserve_insertion_order = true`, so that the rows reach R in the order
 the write asks for; the caller's setting is restored when the call ends,
 also after an error. DuckDB never uploads: the files are staged and land
-in every location as for any other write. Staged files need free room
-equal to the output in `getOption("rcs.staging_dir")` (default
+in the locations as for any other write (every location, unless the
+dataset is kept in the primary only). Staged files need free room equal
+to the output in `getOption("rcs.staging_dir")` (default
 [`tempdir()`](https://rdrr.io/r/base/tempfile.html)); setting it to a
 folder on the store's drive avoids copying them across drives. The files
 equal those written from the same rows collected into R, so both give
@@ -511,7 +523,49 @@ from a copy in EPSG:4326.
 
 Writing the same data again gives the same version: the call reports the
 dataset as unchanged, uploads nothing to the primary, and only brings
-secondary locations that differ up to date.
+secondary locations that differ up to date (none for a primary-only
+write).
+
+## Primary-only datasets
+
+`locations = "primary"` writes the dataset to the primary location only:
+no secondary is landed or even contacted, and each gets the status
+`"primary only"` in the result (an unavailable secondary too), with no
+warning and without counting as behind. The setting is recorded with the
+dataset (`primary_only` in its catalog entry and manifest, also for its
+index table) and kept by later writes that leave `locations` out, of any
+mode, until `locations = "all"` writes the dataset to every location
+again. A secondary that already holds the dataset is left as it is: a
+message names it and how to update it (`store_sync(st, datasets = )`).
+
+Where a dataset is kept does not change its files or its version: the
+setting is not written into the data files, so the same data written
+with and without it give the same version, and switching it for
+unchanged data changes only the catalog entry and sends no data file to
+the primary. Switching back with `locations = "all"` also copies the
+dataset to the secondaries that lack it.
+
+Elsewhere a primary-only dataset is treated thus:
+
+- [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md),
+  [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md)
+  and the print of the connection (symbol `P`) report `"primary only"`,
+  not `"missing"`, for a secondary that does not hold it;
+
+- [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+  does not copy it to a secondary that does not hold it, also with
+  `all = TRUE`; `store_sync(st, datasets = "<name>")` and
+  [`store_copy()`](https://ebukin.github.io/rcs/reference/store_copy.md)
+  copy it, and a secondary that holds it is refreshed by a plain
+  [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+  like any dataset it holds;
+
+- [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
+  does not copy it to a local secondary that lacks it, whatever its
+  size, unless `copy = TRUE`.
+
+Use it for data that should stay in the primary, typically a large
+raster in a bucket that is read a window at a time straight from there.
 
 ## History
 
@@ -562,7 +616,7 @@ store_write(st, sales, "sales/daily",
 )
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  2/2
-#>   files sent  27.9 kB  0.1s
+#>   files sent  27.9 kB  0.2s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     2/2
 #>   files sent  27.9 kB  0.1s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
@@ -595,7 +649,7 @@ store_write(st, year_2024, "sales/daily",
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/2
 #>   files sent  13.9 kB  0.1s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/2
-#>   files sent  13.9 kB  0.1s
+#>   files sent  13.9 kB  0.2s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
@@ -606,7 +660,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1
 #>   sales/
-#>     daily  table   200  27.9 kB      2  2026-11-27 18:51  =
+#>     daily  table   200  27.9 kB      2  2026-11-27 21:24  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 
 # A class map: the codes go into the file, the legend and the colours
@@ -645,9 +699,9 @@ if (requireNamespace("terra", quietly = TRUE)) {
 }
 #> ℹ Writing "grids/cover": 4,800 cells in 1 file.
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/1
-#>   files sent  1.9 kB  0.1s
+#>   files sent  1.9 kB  0.2s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/1
-#>   files sent  1.9 kB  0.1s
+#>   files sent  1.9 kB  0.2s
 #> ✔ MD5 identical for 1 file in 2 locations. Catalogs updated.
 #> # A tibble: 1 × 4
 #>   name  type  r_type                                            description
@@ -655,9 +709,9 @@ if (requireNamespace("terra", quietly = TRUE)) {
 #> 1 cover INT1U raster layer (60 x 80 cells, nodata 0, 5 classes) NA         
 #> ℹ Writing "grids/cover_zstd": 4,800 cells in 1 file.
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/1
-#>   files sent  1.6 kB  0.1s
+#>   files sent  1.6 kB  0.2s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/1
-#>   files sent  1.6 kB  0.1s
+#>   files sent  1.6 kB  0.2s
 #> ✔ MD5 identical for 1 file in 2 locations. Catalogs updated.
 #>   value  cover
 #> 1     1  water

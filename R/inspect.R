@@ -13,9 +13,14 @@
 #' @param source The `rcs_location` compared against (the primary unless
 #'   `store_status(from = )` names another).
 #' @param location Another `rcs_location`, the target.
+#' @param target_is_secondary `TRUE` when `location` is a secondary: a
+#'   dataset it lacks whose source entry has `primary_only` `TRUE` is then
+#'   `"primary only"`, not `"missing"` (plan 0005, D-C4). `FALSE` for the
+#'   primary as the target.
 #' @return A tibble, one row per dataset of the source catalog (in its
 #'   order) followed by the datasets found only in `location`: `dataset`,
-#'   `status` (`"same"`, `"differs"`, `"missing"`, `"extra"`, or
+#'   `status` (`"same"`, `"differs"`, `"missing"`, `"primary only"`,
+#'   `"extra"`, or
 #'   `"unavailable"` for every row when either location is unavailable:
 #'   then the rows are the datasets of the source catalog, or of the
 #'   target's when the source is the unavailable one), `newer` (for
@@ -24,7 +29,7 @@
 #'   `primary_updated`, `location_updated` (`primary_*` describe the
 #'   source).
 #' @noRd
-location_status <- function(source, location) {
+location_status <- function(source, location, target_is_secondary = TRUE) {
   pc <- source$catalog
   sc <- location$catalog
   available <- source$available && location$available
@@ -52,6 +57,11 @@ location_status <- function(source, location) {
   status <- rep("differs", length(dataset))
   status[!is.na(pv) & !is.na(sv) & pv == sv] <- "same"
   status[is.na(is_)] <- "missing"
+  flag <- pc[["primary_only"]]
+  if (target_is_secondary && !is.null(flag)) {
+    # `%in% TRUE`: `NA` for ordinary datasets (and for rows the source lacks).
+    status[is.na(is_) & flag[ip] %in% TRUE] <- "primary only"
+  }
   status[is.na(ip)] <- "extra"
   if (!available) {
     status <- rep("unavailable", length(dataset))
@@ -105,7 +115,9 @@ is_index_entry <- function(catalog) {
 #'   * `dataset`: the full name;
 #'   * `location`: the address of the location compared with the source;
 #'   * `status`: `"same"`, `"differs"` (another version), `"missing"` (not
-#'     in that location), `"extra"` (only in that location), or
+#'     in that location), `"primary only"` (not in that secondary location
+#'     because the dataset is kept in the primary only, see
+#'     [store_write()]'s `locations`), `"extra"` (only in that location), or
 #'     `"unavailable"` when it or the source could not be reached;
 #'   * `newer`: for `"differs"`, the side with the later `updated` time,
 #'     `"source"` or `"target"` (the location of the row); `NA` otherwise.
@@ -119,7 +131,8 @@ is_index_entry <- function(catalog) {
 #'   the connection has no other location. `store_sync()` brings differing
 #'   datasets up to date in the secondaries that hold them;
 #'   `store_sync(st, datasets = "<name>")` or `store_sync(st, all = TRUE)`
-#'   also copies missing ones.
+#'   also copies missing ones (`all = TRUE` leaves out those kept in the
+#'   primary only).
 #' @seealso [store_datasets()], [store_refresh()], [store_sync()].
 #' @export
 #' @examples
@@ -148,7 +161,7 @@ store_status <- function(st, from = NULL) {
   targets <- store_locations(st)
   targets <- targets[store_uris(st) != source_uri]
   parts <- lapply(targets, function(location) {
-    out <- location_status(source, location)
+    out <- location_status(source, location, !identical(location$uri, st$primary$uri))
     tibble::add_column(out, location = rep(location$uri, nrow(out)), .after = "dataset")
   })
   empty <- tibble::tibble(
@@ -207,8 +220,10 @@ print.rcs_status <- function(x, ...) {
 #'   `title`, `rows`, `bytes`, `n_files`, `partition` (the partition
 #'   columns, a list), `version`, `updated` (in the session's time zone),
 #'   then one column `in_<n>` per secondary location, numbered in connection
-#'   order, holding `"same"`, `"differs"` or `"missing"` (`NA` when the
-#'   location is unavailable). With `index = TRUE` a column `index_of` names
+#'   order, holding `"same"`, `"differs"`, `"missing"` or `"primary only"`
+#'   (a dataset kept in the primary only, see [store_write()]'s
+#'   `locations`, that the location does not hold; `NA` when the location
+#'   is unavailable). With `index = TRUE` a column `index_of` names
 #'   the dataset an index table belongs to. The attribute `locations` holds
 #'   the addresses: a named character vector with the names `primary` and
 #'   `in_<n>`.
@@ -281,8 +296,10 @@ store_datasets <- function(st, pattern = NULL, kind = NULL, index = FALSE) {
 #' setting, and the datasets grouped by folder: name, kind, rows, size,
 #' files, last update and, per secondary location, whether its copy is the
 #' same (`=`), differs (a not-equal sign, `!=` on a console without UTF-8)
-#' or is missing (a dash), and `?` for an unavailable location. Works from
-#' the catalogs held by the connection.
+#' or is missing (a dash), `P` when it does not hold a dataset kept in the
+#' primary only (see [store_write()]'s `locations`; the legend names `P`
+#' only when the store holds such a dataset), and `?` for an unavailable
+#' location. Works from the catalogs held by the connection.
 #'
 #' @param x A store connection made by [store_connect()].
 #' @param index `TRUE` also lists the H3 index tables, hidden by default.
@@ -318,10 +335,10 @@ status_symbols <- function() {
   if (cli::is_utf8_output()) {
     c(
       same = "=", differs = intToUtf8(0x2260), missing = intToUtf8(0x2013),
-      unavailable = "?", ellipsis = intToUtf8(0x2026)
+      `primary only` = "P", unavailable = "?", ellipsis = intToUtf8(0x2026)
     )
   } else {
-    c(same = "=", differs = "!=", missing = "-", unavailable = "?", ellipsis = "...")
+    c(same = "=", differs = "!=", missing = "-", `primary only` = "P", unavailable = "?", ellipsis = "...")
   }
 }
 
@@ -414,9 +431,15 @@ store_dataset_lines <- function(st, index, n) {
     ))
   }
   if (length(st$secondary) > 0) {
+    # `P` is named only when the store holds a primary-only dataset.
+    primary_only <- if (any(st$primary$catalog[["primary_only"]] %in% TRUE)) {
+      sprintf(", %s primary only", symbols[["primary only"]])
+    } else {
+      ""
+    }
     out <- c(out, sprintf(
-      "Secondary copies: %s same, %s differs, %s missing, %s unavailable.",
-      symbols[["same"]], symbols[["differs"]], symbols[["missing"]], symbols[["unavailable"]]
+      "Secondary copies: %s same, %s differs, %s missing%s, %s unavailable.",
+      symbols[["same"]], symbols[["differs"]], symbols[["missing"]], primary_only, symbols[["unavailable"]]
     ))
   }
   out

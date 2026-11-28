@@ -39,8 +39,13 @@
 #' call says which datasets were not copied to each secondary, with the
 #' number of files and the bytes a full sync would send at most (an empty
 #' secondary is named as such). `all = TRUE` copies every dataset of the
-#' source; `datasets = ` copies the named datasets, whether or not a
-#' secondary holds them. The primary, as a target (`from` a secondary),
+#' source, except the datasets kept in the primary only
+#' (`store_write(locations = "primary")`) to a secondary that does not hold
+#' them; they are listed apart among the datasets not copied. `datasets = `
+#' copies the named datasets, whether or not a secondary holds them, those
+#' kept in the primary only included (the copy keeps that setting). A
+#' secondary that holds a primary-only dataset gets it refreshed like any
+#' other dataset it holds. The primary, as a target (`from` a secondary),
 #' always receives every dataset of the source.
 #'
 #' @section Conflicts:
@@ -75,7 +80,8 @@
 #'   With `delete = TRUE` it restricts the deletions too, and a full name
 #'   the source does not hold is accepted.
 #' @param all `TRUE` copies every dataset of the source to every target,
-#'   including datasets a secondary does not hold. `FALSE` (the default)
+#'   including datasets a secondary does not hold, but not the datasets kept
+#'   in the primary only (see "Scope"). `FALSE` (the default)
 #'   refreshes in a secondary only the datasets it already holds (see
 #'   "Scope"). Cannot be combined with `datasets`.
 #' @param to `NULL` for every location other than the source, or the
@@ -95,7 +101,8 @@
 #'   `dry_run = TRUE`), the list columns `datasets` (copied, or to copy),
 #'   `deleted` (deleted, or to delete), `kept` (not deleted from the primary
 #'   without `force`) and `conflicts`; then the datasets left out by the
-#'   default scope: `skipped` (a list column of names), `skipped_files` and
+#'   scope (those kept in the primary only included): `skipped` (a list
+#'   column of names), `skipped_files` and
 #'   `skipped_bytes` (the files of those datasets the target lacks, and their
 #'   size: at most what `all = TRUE` would send); then `files` (files sent,
 #'   or to send), `bytes` and `seconds`. A status of `"same"` can go with
@@ -195,6 +202,8 @@ store_sync <- function(st, datasets = NULL, all = FALSE, to = NULL, from = NULL,
       target <- current_location(st, uri)
       plan <- sync_plan(st, source, target, units, restrict, delete, force, all)
       lacking <- files_lacking(plan$skipped, target)
+      only <- plan$skipped[unit_names(plan$skipped) %in% plan$primary_only]
+      lacking_only <- files_lacking(only, target)
       result <- if (dry_run) {
         sync_plan_location(st, uri, plan)
       } else {
@@ -204,6 +213,9 @@ store_sync <- function(st, datasets = NULL, all = FALSE, to = NULL, from = NULL,
       result$skipped <- unit_names(plan$skipped)
       result$skipped_files <- lacking$files
       result$skipped_bytes <- lacking$bytes
+      result$primary_only <- plan$primary_only
+      result$primary_only_files <- lacking_only$files
+      result$primary_only_bytes <- lacking_only$bytes
       result$empty <- !any(!is_index_entry(target$catalog))
       result
     }
@@ -212,7 +224,7 @@ store_sync <- function(st, datasets = NULL, all = FALSE, to = NULL, from = NULL,
   }
   out <- vctrs::vec_rbind(sync_empty(), !!!lapply(results, sync_result_row))
   sync_skipped_block(results)
-  sync_footer(st, out, dry_run)
+  sync_footer(st, out, dry_run, ordinary_skipped(results))
   if (!dry_run) {
     sync_warn_overwrite(results)
     sync_abort_conflicts(results, out, call)
@@ -426,7 +438,9 @@ landed_anyway <- function(st, location, sets, drops, error) {
 #' @return A list: `copy` (units to land), `conflicts` and `overwritten`
 #'   (lists of version records: `dataset`, `target_version`,
 #'   `target_updated`, `source_version`, `source_updated`), `delete` and
-#'   `kept` (dataset names), `skipped` (units left out by `sync_scope()`).
+#'   `kept` (dataset names), `skipped` (units left out by `sync_scope()`),
+#'   `primary_only` (the names of the skipped units kept in the primary
+#'   only).
 #' @noRd
 sync_plan <- function(st, source, target, units, restrict, delete, force, all) {
   scope <- sync_scope(st, target, units, restrict, all)
@@ -464,7 +478,8 @@ sync_plan <- function(st, source, target, units, restrict, delete, force, all) {
     copy = copy, conflicts = conflicts, overwritten = overwritten,
     delete = if (keep) character() else gone,
     kept = if (keep) gone else character(),
-    skipped = scope$skip
+    skipped = scope$skip,
+    primary_only = scope$primary_only
   )
 }
 
@@ -472,24 +487,32 @@ sync_plan <- function(st, source, target, units, restrict, delete, force, all) {
 #'
 #' The default scope of `store_sync()`: a secondary target receives only the
 #' units whose dataset its held catalog lists, at any version (an index
-#' table alone does not count). The primary receives every unit, and so does
-#' every target with `all = TRUE` or with `datasets` given.
+#' table alone does not count). With `all = TRUE` it receives every unit,
+#' except those of datasets kept in the primary only (`primary_only` `TRUE`
+#' in the source's entry) that it does not hold (plan 0005, D-C5). The
+#' primary receives every unit, and so does every target with `datasets`
+#' given.
 #'
 #' @param st An `rcs_store`.
 #' @param target The target `rcs_location`.
 #' @param units The units of the source.
 #' @param restrict `NULL`, or the dataset names given to `store_sync()`.
 #' @param all As in `store_sync()`.
-#' @return A list: `keep` and `skip`, two lists of units.
+#' @return A list: `keep` and `skip`, two lists of units, and `primary_only`,
+#'   the names of the skipped units kept in the primary only (with `all`
+#'   `TRUE` or `FALSE`).
 #' @noRd
 sync_scope <- function(st, target, units, restrict, all) {
-  if (all || !is.null(restrict) || identical(target$uri, st$primary$uri)) {
-    return(list(keep = units, skip = list()))
+  if (!is.null(restrict) || identical(target$uri, st$primary$uri)) {
+    return(list(keep = units, skip = list(), primary_only = character()))
   }
   catalog <- target$catalog
   held <- catalog$dataset[!is_index_entry(catalog)]
   in_target <- vapply(units, function(u) u$dataset %in% held, logical(1))
-  list(keep = units[in_target], skip = units[!in_target])
+  # `isTRUE()`: a catalog written before the column has no `primary_only`.
+  only <- vapply(units, function(u) isTRUE(u$sets[[1]]$entry[["primary_only"]]), logical(1))
+  keep <- in_target | (all & !only)
+  list(keep = units[keep], skip = units[!keep], primary_only = unit_names(units[!keep & only]))
 }
 
 #' The files of some units that a target lacks
@@ -637,8 +660,14 @@ sync_result <- function(uri, role, status, datasets = character(), deleted = cha
     location = uri, role = role, status = status, datasets = datasets, deleted = deleted,
     kept = kept, conflicts = conflicts, overwritten = overwritten, files = files, total = total,
     bytes = bytes, seconds = seconds, message = message,
-    skipped = character(), skipped_files = 0L, skipped_bytes = 0, empty = FALSE
+    skipped = character(), skipped_files = 0L, skipped_bytes = 0, empty = FALSE,
+    primary_only = character(), primary_only_files = 0L, primary_only_bytes = 0
   )
+}
+
+# How many skipped datasets of the results are not kept in the primary only.
+ordinary_skipped <- function(results) {
+  sum(vapply(results, function(r) length(r$skipped) - length(r$primary_only), numeric(1)))
 }
 
 sync_empty <- function() {
@@ -682,27 +711,46 @@ sync_header <- function(st, source, names, targets, dry_run, restricted = FALSE)
   }
 }
 
-# What the default scope left out, one line per secondary that skipped
-# datasets (dry runs too); nothing when no target skipped any.
+# What the scope left out, one line per secondary that skipped datasets (dry
+# runs too); nothing when no target skipped any. Datasets kept in the primary
+# only get lines and a hint of their own, after the others (plan 0005, D-C5).
 sync_skipped_block <- function(results) {
-  results <- Filter(function(r) length(r$skipped) > 0, results)
-  if (length(results) == 0) {
-    return(invisible())
-  }
   plural <- function(n, what) paste0(format_count(n), " ", what, if (n == 1) "" else "s")
-  lines <- vapply(results, function(r) {
+  line <- function(r, n, files, bytes, what, empty = FALSE) {
     uri <- r$location
-    what <- paste0(
-      plural(length(r$skipped), "dataset"), " not copied (",
-      plural(r$skipped_files, "file"), ", ", format_bytes(r$skipped_bytes), ")."
+    what <- paste0(plural(n, what), " not copied (", plural(files, "file"), ", ", format_bytes(bytes), ").")
+    cli::format_inline(if (empty) "{.path {uri}} is empty: {what}" else "{.path {uri}}: {what}")
+  }
+  ordinary <- Filter(function(r) length(r$skipped) > length(r$primary_only), results)
+  only <- Filter(function(r) length(r$primary_only) > 0, results)
+  message <- character()
+  if (length(ordinary) > 0) {
+    lines <- vapply(ordinary, function(r) {
+      line(
+        r, length(r$skipped) - length(r$primary_only), r$skipped_files - r$primary_only_files,
+        r$skipped_bytes - r$primary_only_bytes, "dataset", r$empty
+      )
+    }, character(1))
+    message <- c(
+      i = "Synced only the datasets already in each secondary location.",
+      rlang::set_names(escape_braces(lines), rep("i", length(lines))),
+      " " = "Use {.code store_sync(st, all = TRUE)} to copy every dataset, or {.code datasets = } to copy some."
     )
-    cli::format_inline(if (r$empty) "{.path {uri}} is empty: {what}" else "{.path {uri}}: {what}")
-  }, character(1))
-  rcs_inform(c(
-    i = "Synced only the datasets already in each secondary location.",
-    rlang::set_names(escape_braces(lines), rep("i", length(lines))),
-    " " = "Use {.code store_sync(st, all = TRUE)} to copy every dataset, or {.code datasets = } to copy some."
-  ))
+  }
+  if (length(only) > 0) {
+    lines <- vapply(only, function(r) {
+      line(r, length(r$primary_only), r$primary_only_files, r$primary_only_bytes, "primary-only dataset")
+    }, character(1))
+    message <- c(
+      message,
+      rlang::set_names(escape_braces(lines), rep("i", length(lines))),
+      " " = "Use {.code store_sync(st, datasets = )} to copy them."
+    )
+  }
+  if (length(message) > 0) {
+    rcs_inform(message)
+  }
+  invisible()
 }
 
 dataset_list_text <- function(datasets, max = 5L) {
@@ -756,8 +804,9 @@ sync_line <- function(r, widths) {
     unavailable = "unavailable, skipped",
     if (length(parts) > 0) {
       paste(parts, collapse = "; ")
-    } else if (length(r$skipped) > 0) {
-      # Not "up to date": the default scope left datasets out (see the block).
+    } else if (length(r$skipped) > length(r$primary_only)) {
+      # Not "up to date": the default scope left datasets out (see the block);
+      # datasets kept in the primary only do not count.
       "nothing copied"
     } else {
       "up to date"
@@ -769,7 +818,10 @@ sync_line <- function(r, widths) {
   rcs_inform(stats::setNames(escape_braces(paste0(head, gap, detail)), bullet))
 }
 
-sync_footer <- function(st, out, dry_run) {
+# `ordinary_skipped`: the number of skipped datasets not kept in the primary
+# only; skipped primary-only datasets do not stop "up to date" (plan 0005,
+# D-C5).
+sync_footer <- function(st, out, dry_run, ordinary_skipped = sum(lengths(out$skipped))) {
   if (dry_run || nrow(out) == 0) {
     return(invisible())
   }
@@ -785,7 +837,7 @@ sync_footer <- function(st, out, dry_run) {
     k <- sum(lengths(out$deleted) > 0)
     rcs_inform(c(v = "{n_deleted} dataset{?s} deleted in {k} location{?s}."))
   }
-  if (all(out$status == "same") && sum(lengths(out$kept)) == 0 && sum(lengths(out$skipped)) == 0) {
+  if (all(out$status == "same") && sum(lengths(out$kept)) == 0 && ordinary_skipped == 0) {
     rcs_inform(c(v = paste0("Every ", noun, " is up to date.")))
   }
   n_kept <- sum(lengths(out$kept))
@@ -861,8 +913,9 @@ sync_abort_conflicts <- function(results, out, call) {
 #'
 #' Copying into the primary changes the store's current version of the
 #' dataset; [store_sync()] then brings the other secondaries that hold it to
-#' that version (`datasets = ` or `all = TRUE` also copies it to those that
-#' do not). Files of the version the target replaces are deleted when the
+#' that version (`datasets = `, or `all = TRUE` unless the dataset is kept
+#' in the primary only, also copies it to those that do not). Files of the
+#' version the target replaces are deleted when the
 #' dataset keeps no history, as in [store_write()].
 #'
 #' @param st A store connection made by [store_connect()]. It is updated in

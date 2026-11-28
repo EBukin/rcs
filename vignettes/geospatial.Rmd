@@ -724,11 +724,33 @@ terra::datatype(store_read(st, "grids/cover_from_file"))
   `options(rcs.copy_on_read_max_bytes = )`), and the window is then read
   from that copy. Above the limit, the window is read from the bucket.
   `copy = FALSE` on the read, or `copy_on_read = FALSE` on the connection,
-  keeps the read on the bucket (see "Local working copies of a bucket" in
-  `vignette("locations")`).
-- **Every location gets the map.** A write lands in the primary and in
-  every secondary location of the connection. A dataset cannot yet be kept
-  in the primary only.
+  keeps that read on the bucket (see "Local working copies of a bucket" in
+  `vignette("locations")`). A map written with `locations = "primary"`
+  (next point) is never copied by a read to a secondary that lacks it,
+  whatever its size: its windows are read from the bucket.
+- **Keep a large map in the bucket.** A write lands in the primary and in
+  every secondary location of the connection, unless it is written with
+  `locations = "primary"`. Write a large map that way and read windows of
+  it from the bucket: no secondary gets the map, from the write, from
+  `store_sync(all = TRUE)` or from a read, unless you ask for it
+  (`store_sync(st, datasets = "name")` or `copy = TRUE`). The setting is
+  kept by later writes of the map until `locations = "all"` (see
+  "Primary-only datasets" in `vignette("locations")`). Here a second store
+  with a local secondary shows it on the small class map:
+
+```{r, eval = has_terra}
+root_2 <- file.path(tempdir(), "geo-store-2")
+st_2 <- store_connect(file.path(root_2, "primary"),
+  secondary = file.path(root_2, "copy"),
+  create = TRUE
+)
+store_write(st_2, big, "grids/cover",
+  title = "Land cover",
+  description = "A simulated class map in open ocean, kept in the primary only.",
+  locations = "primary"
+)
+store_status(st_2)
+```
 
 ### What is not stored
 
@@ -762,6 +784,7 @@ for trying this out.
 if (has_terra) rm(map, window, big)
 unlink(file.path(tempdir(), "geo-landcover.tif"))
 unlink(file.path(tempdir(), "geo-store"), recursive = TRUE)
+unlink(file.path(tempdir(), "geo-store-2"), recursive = TRUE)
 options(old_options)
 if (is.na(old_tz)) Sys.unsetenv("TZ") else Sys.setenv(TZ = old_tz)
 ```

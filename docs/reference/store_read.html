@@ -11,7 +11,7 @@ groups and columns are read."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -132,8 +132,9 @@ an earlier version kept in the history.</p></dd>
 before reading (see "Copy to secondary locations"). <code>NULL</code> (the
 default) copies the current version when the connection's
 <code>copy_on_read</code> is <code>TRUE</code> and the bytes to download are at or under the
-limit. <code>TRUE</code> copies whatever the limit and the connection's setting,
-and copies an earlier version too, into the secondaries' history.
+limit, unless the dataset is kept in the primary only. <code>TRUE</code> copies
+whatever the limit, the connection's setting and where the dataset is
+kept, and copies an earlier version too, into the secondaries' history.
 <code>FALSE</code> never copies.</p></dd>
 
 
@@ -198,7 +199,10 @@ and a local secondary that lacks the raster or holds an older version,
 the whole file is first copied to the secondary when it is at or under
 the size limit, and the raster, or its window, is then read from that
 copy. With <code>copy = FALSE</code>, a connection made with <code>copy_on_read = FALSE</code>, or a file above the limit, nothing is copied and the read stays
-on the bucket.</p><ul><li><p><strong>The whole raster.</strong> <code>store_read(st, "name")</code> returns every layer,
+on the bucket. A raster kept in the primary only
+(<code>store_write(locations = "primary")</code>) is never copied by a read
+unless <code>copy = TRUE</code>: while no local secondary holds it, every read,
+whole or a window, comes from the primary.</p><ul><li><p><strong>The whole raster.</strong> <code>store_read(st, "name")</code> returns every layer,
 with the layer names, the data type and the NoData value of the file.
 Cells that hold the NoData value are missing (<code>NA</code>).</p></li>
 <li><p><strong>A window.</strong> <code>intersects</code> returns only the part inside the bounding
@@ -251,7 +255,13 @@ secondary lacks are sent, each verified by its MD5;</p></li>
 are at or under the limit <code>getOption("rcs.copy_on_read_max_bytes")</code>,
 2 GB (<code>2e9</code>) by default. Above it nothing is copied and a message
 says how to copy (<code>copy = TRUE</code>, or <code><a href="store_sync.html">store_sync()</a></code> with
-<code>datasets = </code>).</p></li>
+<code>datasets = </code>);</p></li>
+<li><p>not a dataset kept in the primary only (written with
+<code>store_write(locations = "primary")</code>) to a secondary that lacks it,
+whatever its size. When every such secondary lacks it, the read comes
+from the primary and a message says so, with the hint
+<code>copy = TRUE</code>, which copies it. A secondary that already holds such a
+dataset is brought up to date as for any other dataset.</p></li>
 </ul><p>Filters, <code>columns</code> and <code>intersects</code> do not change the rule: the whole
 dataset is copied, then read from the copy. A secondary whose version
 was written later than the primary's is never replaced by a read; a
@@ -295,7 +305,7 @@ still read from). Messages are silenced by <code>options(rcs.quiet = TRUE)</code
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 500 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_read</span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, <span class="va">year</span> <span class="op">==</span> <span class="fl">2023</span>, <span class="va">product</span> <span class="op">==</span> <span class="st">"p07"</span>,</span></span>
 <span class="r-in"><span>  columns <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="va">shop_id</span>, <span class="va">date</span>, <span class="va">qty</span><span class="op">)</span></span></span>
@@ -323,7 +333,7 @@ still read from). Messages are silenced by <code>options(rcs.quiet = TRUE)</code
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons"</span>: 200 rows in 1 file, and its index table in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.2 kB  0.3s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.2 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">area</span> <span class="op">&lt;-</span> <span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">28</span>, ymin <span class="op">=</span> <span class="fl">7</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">27</span>, ymax <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span></span>
@@ -404,7 +414,7 @@ still read from). Messages are silenced by <code>options(rcs.quiet = TRUE)</code
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 4,800 cells in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  1/1</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.1s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> class       : SpatRaster</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> size        : 60, 80, 1  (nrow, ncol, nlyr)</span>

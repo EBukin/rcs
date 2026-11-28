@@ -73,8 +73,9 @@ store_read(
   Whether to copy the dataset to the local secondary locations before
   reading (see "Copy to secondary locations"). `NULL` (the default)
   copies the current version when the connection's `copy_on_read` is
-  `TRUE` and the bytes to download are at or under the limit. `TRUE`
-  copies whatever the limit and the connection's setting, and copies an
+  `TRUE` and the bytes to download are at or under the limit, unless the
+  dataset is kept in the primary only. `TRUE` copies whatever the limit,
+  the connection's setting and where the dataset is kept, and copies an
   earlier version too, into the secondaries' history. `FALSE` never
   copies.
 
@@ -152,7 +153,10 @@ the whole file is first copied to the secondary when it is at or under
 the size limit, and the raster, or its window, is then read from that
 copy. With `copy = FALSE`, a connection made with
 `copy_on_read = FALSE`, or a file above the limit, nothing is copied and
-the read stays on the bucket.
+the read stays on the bucket. A raster kept in the primary only
+(`store_write(locations = "primary")`) is never copied by a read unless
+`copy = TRUE`: while no local secondary holds it, every read, whole or a
+window, comes from the primary.
 
 - **The whole raster.** `store_read(st, "name")` returns every layer,
   with the layer names, the data type and the NoData value of the file.
@@ -227,7 +231,14 @@ this read and the next ones come from the local copy. It copies only:
   (`2e9`) by default. Above it nothing is copied and a message says how
   to copy (`copy = TRUE`, or
   [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-  with `datasets = `).
+  with `datasets = `);
+
+- not a dataset kept in the primary only (written with
+  `store_write(locations = "primary")`) to a secondary that lacks it,
+  whatever its size. When every such secondary lacks it, the read comes
+  from the primary and a message says so, with the hint `copy = TRUE`,
+  which copies it. A secondary that already holds such a dataset is
+  brought up to date as for any other dataset.
 
 Filters, `columns` and `intersects` do not change the rule: the whole
 dataset is copied, then read from the copy. A secondary whose version
@@ -281,7 +292,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  38.3 kB  0.2s
+#>   files sent  38.3 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_read(st, "sales/daily", year == 2023, product == "p07",
   columns = c(shop_id, date, qty)
@@ -309,7 +320,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
 )
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  41.2 kB  0.3s
+#>   files sent  41.2 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(
   c(xmin = -28, ymin = 7, xmax = -27, ymax = 8),
@@ -390,7 +401,7 @@ if (requireNamespace("terra", quietly = TRUE)) {
 }
 #> ℹ Writing "grids/cover": 4,800 cells in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  1/1
-#>   files sent  1.9 kB  0.1s
+#>   files sent  1.9 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 #> class       : SpatRaster
 #> size        : 60, 80, 1  (nrow, ncol, nlyr)

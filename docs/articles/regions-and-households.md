@@ -166,8 +166,8 @@ print(st, index = TRUE)
 #> Datasets: 2
 #>   name           kind        rows     size  files  updated
 #>   admin/
-#>     regions      geospatial     3  13.4 kB      1  2026-11-27 23:54
-#>     regions__h3  table        282   6.3 kB      1  2026-11-27 23:54
+#>     regions      geospatial     3  13.4 kB      1  2026-11-28 02:27
+#>     regions__h3  table        282   6.3 kB      1  2026-11-28 02:27
 ```
 
 ## 3. The regions as H3 cells
@@ -398,7 +398,7 @@ store_write(st, wave_2, "survey/households",
 #> ℹ Updating "survey/households": 0 partitions replaced, 1 added, 1 kept.
 #> • wave = 2: new, 300 rows
 #> ℹ Writing "survey/households": 2,300 rows in 2 files (partition wave).
-#> ✔ primary  <tempdir>/regions-store  1/2 files sent  30.4 kB  0.2s
+#> ✔ primary  <tempdir>/regions-store  1/2 files sent  30.4 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 

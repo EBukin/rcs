@@ -4,8 +4,12 @@ Shows the locations with their backend and availability, the history
 setting, and the datasets grouped by folder: name, kind, rows, size,
 files, last update and, per secondary location, whether its copy is the
 same (`=`), differs (a not-equal sign, `!=` on a console without UTF-8)
-or is missing (a dash), and `?` for an unavailable location. Works from
-the catalogs held by the connection.
+or is missing (a dash), `P` when it does not hold a dataset kept in the
+primary only (see
+[`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md)'s
+`locations`; the legend names `P` only when the store holds such a
+dataset), and `?` for an unavailable location. Works from the catalogs
+held by the connection.
 
 ## Usage
 
@@ -63,6 +67,6 @@ print(st)
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 18:50
+#>     daily  table   100  23.8 kB      2  2026-11-27 21:23
 unlink(root, recursive = TRUE)
 ```

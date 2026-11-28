@@ -26,8 +26,9 @@
 #' Write a dataset to a store
 #'
 #' Writes a table, an `sf` object or a `terra::SpatRaster` as one dataset of
-#' the store, in the primary location and in every available secondary one.
-#' The files are staged locally, checked, uploaded where they are missing,
+#' the store, in the primary location and in every available secondary one
+#' (in the primary only with `locations = "primary"`, see "Primary-only
+#' datasets"). The files are staged locally, checked, uploaded where they are missing,
 #' verified by MD5, and the catalogs of each location are switched to the
 #' new version last, so that readers always see either the old or the new
 #' version.
@@ -228,7 +229,8 @@
 #' call the connection runs with `preserve_insertion_order = true`, so that
 #' the rows reach R in the order the write asks for; the caller's setting is
 #' restored when the call ends, also after an error. DuckDB never uploads:
-#' the files are staged and land in every location as for any other write.
+#' the files are staged and land in the locations as for any other write
+#' (every location, unless the dataset is kept in the primary only).
 #' Staged files need free room equal to the output in
 #' `getOption("rcs.staging_dir")` (default [tempdir()]); setting it to a
 #' folder on the store's drive avoids copying them across drives. The files
@@ -312,7 +314,41 @@
 #'
 #' Writing the same data again gives the same version: the call reports the
 #' dataset as unchanged, uploads nothing to the primary, and only brings
-#' secondary locations that differ up to date.
+#' secondary locations that differ up to date (none for a primary-only
+#' write).
+#'
+#' @section Primary-only datasets:
+#' `locations = "primary"` writes the dataset to the primary location only:
+#' no secondary is landed or even contacted, and each gets the status
+#' `"primary only"` in the result (an unavailable secondary too), with no
+#' warning and without counting as behind. The setting is recorded with the
+#' dataset (`primary_only` in its catalog entry and manifest, also for its
+#' index table) and kept by later writes that leave `locations` out, of any
+#' mode, until `locations = "all"` writes the dataset to every location
+#' again. A secondary that already holds the dataset is left as it is: a
+#' message names it and how to update it (`store_sync(st, datasets = )`).
+#'
+#' Where a dataset is kept does not change its files or its version: the
+#' setting is not written into the data files, so the same data written with
+#' and without it give the same version, and switching it for unchanged data
+#' changes only the catalog entry and sends no data file to the primary.
+#' Switching back with `locations = "all"` also copies the dataset to the
+#' secondaries that lack it.
+#'
+#' Elsewhere a primary-only dataset is treated thus:
+#'
+#' * [store_status()], [store_datasets()] and the print of the connection
+#'   (symbol `P`) report `"primary only"`, not `"missing"`, for a secondary
+#'   that does not hold it;
+#' * [store_sync()] does not copy it to a secondary that does not hold it,
+#'   also with `all = TRUE`; `store_sync(st, datasets = "<name>")` and
+#'   [store_copy()] copy it, and a secondary that holds it is refreshed by a
+#'   plain `store_sync()` like any dataset it holds;
+#' * [store_read()] does not copy it to a local secondary that lacks it,
+#'   whatever its size, unless `copy = TRUE`.
+#'
+#' Use it for data that should stay in the primary, typically a large raster
+#' in a bucket that is read a window at a time straight from there.
 #'
 #' @section History:
 #' Whether the replaced version is kept is decided by the dataset's own
@@ -405,11 +441,16 @@
 #'   `BIGTIFF=IF_SAFER`, `OVERVIEWS=IGNORE_EXISTING`,
 #'   `OVERVIEW_RESAMPLING=NEAREST` or `AVERAGE`); other options are added.
 #'   See "Rasters". Aborts for any other data.
+#' @param locations Where the dataset is kept (see "Primary-only
+#'   datasets"): `"primary"` for the primary location only, `"all"` for
+#'   every location, or `NULL` (the default) to keep the dataset's recorded
+#'   setting (every location for a new dataset).
 #' @return A tibble with one row per location, invisibly: `location`,
 #'   `role`, `status` (`"written"`, `"unchanged"`, `"same"` for a secondary
-#'   that already held the version, `"behind"` or `"unavailable"`), `files`
-#'   (files of the version), `uploaded` (files sent), `bytes` (bytes sent)
-#'   and `seconds`. The attribute `version` holds the dataset's version.
+#'   that already held the version, `"behind"`, `"unavailable"`, or
+#'   `"primary only"` for a secondary left out by a primary-only write),
+#'   `files` (files of the version; `NA` for a secondary not written to),
+#'   `uploaded` (files sent), `bytes` (bytes sent) and `seconds`. The attribute `version` holds the dataset's version.
 #' @seealso [store_check()], [store_history()], [store_prune()],
 #'   [rcs_geo_add()], [store_duckdb()].
 #' @export
@@ -487,7 +528,8 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
                         geocode_engine = c("auto", "s2", "planar"),
                         max_files = 50L, history = NULL, source = NULL, inputs = NULL,
                         columns = NULL, check = TRUE, rows_per_group = 50000L,
-                        crs = NULL, datatype = NULL, nodata = NULL, gdal = NULL) {
+                        crs = NULL, datatype = NULL, nodata = NULL, gdal = NULL,
+                        locations = NULL) {
   validate_store(st)
   local_trace("store_write")
   call <- rlang::current_env()
@@ -527,11 +569,15 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     }
   }
 
-  # Step 1: fresh catalogs of every location, then the mode.
-  failed <- write_refresh(st, call)
+  # Step 1: fresh catalogs of the primary, the mode and where the dataset is
+  # kept; then fresh catalogs of the secondaries, unless the write is
+  # primary-only (they are not contacted at all then, plan 0005, D-C3).
+  write_refresh_primary(st, call)
   existing <- catalog_entry(st$primary$catalog, dataset)
   existing_index <- catalog_entry(st$primary$catalog, index_name(dataset))
   check_write_mode(mode, dataset, existing, call)
+  primary_only <- resolve_primary_only(locations, existing, call)
+  failed <- if (isTRUE(primary_only)) list() else write_refresh_secondaries(st, call)
   dataset_history <- if (!is.null(history)) {
     history
   } else if (nrow(existing) == 1) {
@@ -573,6 +619,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     stage_full(args)
   }
   warn_s2_rebuild(dataset, plan$rebuild)
+  plan <- plan_primary_only(plan, primary_only, now)
 
   primary_files <- st$primary$files
   data_src <- resolve_target(plan$data, existing, primary_files, dir, now)
@@ -589,8 +636,7 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   }
 
   ctx <- write_context(st, dir, sets)
-  locations <- store_locations(st)
-  widths <- write_widths(locations)
+  widths <- write_widths(store_locations(st))
   primary_changed <- any(vapply(sets, function(s) s$changed, logical(1))) ||
     any(drops %in% st$primary$catalog$dataset)
   write_header(dataset, data_src, plan, mode, existing, primary_changed)
@@ -600,10 +646,13 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
   results[[1]] <- land_primary(st, sets, drops, keep_history, ctx, now, dataset, widths, call)
   write_line(results[[1]], widths)
 
-  # Then every secondary, in connection order; a failure warns.
+  # Then every secondary, in connection order; a failure warns. A
+  # primary-only write lands in none of them.
   for (location in st$secondary) {
     uri <- location$uri
-    result <- if (uri %in% names(failed)) {
+    result <- if (isTRUE(primary_only)) {
+      write_result(uri, "secondary", "primary only")
+    } else if (uri %in% names(failed)) {
       write_result(uri, "secondary", if (identical(failed[[uri]], "unavailable")) "unavailable" else "behind",
         message = failed[[uri]])
     } else {
@@ -613,6 +662,9 @@ store_write <- function(st, x, dataset, title, description, key = NULL,
     results[[length(results) + 1L]] <- result
   }
 
+  if (isTRUE(primary_only)) {
+    inform_primary_only_held(st, dataset)
+  }
   out <- vctrs::vec_rbind(!!!lapply(results, write_result_row))
   write_footer(out, data_src)
   attr(out, "version") <- data_src$entry$version
@@ -678,10 +730,20 @@ check_write_mode <- function(mode, dataset, existing, call = caller_env()) {
 # Step 1: re-read the catalogs of every location. The primary must answer;
 # a secondary that does not is reported in the result (named by its `uri`:
 # the error message, or "unavailable" for a location unavailable since the
-# connection).
+# connection). `store_write()` calls the two halves itself, so that a
+# primary-only write never contacts the secondaries (plan 0005, D-C3).
 write_refresh <- function(st, call = caller_env()) {
+  write_refresh_primary(st, call)
+  write_refresh_secondaries(st, call)
+}
+
+write_refresh_primary <- function(st, call = caller_env()) {
   be <- st$primary$backend
   reach(location_refresh(st, st$primary), be, "primary", call)
+  invisible()
+}
+
+write_refresh_secondaries <- function(st, call = caller_env()) {
   failed <- list()
   for (location in st$secondary) {
     uri <- location$uri
@@ -703,6 +765,72 @@ write_refresh <- function(st, call = caller_env()) {
     }
   }
   failed
+}
+
+# Where a dataset is kept (plan 0005, D-C1, D-C2): `TRUE` for the primary
+# only, `NA` for every location (never `FALSE`). `locations` is `"primary"`,
+# `"all"` or `NULL` (the stored setting of `existing`; `NA` for a new
+# dataset).
+resolve_primary_only <- function(locations, existing, call = caller_env()) {
+  if (is.null(locations)) {
+    stored <- if (nrow(existing) == 1) existing[["primary_only"]] else NULL
+    return(if (isTRUE(stored)) TRUE else NA)
+  }
+  if (!rlang::is_string(locations) || !locations %in% c("primary", "all")) {
+    cli::cli_abort(
+      c(
+        "{.arg locations} must be {.val primary}, {.val all} or {.code NULL}.",
+        x = if (is.character(locations) && !anyNA(locations)) {
+          "It is {.val {locations}}."
+        } else {
+          "It is {.obj_type_friendly {locations}}."
+        }
+      ),
+      class = "rcs_error_argument", call = call
+    )
+  }
+  if (locations == "primary") TRUE else NA
+}
+
+# The setting of `resolve_primary_only()` on the staged entries of the data
+# and of the index table, whose local manifests are written again. The files
+# do not change: `primary_only` is not embedded in them (`entry_not_embedded`).
+# An entry that already carries the value keeps its staged manifest.
+plan_primary_only <- function(plan, value, now) {
+  for (part in c("data", "index")) {
+    src <- plan[[part]]
+    if (is.null(src) || identical(src$entry[["primary_only"]], value)) {
+      next
+    }
+    src$entry$primary_only <- value
+    manifest_write_local(new_manifest(src$entry, src$files, written = now), src$manifest_local)
+    plan[[part]] <- src
+  }
+  plan
+}
+
+# The note of a primary-only write about the secondaries that already hold
+# the dataset (judged from the catalogs the connection holds): they are left
+# as they are (plan 0005, D-C3).
+inform_primary_only_held <- function(st, dataset) {
+  uris <- character()
+  for (location in st$secondary) {
+    if (dataset %in% location$catalog$dataset) {
+      uris <- c(uris, location$uri)
+    }
+  }
+  n <- length(uris)
+  if (n == 0) {
+    return(invisible())
+  }
+  listed <- paste(vapply(uris, function(u) cli::format_inline("{.path {u}}"), character(1)), collapse = ", ")
+  hold <- if (n == 1) "holds" else "hold"
+  is <- if (n == 1) "is" else "are"
+  it <- if (n == 1) "it" else "them"
+  rcs_inform(c(
+    i = "{listed} {hold} {.val {dataset}} and {is} not updated by this primary-only write.",
+    " " = "Use {.code store_sync(st, datasets = \"{dataset}\")} to update {it}."
+  ))
 }
 
 # Errors of a location that a write survives for a secondary (and reports
@@ -1965,9 +2093,10 @@ write_line <- function(r, widths) {
     unchanged = "unchanged",
     same = "up to date",
     behind = paste0("behind: ", r$message),
-    unavailable = "unavailable, skipped"
+    unavailable = "unavailable, skipped",
+    `primary only` = "kept in the primary only"
   )
-  bullet <- switch(r$status, behind = "x", unavailable = "!", "v")
+  bullet <- switch(r$status, behind = "x", unavailable = "!", `primary only` = "i", "v")
   rcs_inform(stats::setNames(escape_braces(paste0(head, gap, detail)), bullet))
 }
 
@@ -1993,7 +2122,8 @@ write_header <- function(dataset, src, plan, mode, existing, changed) {
 
 write_footer <- function(out, src) {
   ok <- out$status %in% c("written", "unchanged", "same")
-  behind <- out[!ok, ]
+  # A secondary left out by a primary-only write is neither written nor behind.
+  behind <- out[!ok & out$status != "primary only", ]
   n_files <- max(c(as.numeric(src$entry$n_files), out$files), na.rm = TRUE)
   k <- sum(ok)
   if (any(out$status == "written")) {

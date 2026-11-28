@@ -35,7 +35,10 @@ A tibble, one row per dataset, sorted by name: `dataset`, `kind`,
 `title`, `rows`, `bytes`, `n_files`, `partition` (the partition columns,
 a list), `version`, `updated` (in the session's time zone), then one
 column `in_<n>` per secondary location, numbered in connection order,
-holding `"same"`, `"differs"` or `"missing"` (`NA` when the location is
+holding `"same"`, `"differs"`, `"missing"` or `"primary only"` (a
+dataset kept in the primary only, see
+[`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md)'s
+`locations`, that the location does not hold; `NA` when the location is
 unavailable). With `index = TRUE` a column `index_of` names the dataset
 an index table belongs to. The attribute `locations` holds the
 addresses: a named character vector with the names `primary` and
@@ -64,11 +67,11 @@ store_datasets(st)
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 18:51:22
+#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 21:23:58
 store_datasets(st, pattern = "^sales/", kind = "table")
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 18:51:22
+#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 21:23:58
 unlink(root, recursive = TRUE)
 ```

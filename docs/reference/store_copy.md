@@ -42,9 +42,9 @@ Copying into the primary changes the store's current version of the
 dataset;
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
 then brings the other secondaries that hold it to that version
-(`datasets = ` or `all = TRUE` also copies it to those that do not).
-Files of the version the target replaces are deleted when the dataset
-keeps no history, as in
+(`datasets = `, or `all = TRUE` unless the dataset is kept in the
+primary only, also copies it to those that do not). Files of the version
+the target replaces are deleted when the dataset keeps no history, as in
 [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md).
 
 ## See also

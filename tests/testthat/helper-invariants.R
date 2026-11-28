@@ -25,7 +25,9 @@
 #      every h3_main equals the row's h3;
 #   6. every secondary dataset with the primary's version has the primary's
 #      file rows; when `store_status()` (work package D) is implemented, its
-#      verdict (same / missing / differs) matches the catalogs.
+#      verdict (same / missing / differs, or primary only for a dataset the
+#      secondary lacks whose primary entry has `primary_only` TRUE) matches
+#      the catalogs.
 #
 # All problems are collected and reported in one failed expectation.
 
@@ -231,7 +233,16 @@ invariant_secondaries <- function(st, stored, add) {
     for (ds in primary$catalog$dataset) {
       v <- primary$catalog$version[primary$catalog$dataset == ds]
       sv <- secondary$catalog$version[secondary$catalog$dataset == ds]
-      state <- if (length(sv) == 0) "missing" else if (identical(sv, v)) "same" else "differs"
+      primary_only <- isTRUE(primary$catalog[["primary_only"]][primary$catalog$dataset == ds])
+      state <- if (length(sv) == 0 && primary_only) {
+        "primary only"
+      } else if (length(sv) == 0) {
+        "missing"
+      } else if (identical(sv, v)) {
+        "same"
+      } else {
+        "differs"
+      }
       if (state == "same" && !identical(rows_of(primary, ds), rows_of(secondary, ds))) {
         add("[", uri, "] ", ds, ": same version as the primary but other file rows")
       }

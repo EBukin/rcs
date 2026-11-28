@@ -15,7 +15,7 @@ geospatial dataset's index table travels with it."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -107,8 +107,9 @@ unique among the datasets of <code>from</code>.</p></dd>
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>Copying into the primary changes the store's current version of the
 dataset; <code><a href="store_sync.html">store_sync()</a></code> then brings the other secondaries that hold it to
-that version (<code>datasets = </code> or <code>all = TRUE</code> also copies it to those that
-do not). Files of the version the target replaces are deleted when the
+that version (<code>datasets = </code>, or <code>all = TRUE</code> unless the dataset is kept
+in the primary only, also copies it to those that do not). Files of the
+version the target replaces are deleted when the
 dataset keeps no history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
     </div>
     <div class="section level2">

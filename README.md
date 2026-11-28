@@ -12,9 +12,10 @@ ones: local folders or Google Cloud Storage buckets.
   and files. Every function starts from it: listing a store, describing
   a dataset or finding the files a filter needs reads no data file.
 - **Every write lands everywhere, verified.** A write goes to the
-  primary and to every secondary, each file is checked by its MD5
-  checksum, and the catalog is switched last, so readers see the old or
-  the new version, never a mixture.
+  primary and to every secondary (to the primary only with
+  `locations = "primary"`), each file is checked by its MD5 checksum,
+  and the catalog is switched last, so readers see the old or the new
+  version, never a mixture.
 - **Reads fetch only what they need.** Filters and column selections are
   passed to the Parquet reader. Spatial filters use H3 cells and
   bounding boxes stored with the data, so an area is read without
@@ -71,7 +72,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   500  38.3 kB      2  2026-11-27 23:24
+#>     daily  table   500  38.3 kB      2  2026-11-28 01:08
 ```
 
 Open a dataset. Nothing is read yet; printing shows a header and the
@@ -151,7 +152,8 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 Keep the same store in a bucket and in a local copy; writes reach both
-and reads use the local copy:
+(unless written with `locations = "primary"`, for data that stays in the
+bucket) and reads use the local copy:
 
 ``` r
 st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")

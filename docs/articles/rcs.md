@@ -157,7 +157,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   300  31.4 kB      2  2026-11-27 23:54
+#>     daily  table   300  31.4 kB      2  2026-11-28 02:27
 ```
 
 [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md)
@@ -170,7 +170,7 @@ datasets
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   300 31399       2 <chr [1]> 66bd1c… 2026-11-27 23:54:14
+#> 1 sales/d… table Dail…   300 31399       2 <chr [1]> 66bd1c… 2026-11-28 02:27:01
 datasets$title
 #> [1] "Daily sales"
 ```
@@ -198,9 +198,9 @@ store_describe(st, "sales/daily")
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-27 23:54:14 UTC
-#> Updated     2026-11-27 23:54:14 UTC
-#> Written by  R 4.6.2, rcs 0.0.0.9007
+#> Created     2026-11-28 02:27:01 UTC
+#> Updated     2026-11-28 02:27:01 UTC
+#> Written by  R 4.6.2, rcs 0.0.0.9008
 #> 
 #> Locations:
 #>   primary    <tempdir>/my-store

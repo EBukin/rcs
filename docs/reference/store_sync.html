@@ -19,7 +19,7 @@ geospatial dataset's index table travels with it."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -111,7 +111,8 @@ the source does not hold is accepted.</p></dd>
 
 <dt id="arg-all">all<a class="anchor" aria-label="anchor" href="#arg-all"></a></dt>
 <dd><p><code>TRUE</code> copies every dataset of the source to every target,
-including datasets a secondary does not hold. <code>FALSE</code> (the default)
+including datasets a secondary does not hold, but not the datasets kept
+in the primary only (see "Scope"). <code>FALSE</code> (the default)
 refreshes in a secondary only the datasets it already holds (see
 "Scope"). Cannot be combined with <code>datasets</code>.</p></dd>
 
@@ -150,7 +151,8 @@ conflict, and changes nothing.</p></dd>
 <code>dry_run = TRUE</code>), the list columns <code>datasets</code> (copied, or to copy),
 <code>deleted</code> (deleted, or to delete), <code>kept</code> (not deleted from the primary
 without <code>force</code>) and <code>conflicts</code>; then the datasets left out by the
-default scope: <code>skipped</code> (a list column of names), <code>skipped_files</code> and
+scope (those kept in the primary only included): <code>skipped</code> (a list
+column of names), <code>skipped_files</code> and
 <code>skipped_bytes</code> (the files of those datasets the target lacks, and their
 size: at most what <code>all = TRUE</code> would send); then <code>files</code> (files sent,
 or to send), <code>bytes</code> and <code>seconds</code>. A status of <code>"same"</code> can go with
@@ -173,8 +175,13 @@ brought to the source's version, and nothing new is copied there. The
 call says which datasets were not copied to each secondary, with the
 number of files and the bytes a full sync would send at most (an empty
 secondary is named as such). <code>all = TRUE</code> copies every dataset of the
-source; <code>datasets = </code> copies the named datasets, whether or not a
-secondary holds them. The primary, as a target (<code>from</code> a secondary),
+source, except the datasets kept in the primary only
+(<code>store_write(locations = "primary")</code>) to a secondary that does not hold
+them; they are listed apart among the datasets not copied. <code>datasets = </code>
+copies the named datasets, whether or not a secondary holds them, those
+kept in the primary only included (the copy keeps that setting). A
+secondary that holds a primary-only dataset gets it refreshed like any
+other dataset it holds. The primary, as a target (<code>from</code> a secondary),
 always receives every dataset of the source.</p>
     </div>
     <div class="section level2">

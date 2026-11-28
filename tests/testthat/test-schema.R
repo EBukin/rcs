@@ -40,7 +40,7 @@ test_that("the catalog schema has the columns of the plan", {
     names(catalog_schema()),
     c(
       "dataset", "kind", "title", "description", "source", "inputs", "key",
-      "sorted_by", "partition", "partition_auto", "columns", "version", "n_files",
+      "sorted_by", "partition", "partition_auto", "primary_only", "columns", "version", "n_files",
       "rows", "bytes", "crs", "bbox", "h3_res", "geocode_engine", "index_of", "history", "writer",
       "r_version", "rcs_version", "created", "updated"
     )

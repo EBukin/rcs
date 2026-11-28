@@ -117,8 +117,8 @@ print(st, index = TRUE)
 #> Datasets: 2
 #>   name            kind        rows     size  files  updated
 #>   shapes/
-#>     polygons      geospatial   500  62.6 kB      1  2026-11-27 23:53
-#>     polygons__h3  table        533  10.2 kB      1  2026-11-27 23:53
+#>     polygons      geospatial   500  62.6 kB      1  2026-11-28 02:26
+#>     polygons__h3  table        533  10.2 kB      1  2026-11-28 02:26
 ```
 
 `h3` and `bbox` come back with the data.
@@ -392,7 +392,7 @@ store_write(st, polys, "shapes/polygons_by_cell",
   max_files = 10
 )
 #> ℹ Writing "shapes/polygons_by_cell": 500 rows in 7 files (partition h3_p2), and its index table in 1 file.
-#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.5 kB  0.3s
+#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.5 kB  0.2s
 #> ✔ MD5 identical for 8 files in 1 location. Catalogs updated.
 ```
 
@@ -1003,12 +1003,49 @@ terra::datatype(store_read(st, "grids/cover_from_file"))
   GB by default, `options(rcs.copy_on_read_max_bytes = )`), and the
   window is then read from that copy. Above the limit, the window is
   read from the bucket. `copy = FALSE` on the read, or
-  `copy_on_read = FALSE` on the connection, keeps the read on the bucket
-  (see “Local working copies of a bucket” in
+  `copy_on_read = FALSE` on the connection, keeps that read on the
+  bucket (see “Local working copies of a bucket” in
   [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)).
-- **Every location gets the map.** A write lands in the primary and in
-  every secondary location of the connection. A dataset cannot yet be
-  kept in the primary only.
+  A map written with `locations = "primary"` (next point) is never
+  copied by a read to a secondary that lacks it, whatever its size: its
+  windows are read from the bucket.
+- **Keep a large map in the bucket.** A write lands in the primary and
+  in every secondary location of the connection, unless it is written
+  with `locations = "primary"`. Write a large map that way and read
+  windows of it from the bucket: no secondary gets the map, from the
+  write, from `store_sync(all = TRUE)` or from a read, unless you ask
+  for it (`store_sync(st, datasets = "name")` or `copy = TRUE`). The
+  setting is kept by later writes of the map until `locations = "all"`
+  (see “Primary-only datasets” in
+  [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)).
+  Here a second store with a local secondary shows it on the small class
+  map:
+
+``` r
+
+root_2 <- file.path(tempdir(), "geo-store-2")
+st_2 <- store_connect(file.path(root_2, "primary"),
+  secondary = file.path(root_2, "copy"),
+  create = TRUE
+)
+store_write(st_2, big, "grids/cover",
+  title = "Land cover",
+  description = "A simulated class map in open ocean, kept in the primary only.",
+  locations = "primary"
+)
+#> ℹ Writing "grids/cover": 40,000 cells in 1 file.
+#> ✔ primary    <tempdir>/geo-store-2/primary  1/1 files sent  4.7 kB  0.2s
+#> ℹ secondary  <tempdir>/geo-store-2/copy     kept in the primary only
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+store_status(st_2)
+#> Source: <tempdir>/geo-store-2/primary
+#> Locations: [1] <tempdir>/geo-store-2/copy
+#> # A tibble: 1 × 8
+#>   dataset     location status       newer primary_version  location_version
+#>   <chr>       <chr>    <chr>        <chr> <chr>            <chr>           
+#> 1 grids/cover [1]      primary only NA    12e566b97094f119 NA              
+#> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
+```
 
 ### What is not stored
 

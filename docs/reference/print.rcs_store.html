@@ -3,13 +3,17 @@
 setting, and the datasets grouped by folder: name, kind, rows, size,
 files, last update and, per secondary location, whether its copy is the
 same (=), differs (a not-equal sign, != on a console without UTF-8)
-or is missing (a dash), and ? for an unavailable location. Works from
-the catalogs held by the connection."><meta property="og:description" content="Shows the locations with their backend and availability, the history
+or is missing (a dash), P when it does not hold a dataset kept in the
+primary only (see store_write()'s locations; the legend names P
+only when the store holds such a dataset), and ? for an unavailable
+location. Works from the catalogs held by the connection."><meta property="og:description" content="Shows the locations with their backend and availability, the history
 setting, and the datasets grouped by folder: name, kind, rows, size,
 files, last update and, per secondary location, whether its copy is the
 same (=), differs (a not-equal sign, != on a console without UTF-8)
-or is missing (a dash), and ? for an unavailable location. Works from
-the catalogs held by the connection."></head><body>
+or is missing (a dash), P when it does not hold a dataset kept in the
+primary only (see store_write()'s locations; the legend names P
+only when the store holds such a dataset), and ? for an unavailable
+location. Works from the catalogs held by the connection."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -17,7 +21,7 @@ the catalogs held by the connection."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -72,8 +76,10 @@ the catalogs held by the connection."></head><body>
 setting, and the datasets grouped by folder: name, kind, rows, size,
 files, last update and, per secondary location, whether its copy is the
 same (<code>=</code>), differs (a not-equal sign, <code>!=</code> on a console without UTF-8)
-or is missing (a dash), and <code>?</code> for an unavailable location. Works from
-the catalogs held by the connection.</p>
+or is missing (a dash), <code>P</code> when it does not hold a dataset kept in the
+primary only (see <code><a href="store_write.html">store_write()</a></code>'s <code>locations</code>; the legend names <code>P</code>
+only when the store holds such a dataset), and <code>?</code> for an unavailable
+location. Works from the catalogs held by the connection.</p>
     </div>
 
     <div class="section level2">
@@ -131,7 +137,7 @@ the catalogs held by the connection.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 18:50</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 21:23</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">root</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

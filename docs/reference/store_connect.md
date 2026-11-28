@@ -102,7 +102,8 @@ secondaries of another store.
   does, with the store's history default off).
 
 - An available secondary that holds no dataset while the primary holds
-  some prints a notice that it is empty, with the
+  some that are not kept in the primary only prints a notice that it is
+  empty, with the
   [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
   calls that fill it (`all = TRUE` for every dataset, `datasets = ` for
   some).
@@ -134,7 +135,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-connect  2/2
-#>   files sent  23.8 kB  0.2s
+#>   files sent  23.8 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
@@ -144,7 +145,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 18:51
+#>     daily  table   100  23.8 kB      2  2026-11-27 21:23
 
 # The same, with the address in the environment
 withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
@@ -155,6 +156,6 @@ withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 18:51
+#>     daily  table   100  23.8 kB      2  2026-11-27 21:23
 unlink(primary, recursive = TRUE)
 ```

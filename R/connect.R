@@ -26,8 +26,9 @@
 #'   initialises it with empty catalogs (as [store_create()] does, with the
 #'   store's history default off).
 #' * An available secondary that holds no dataset while the primary holds
-#'   some prints a notice that it is empty, with the [store_sync()] calls
-#'   that fill it (`all = TRUE` for every dataset, `datasets = ` for some).
+#'   some that are not kept in the primary only prints a notice that it is
+#'   empty, with the [store_sync()] calls that fill it (`all = TRUE` for
+#'   every dataset, `datasets = ` for some).
 #'   [store_refresh()] does not repeat it.
 #'
 #' The object has reference semantics: functions that change a location
@@ -137,10 +138,16 @@ store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
 }
 
 # One notice per available secondary whose catalog holds no dataset while
-# the primary holds at least one (at connection only, not on refresh).
+# the primary holds at least one (at connection only, not on refresh). The
+# primary's datasets kept in the primary only do not count (plan 0005, D-C8):
+# `store_sync(all = TRUE)` would not copy them.
 inform_empty_secondaries <- function(st) {
   holds_dataset <- function(location) any(!is_index_entry(location$catalog))
-  if (!holds_dataset(st$primary)) {
+  primary <- st$primary$catalog
+  # A catalog written before the column has no `primary_only`.
+  flag <- primary[["primary_only"]] %||% rep(NA, nrow(primary))
+  ordinary <- !is_index_entry(primary) & !(flag %in% TRUE)
+  if (!any(ordinary)) {
     return(invisible())
   }
   for (location in st$secondary) {

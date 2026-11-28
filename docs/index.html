@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -85,7 +85,7 @@
 <li>
 <strong>Catalog first.</strong> Each location holds a small catalog of its datasets and files. Every function starts from it: listing a store, describing a dataset or finding the files a filter needs reads no data file.</li>
 <li>
-<strong>Every write lands everywhere, verified.</strong> A write goes to the primary and to every secondary, each file is checked by its MD5 checksum, and the catalog is switched last, so readers see the old or the new version, never a mixture.</li>
+<strong>Every write lands everywhere, verified.</strong> A write goes to the primary and to every secondary (to the primary only with <code>locations = "primary"</code>), each file is checked by its MD5 checksum, and the catalog is switched last, so readers see the old or the new version, never a mixture.</li>
 <li>
 <strong>Reads fetch only what they need.</strong> Filters and column selections are passed to the Parquet reader. Spatial filters use H3 cells and bounding boxes stored with the data, so an area is read without scanning every geometry.</li>
 <li>
@@ -131,7 +131,7 @@
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   500  38.3 kB      2  2026-11-27 23:24</span></span></code></pre></div>
+<span><span class="co">#&gt;     daily  table   500  38.3 kB      2  2026-11-28 01:08</span></span></code></pre></div>
 <p>Open a dataset. Nothing is read yet; printing shows a header and the first rows.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span>
@@ -195,7 +195,7 @@
 <span><span class="co">#&gt; 1 2023 5851</span></span>
 <span><span class="co">#&gt; 2 2024 6065</span></span>
 <span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
-<p>Keep the same store in a bucket and in a local copy; writes reach both and reads use the local copy:</p>
+<p>Keep the same store in a bucket and in a local copy; writes reach both (unless written with <code>locations = "primary"</code>, for data that stays in the bucket) and reads use the local copy:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>, secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span><span class="op">)</span></span></code></pre></div>
 <p>A read of a dataset that the local copy lacks, or holds at an older version, first copies it there (up to 2 GB by default), so the next reads are local.</p>

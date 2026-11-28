@@ -70,7 +70,7 @@ available location again and checks, for each:
 5.  every index table agrees with its dataset: every row identifier
     exists and every recorded main cell equals the row’s `h3`;
 6.  every secondary copy of a dataset either equals the primary’s or is
-    reported as `missing` or `differs` by
+    reported as `missing`, `primary only` or `differs` by
     [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md).
 
 It also checks that the connection object holds the catalogs that are
@@ -309,6 +309,23 @@ tests themselves):
   dataset’s index table and a raster copied whole; a failing copy that
   warns while the read goes on; a windowed read of a class map; and one
   test against a bucket primary at level `full`.
+- **Primary-only datasets** (`test-primary-only.R`): a write with
+  `locations = "primary"` lands in the primary only, contacts no
+  secondary and records the setting (for a geospatial dataset on its
+  index table too), which later writes keep until `locations = "all"`;
+  the status `primary only` in
+  [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md),
+  [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md),
+  the print and
+  [`store_describe()`](https://ebukin.github.io/rcs/reference/store_describe.md);
+  a secondary that already holds the dataset left as it was, with one
+  message;
+  [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md),
+  with and without `all = TRUE`, leaving the dataset out, and
+  `datasets =` copying it; reads of a raster and of a class map window
+  that never copy it unless `copy = TRUE`, and one test against a bucket
+  at level `full`; no notice of an empty secondary when the primary
+  holds only such datasets.
 
 ## DuckDB
 

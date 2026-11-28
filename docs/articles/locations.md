@@ -54,11 +54,11 @@ st
 ## Writes land everywhere
 
 [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md)
-writes to the primary and then to every secondary, in the order given.
-There is no argument to choose locations: a write always tries them all.
-Each location gets only the files it lacks, each file is checked by its
-MD5 checksum after the copy, and each location’s catalog is switched
-last.
+writes to the primary and then to every secondary, in the order given: a
+write tries them all, unless the dataset is kept in the primary only
+with `locations = "primary"` (see “Primary-only datasets”). Each
+location gets only the files it lacks, each file is checked by its MD5
+checksum after the copy, and each location’s catalog is switched last.
 
 ``` r
 
@@ -77,7 +77,8 @@ store_write(st, rcs_sim_table(200, seed = 1), "sales/daily",
 
 In the printed connection, the columns `1` and `2` show the state of
 each secondary copy: `=` the same as the primary, `≠` another version,
-`–` missing, `?` location unavailable.
+`–` missing, `P` kept in the primary only (named in the legend only when
+the store holds such a dataset), `?` location unavailable.
 
 ``` r
 
@@ -91,7 +92,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.9 kB      2  2026-11-27 23:53  =  =
+#>     daily  table   200  27.9 kB      2  2026-11-28 02:26  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -158,7 +159,7 @@ st_env
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   200  27.9 kB      2  2026-11-27 23:53  =  =
+#>     daily  table   200  27.9 kB      2  2026-11-28 02:26  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -228,7 +229,7 @@ store_write(st, rcs_sim_table(300, seed = 2), "sales/daily",
 )
 #> ℹ Replacing "sales/daily": 300 rows in 2 files (partition year).
 #> ✔ primary    <tempdir>/locations/primary  2/2 files sent  31.3 kB  0.1s
-#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  31.3 kB  0.2s
+#> ✔ secondary  <tempdir>/locations/copy-1   2/2 files sent  31.3 kB  0.1s
 #> ! secondary  <tempdir>/locations/copy-2   unavailable, skipped
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 #> ! 1 secondary location is behind; run `store_sync(st, datasets = "sales/daily")` to bring it up to date, or
@@ -270,7 +271,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   300  31.3 kB      2  2026-11-27 23:53  =  ≠
+#>     daily  table   300  31.3 kB      2  2026-11-28 02:26  =  ≠
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -293,12 +294,13 @@ store_refresh(st)
 [`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md)
 compares every secondary with the primary, dataset by dataset, from the
 catalogs alone. `status` is `same`, `differs` (another version),
-`missing` (not in the secondary) or `extra` (only in the secondary); for
-`differs`, `newer` says which side was written last: `"source"` (the
-primary here) or `"target"` (the location of the row). It is a hint
-only, as clocks of different machines can differ. Printed, the source is
-named first, and the addresses of the other locations are listed once
-above the table and numbered in the column `location`.
+`missing` (not in the secondary), `primary only` (not in the secondary
+because the dataset is kept in the primary only) or `extra` (only in the
+secondary); for `differs`, `newer` says which side was written last:
+`"source"` (the primary here) or `"target"` (the location of the row).
+It is a hint only, as clocks of different machines can differ. Printed,
+the source is named first, and the addresses of the other locations are
+listed once above the table and numbered in the column `location`.
 
 ``` r
 
@@ -337,7 +339,8 @@ store_status(st, from = copy_2)[c("dataset", "location", "status", "newer")]
 A copy that is behind is never read: reads go to a location that holds
 the primary’s version. The next write of a dataset brings every
 available secondary up to date for that dataset, whatever version it
-held.
+held, unless the dataset is kept in the primary only
+(`locations = "primary"`).
 
 ## Bringing secondaries up to date
 
@@ -387,11 +390,12 @@ store_sync(st, to = copy_2)
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
 #> • '<tempdir>/locations/copy-2': "sales/daily" version 41ec22ed5b5602ce (updated
-#>   2026-11-27 23:53:53) replaced by version 0f1993a2e5855aa8 (updated 2026-11-27 23:53:55).
+#>   2026-11-28 02:26:39) replaced by version 0f1993a2e5855aa8 (updated 2026-11-28 02:26:41).
 ```
 
 `datasets` names the datasets to copy, whether a secondary holds them or
-not, and `all = TRUE` copies every dataset of the source:
+not, and `all = TRUE` copies every dataset of the source, except those
+kept in the primary only (see “Primary-only datasets”):
 
 ``` r
 
@@ -586,7 +590,8 @@ datasets that were read, and a plain
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
 refreshes exactly those (see “Bringing secondaries up to date”), so the
 copy stays small however large the bucket is. `datasets =` copies some
-more, and `all = TRUE` makes the folder a full copy of the store.
+more, and `all = TRUE` copies every other dataset of the store, except
+those kept in the primary only (see “Primary-only datasets”).
 
 The stores of this vignette are local folders, primary included, so
 their reads copy nothing. A new, empty secondary is announced when you
@@ -607,6 +612,151 @@ store_status(st_work)[c("dataset", "status")]
 #> 1 sales/daily missing
 ```
 
+## Primary-only datasets
+
+Some datasets should stay in the primary: a large raster in a bucket
+that is read a window at a time straight from there, or data that should
+not be copied to every laptop. `locations = "primary"` writes a dataset
+to the primary only. The secondaries are not contacted at all, not even
+to see whether they can be reached, and each is reported as kept in the
+primary only.
+
+A small store of its own, with one secondary, shows this. An ordinary
+dataset is written first, for comparison:
+
+``` r
+
+po_root <- file.path(root, "primary-only")
+st_po <- store_connect(file.path(po_root, "primary"),
+  secondary = file.path(po_root, "copy"),
+  create = TRUE
+)
+store_write(st_po, rcs_sim_table(100, seed = 7), "sales/daily",
+  title = "Daily sales",
+  description = "Simulated daily sales by shop and product."
+)
+#> ℹ Writing "sales/daily": 100 rows in 1 file.
+#> ✔ primary    <tempdir>/locations/primary-only/primary  1/1 files sent  13.8 kB  0.1s
+#> ✔ secondary  <tempdir>/locations/primary-only/copy     1/1 files sent  13.8 kB  0.1s
+#> ✔ MD5 identical for 1 file in 2 locations. Catalogs updated.
+store_write(st_po, rcs_sim_table(60, seed = 8), "sales/archive",
+  title = "Sales archive",
+  description = "Simulated sales kept in the primary only.",
+  locations = "primary"
+)
+#> ℹ Writing "sales/archive": 60 rows in 1 file.
+#> ✔ primary    <tempdir>/locations/primary-only/primary  1/1 files sent  12.2 kB  0.1s
+#> ℹ secondary  <tempdir>/locations/primary-only/copy     kept in the primary only
+#> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
+```
+
+The printed connection shows `P` for the secondary, and the legend names
+the symbol.
+[`store_status()`](https://ebukin.github.io/rcs/reference/store_status.md)
+reports `primary only`, not `missing`:
+
+``` r
+
+st_po
+#> ── rcs store ───────────────────────────────────────────────────────────────────
+#> Locations:
+#>   primary      local  <tempdir>/locations/primary-only/primary
+#>   secondary 1  local  <tempdir>/locations/primary-only/copy
+#> History: off (store default)
+#> Datasets: 2
+#>   name       kind   rows     size  files  updated           1
+#>   sales/
+#>     archive  table    60  12.2 kB      1  2026-11-28 02:26  P
+#>     daily    table   100  13.8 kB      1  2026-11-28 02:26  =
+#> Secondary copies: = same, ≠ differs, – missing, P primary only, ? unavailable.
+store_status(st_po)
+#> Source: <tempdir>/locations/primary-only/primary
+#> Locations: [1] <tempdir>/locations/primary-only/copy
+#> # A tibble: 2 × 8
+#>   dataset       location status       newer primary_version  location_version
+#>   <chr>         <chr>    <chr>        <chr> <chr>            <chr>           
+#> 1 sales/archive [1]      primary only NA    7242c44d54e80108 NA              
+#> 2 sales/daily   [1]      same         NA    02f1440ed931b56f 02f1440ed931b56f
+#> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
+```
+
+The setting is recorded with the dataset, in its catalog entry and its
+manifest (for a geospatial dataset, on its index table too). Later
+writes that leave `locations` out keep it, in every mode, until
+`locations = "all"` writes the dataset to every location again. Where a
+dataset is kept does not change its files or its version: the same data
+give the same version with and without the setting, and switching it for
+unchanged data sends no data file to the primary (switching back with
+`locations = "all"` copies the dataset to the secondaries that lack it).
+
+A secondary that already holds the dataset when it is written to the
+primary only is left as it is, at its old version. The write names it
+and the call that updates it:
+
+    ℹ '~/data/my-store' holds "sales/archive" and is not updated by this primary-only write.
+      Use `store_sync(st, datasets = "sales/archive")` to update it.
+
+A plain
+[`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+never copies a dataset that a secondary lacks (see “Bringing secondaries
+up to date”), and `all = TRUE` leaves primary-only datasets out too. The
+call says what it left out:
+
+``` r
+
+store_sync(st_po, all = TRUE)
+#> ℹ Syncing 2 datasets from the primary <tempdir>/locations/primary-only/primary to 1
+#>   secondary location.
+#> ✔ secondary  <tempdir>/locations/primary-only/copy     up to date
+#> ℹ <tempdir>/locations/primary-only/copy: 1 primary-only dataset not copied (1 file,
+#>   12.2 kB).
+#>   Use `store_sync(st, datasets = )` to copy them.
+#> ✔ Every secondary location is up to date.
+```
+
+`datasets =` copies such a dataset all the same. A secondary that holds
+it from then on is refreshed by a plain
+[`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md),
+like any other dataset it holds:
+
+``` r
+
+store_sync(st_po, datasets = "sales/archive")
+#> ℹ Syncing 1 dataset from the primary <tempdir>/locations/primary-only/primary to 1
+#>   secondary location.
+#> ✔ secondary  <tempdir>/locations/primary-only/copy     1 dataset, 1/1 files sent  12.2
+#>   kB  0.1s
+#> ✔ MD5 identical for 1 file sent to 1 location. Catalogs updated.
+store_status(st_po)[c("dataset", "status")]
+#> Source: <tempdir>/locations/primary-only/primary
+#> # A tibble: 2 × 2
+#>   dataset       status
+#>   <chr>         <chr> 
+#> 1 sales/archive same  
+#> 2 sales/daily   same
+```
+
+With a bucket as primary, a read never copies a primary-only dataset to
+a local secondary that lacks it, whatever its size (see “Local working
+copies of a bucket”). The read goes to the bucket, and one line says so:
+
+    ℹ "sales/archive" is kept in the primary only; reading from 'gs://my-bucket/store'.
+      Use `copy = TRUE` to copy it.
+
+`copy = TRUE` copies it. With `copy = FALSE`, or `copy_on_read = FALSE`
+on the connection, the read goes to the bucket without that line. A
+local secondary that holds the dataset is treated as for any other
+dataset: an older version there is first brought up to date, and the
+read comes from it; with several local secondaries, the line is printed
+only when none of them holds the dataset. A raster kept in the primary
+only that no local secondary holds is therefore read from the bucket,
+whole or a window at a time, through GDAL. Here the primary is a local
+folder, so reads copy nothing anyway.
+
+A new, empty secondary is announced when you connect only when the
+primary holds datasets that are not primary-only; otherwise `all = TRUE`
+would copy nothing there.
+
 ## Syncing from a secondary
 
 Work can also start on a secondary: on a laptop without network, say, a
@@ -620,7 +770,7 @@ store_write(offline, rcs_sim_table(80, seed = 4), "sales/monthly",
   description = "Simulated monthly sales."
 )
 #> ℹ Writing "sales/monthly": 80 rows in 1 file.
-#> ✔ primary  <tempdir>/locations/copy-1  1/1 files sent  13.1 kB  0.1s
+#> ✔ primary  <tempdir>/locations/copy-1  1/1 files sent  13.1 kB  0.2s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 ```
 
@@ -636,7 +786,7 @@ its own datasets refreshed and would not get `sales/monthly`;
 store_refresh(st)
 store_sync(st, from = copy_1, all = TRUE)
 #> ℹ Syncing 2 datasets from the secondary <tempdir>/locations/copy-1 to 2 locations.
-#> ✔ primary    <tempdir>/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.2s
+#> ✔ primary    <tempdir>/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.1s
 #> ✔ secondary  <tempdir>/locations/copy-2   1 dataset, 1/1 files sent  13.1 kB  0.1s
 #> ✔ MD5 identical for 2 files sent to 2 locations. Catalogs updated.
 st
@@ -649,8 +799,8 @@ st
 #> Datasets: 2
 #>   name       kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily    table   300  31.3 kB      2  2026-11-27 23:53  =  =
-#>     monthly  table    80  13.1 kB      1  2026-11-27 23:54  =  =
+#>     daily    table   300  31.3 kB      2  2026-11-28 02:26  =  =
+#>     monthly  table    80  13.1 kB      1  2026-11-28 02:26  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -670,7 +820,7 @@ store_write(only_primary, rcs_sim_table(120, seed = 5), "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 120 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/locations/primary  2/2 files sent  24.7 kB  0.1s
+#> ✔ primary  <tempdir>/locations/primary  2/2 files sent  24.7 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 Sys.sleep(1)
 store_write(offline, rcs_sim_table(140, seed = 6), "sales/daily",
@@ -705,11 +855,11 @@ store_sync(st)
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
 #> • '<tempdir>/locations/copy-2': "sales/daily" version 0f1993a2e5855aa8 (updated
-#>   2026-11-27 23:53:55) replaced by version 98d066b5654644d4 (updated 2026-11-27 23:54:02).
+#>   2026-11-28 02:26:41) replaced by version 98d066b5654644d4 (updated 2026-11-28 02:26:50).
 #> Error in `store_sync()`:
 #> ! 1 dataset was not copied: the target holds a newer version.
 #> ✖ '<tempdir>/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated
-#>   2026-11-27 23:54:03) is newer than the source's version 98d066b5654644d4 (updated 2026-11-27 23:54:02).
+#>   2026-11-28 02:26:51) is newer than the source's version 98d066b5654644d4 (updated 2026-11-28 02:26:50).
 #> ℹ The other copies and deletions were made.
 #> ℹ Run with `force = TRUE` to copy the source over it, or sync from the location that holds the newer version.
 ```
@@ -730,7 +880,7 @@ store_sync(st, force = TRUE)
 #> ✔ MD5 identical for 2 files sent to 1 location. Catalogs updated.
 #> Warning: `store_sync()` replaced 1 version held by the target locations:
 #> • '<tempdir>/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated
-#>   2026-11-27 23:54:03) replaced by version 98d066b5654644d4 (updated 2026-11-27 23:54:02).
+#>   2026-11-28 02:26:51) replaced by version 98d066b5654644d4 (updated 2026-11-28 02:26:50).
 ```
 
 When the source is the newer side, the copy goes ahead without `force`;
@@ -788,7 +938,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1  2
 #>   sales/
-#>     daily  table   120  24.7 kB      2  2026-11-27 23:54  =  =
+#>     daily  table   120  24.7 kB      2  2026-11-28 02:26  =  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```
 
@@ -988,6 +1138,6 @@ st_keep
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1
 #>   sales/
-#>     daily  table   120  24.7 kB      2  2026-11-27 23:54  =
+#>     daily  table   120  24.7 kB      2  2026-11-28 02:26  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 ```

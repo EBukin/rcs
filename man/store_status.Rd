@@ -30,7 +30,9 @@ connection order) and dataset:
 \item \code{dataset}: the full name;
 \item \code{location}: the address of the location compared with the source;
 \item \code{status}: \code{"same"}, \code{"differs"} (another version), \code{"missing"} (not
-in that location), \code{"extra"} (only in that location), or
+in that location), \code{"primary only"} (not in that secondary location
+because the dataset is kept in the primary only, see
+\code{\link[=store_write]{store_write()}}'s \code{locations}), \code{"extra"} (only in that location), or
 \code{"unavailable"} when it or the source could not be reached;
 \item \code{newer}: for \code{"differs"}, the side with the later \code{updated} time,
 \code{"source"} or \code{"target"} (the location of the row); \code{NA} otherwise.
@@ -45,7 +47,8 @@ The attribute \code{source} holds the address of the source. Zero rows when
 the connection has no other location. \code{store_sync()} brings differing
 datasets up to date in the secondaries that hold them;
 \code{store_sync(st, datasets = "<name>")} or \code{store_sync(st, all = TRUE)}
-also copies missing ones.
+also copies missing ones (\code{all = TRUE} leaves out those kept in the
+primary only).
 }
 \description{
 For each location other than the source and each dataset, compares the

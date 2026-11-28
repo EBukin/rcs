@@ -45,8 +45,9 @@ folders or Google Cloud Storage buckets.
   and files. Every function starts from it: listing a store, describing a
   dataset or finding the files a filter needs reads no data file.
 - **Every write lands everywhere, verified.** A write goes to the primary
-  and to every secondary, each file is checked by its MD5 checksum, and the
-  catalog is switched last, so readers see the old or the new version,
+  and to every secondary (to the primary only with
+  `locations = "primary"`), each file is checked by its MD5 checksum, and
+  the catalog is switched last, so readers see the old or the new version,
   never a mixture.
 - **Reads fetch only what they need.** Filters and column selections are
   passed to the Parquet reader. Spatial filters use H3 cells and bounding
@@ -124,8 +125,9 @@ DBI::dbGetQuery(con, "SELECT year, sum(qty) AS qty FROM sales.daily GROUP BY yea
 DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
-Keep the same store in a bucket and in a local copy; writes reach both and
-reads use the local copy:
+Keep the same store in a bucket and in a local copy; writes reach both
+(unless written with `locations = "primary"`, for data that stays in the
+bucket) and reads use the local copy:
 
 ```{r, eval = FALSE}
 st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")

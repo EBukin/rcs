@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9008</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -188,8 +188,8 @@ apart from files left by an injected failure, which
 exists and every recorded main cell equals the row’s
 <code>h3</code>;</li>
 <li>every secondary copy of a dataset either equals the primary’s or is
-reported as <code>missing</code> or <code>differs</code> by
-<code><a href="../reference/store_status.html">store_status()</a></code>.</li>
+reported as <code>missing</code>, <code>primary only</code> or
+<code>differs</code> by <code><a href="../reference/store_status.html">store_status()</a></code>.</li>
 </ol>
 <p>It also checks that the connection object holds the catalogs that are
 stored, so that a function that changed a location updated the object in
@@ -424,6 +424,21 @@ index table; two secondaries served by one download; a dataset’s index
 table and a raster copied whole; a failing copy that warns while the
 read goes on; a windowed read of a class map; and one test against a
 bucket primary at level <code>full</code>.</li>
+<li>
+<strong>Primary-only datasets</strong>
+(<code>test-primary-only.R</code>): a write with
+<code>locations = "primary"</code> lands in the primary only, contacts
+no secondary and records the setting (for a geospatial dataset on its
+index table too), which later writes keep until
+<code>locations = "all"</code>; the status <code>primary only</code> in
+<code><a href="../reference/store_status.html">store_status()</a></code>, <code><a href="../reference/store_datasets.html">store_datasets()</a></code>, the print
+and <code><a href="../reference/store_describe.html">store_describe()</a></code>; a secondary that already holds the
+dataset left as it was, with one message; <code><a href="../reference/store_sync.html">store_sync()</a></code>,
+with and without <code>all = TRUE</code>, leaving the dataset out, and
+<code>datasets =</code> copying it; reads of a raster and of a class map
+window that never copy it unless <code>copy = TRUE</code>, and one test
+against a bucket at level <code>full</code>; no notice of an empty
+secondary when the primary holds only such datasets.</li>
 </ul>
 </div>
 <div class="section level2">

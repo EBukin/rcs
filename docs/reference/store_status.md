@@ -50,7 +50,10 @@ dataset:
 - `location`: the address of the location compared with the source;
 
 - `status`: `"same"`, `"differs"` (another version), `"missing"` (not in
-  that location), `"extra"` (only in that location), or `"unavailable"`
+  that location), `"primary only"` (not in that secondary location
+  because the dataset is kept in the primary only, see
+  [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md)'s
+  `locations`), `"extra"` (only in that location), or `"unavailable"`
   when it or the source could not be reached;
 
 - `newer`: for `"differs"`, the side with the later `updated` time,
@@ -68,7 +71,8 @@ the connection has no other location.
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
 brings differing datasets up to date in the secondaries that hold them;
 `store_sync(st, datasets = "<name>")` or `store_sync(st, all = TRUE)`
-also copies missing ones.
+also copies missing ones (`all = TRUE` leaves out those kept in the
+primary only).
 
 ## Details
 
