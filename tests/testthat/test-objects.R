@@ -40,7 +40,7 @@ test_that("new_store() holds the documented fields", {
   st <- new_store(primary, list(test_location("b"), test_location("c")))
   expect_s3_class(st, "rcs_store")
   expect_true(is.environment(st))
-  expect_setequal(ls(st), c("primary", "secondary", "history", "store_history", "connected_at"))
+  expect_setequal(ls(st), c("primary", "secondary", "history", "store_history", "connected_at", "copy_on_read"))
   expect_identical(st$primary, primary)
   expect_length(st$secondary, 2)
   expect_null(st$history)

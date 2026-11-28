@@ -81,7 +81,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-describe/primary  2/2
-#>   files sent  23.8 kB  0.1s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_describe(st, "sales/daily")
 #> ── sales/daily ─────────────────────────────────────────────────────────────────
@@ -99,9 +99,9 @@ store_describe(st, "sales/daily")
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-27 13:56:24 EST
-#> Updated     2026-11-27 13:56:24 EST
-#> Written by  R 4.6.2, rcs 0.0.0.9006
+#> Created     2026-11-27 18:51:25 EST
+#> Updated     2026-11-27 18:51:25 EST
+#> Written by  R 4.6.2, rcs 0.0.0.9007
 #> 
 #> Locations:
 #>   primary    /tmp/Rtmp/rcs-example-describe/primary

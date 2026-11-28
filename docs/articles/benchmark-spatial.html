@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -978,7 +978,7 @@ answer.</p>
 <span>      <span class="op">{</span></span>
 <span>        <span class="va">st_both</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">uri</span>, secondary <span class="op">=</span> <span class="va">gcs_uri</span>, create <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span>        <span class="va">start</span> <span class="op">&lt;-</span> <span class="fu">bench</span><span class="fu">::</span><span class="fu"><a href="https://bench.r-lib.org/reference/hires_time.html" class="external-link">hires_time</a></span><span class="op">(</span><span class="op">)</span></span>
-<span>        <span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st_both</span><span class="op">)</span></span>
+<span>        <span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st_both</span>, all <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span>        <span class="va">sync_s</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/numeric.html" class="external-link">as.numeric</a></span><span class="op">(</span><span class="fu">bench</span><span class="fu">::</span><span class="fu"><a href="https://bench.r-lib.org/reference/hires_time.html" class="external-link">hires_time</a></span><span class="op">(</span><span class="op">)</span> <span class="op">-</span> <span class="va">start</span><span class="op">)</span></span>
 <span>        <span class="va">gcs_timed</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span><span class="op">)</span></span>
 <span>        <span class="va">holder</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/environment.html" class="external-link">new.env</a></span><span class="op">(</span><span class="op">)</span></span>

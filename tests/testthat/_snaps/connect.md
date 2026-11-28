@@ -123,6 +123,14 @@
       i It holds no store catalogs.
       i Run `store_refresh()` to try it again.
 
+# store_connect() announces an empty secondary of a non-empty primary, once
+
+    Code
+      again <- store_connect(fx$primary, secondary = empty)
+    Message
+      i Secondary '<root>/empty' is empty.
+        Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st, datasets = )` to copy some.
+
 # auth = is checked
 
     Code

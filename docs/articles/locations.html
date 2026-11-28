@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -170,7 +170,7 @@ missing, <code>?</code> location unavailable.</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated           1  2</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   200  27.9 kB      2  2026-11-27 18:58  =  =</span></span>
+<span><span class="co">#&gt;     daily  table   200  27.9 kB      2  2026-11-27 23:53  =  =</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 </div>
 <div class="section level2">
@@ -179,15 +179,20 @@ missing, <code>?</code> location unavailable.</p>
 <p>A read picks, among the locations that hold the dataset at the
 primary’s version, a local folder first, then the primary, then the
 other secondaries. With a bucket as primary and a local folder as
-secondary, reads come from the local folder as long as it is up to date,
-and a line says so:</p>
+secondary, reads come from the local folder when it holds the primary’s
+version, and a line says so:</p>
 <div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>, secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span><span class="op">)</span></span>
 <span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; ℹ Reading "sales/daily" from secondary ~/data/my-store.</span></span></code></pre></div>
-<p><code>options(rcs.quiet = TRUE)</code> silences that line. A
-secondary that is behind is skipped, and the read goes to the
-primary.</p>
+<p><code>options(rcs.quiet = TRUE)</code> silences that line. When the
+local folder lacks the dataset or holds an older version,
+<code><a href="../reference/store_read.html">store_read()</a></code> first copies the dataset there and then reads
+from the copy (see “Local working copies of a bucket”). A secondary that
+is behind and is not brought up to date that way, for example another
+bucket, is skipped, and the read goes to the primary.</p>
+<p>Here all three locations are local folders. The primary is local too,
+so reads come from it, and a read never copies anything.</p>
 </div>
 <div class="section level2">
 <h2 id="addresses-from-the-environment">Addresses from the environment<a class="anchor" aria-label="anchor" href="#addresses-from-the-environment"></a>
@@ -220,7 +225,7 @@ STORE_SECONDARY=~/data/my-store</code></pre>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated           1  2</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   200  27.9 kB      2  2026-11-27 18:58  =  =</span></span>
+<span><span class="co">#&gt;     daily  table   200  27.9 kB      2  2026-11-27 23:53  =  =</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 <p><code>env</code> changes the prefix of the variables, so one session
 can use several stores: <code>store_connect(env = "ARCHIVE")</code>
@@ -281,11 +286,19 @@ and says that it is behind:</p>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-1   2/2 files sent  31.3 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> secondary  &lt;tempdir&gt;/locations/copy-2   unavailable, skipped</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> 1 secondary location is behind; run `store_sync()` to bring it up to date.</span></span></code></pre></div>
+<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> 1 secondary location is behind; run `store_sync(st, datasets = "sales/daily")` to bring it up to date, or</span></span>
+<span><span class="co">#&gt;   `store_sync(st, all = TRUE)` for every dataset.</span></span></code></pre></div>
+<p>The message names the call that repairs it later:
+<code>store_sync(st, datasets = "sales/daily")</code>, or
+<code>store_sync(st, all = TRUE)</code> for every dataset. Name the
+dataset: a plain <code><a href="../reference/store_sync.html">store_sync()</a></code> refreshes only the datasets a
+secondary already holds (see “Bringing secondaries up to date”), so it
+would not copy a new dataset whose first write missed that
+secondary.</p>
 <p>If a secondary fails during a write (a network error, say), the write
 goes on with the next location and reports the failed one as behind in
-the same way. Only a failure in the primary stops a write, and then no
-catalog of any location has changed.</p>
+the same way, with the same hint. Only a failure in the primary stops a
+write, and then no catalog of any location has changed.</p>
 </div>
 <div class="section level2">
 <h2 id="a-secondary-that-is-behind">A secondary that is behind<a class="anchor" aria-label="anchor" href="#a-secondary-that-is-behind"></a>
@@ -306,7 +319,7 @@ It still holds the old version of <code>sales/daily</code>:</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated           1  2</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   300  31.3 kB      2  2026-11-27 18:58  =  ≠</span></span>
+<span><span class="co">#&gt;     daily  table   300  31.3 kB      2  2026-11-27 23:53  =  ≠</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 <p>A secondary also falls behind when someone writes through a
 connection that does not include it:</p>
@@ -369,37 +382,74 @@ held.</p>
 </h2>
 <p><code><a href="../reference/store_sync.html">store_sync()</a></code> copies datasets from one location, the
 <em>source</em>, to the others, the <em>targets</em>: by default from
-the primary, every dataset that is missing or differs, to every
-secondary. Like a write, it copies only the files a location lacks,
-checks each by MD5 and switches the catalog last. By default it never
-deletes a dataset. <code>dry_run = TRUE</code> shows what it would do
-and changes nothing.</p>
+the primary to every secondary. Like a write, it copies only the files a
+location lacks, checks each by MD5 and switches the catalog last. By
+default it never deletes a dataset. <code>dry_run = TRUE</code> shows
+what it would do and changes nothing.</p>
+<p>A plain <code><a href="../reference/store_sync.html">store_sync()</a></code> refreshes in each secondary only
+the datasets it already holds, at whatever version: a local copy that
+holds a few datasets of a large bucket stays small. It then says which
+datasets it did not copy to each secondary, and how many files and bytes
+a full sync would send there at most. Here both copies lack
+<code>sales/weekly</code>, and the second copy holds an old version of
+<code>sales/daily</code>:</p>
 <div class="sourceCode" id="cb16"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, dry_run <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Dry run: nothing is changed.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary</span></span>
-<span><span class="co">#&gt;   locations.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> secondary  &lt;tempdir&gt;/locations/copy-1   would copy 1 dataset, 1 file (11.7 kB):</span></span>
-<span><span class="co">#&gt;   "sales/weekly"</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> secondary  &lt;tempdir&gt;/locations/copy-2   would copy 2 datasets, 3 files (43.0 kB):</span></span>
-<span><span class="co">#&gt;   "sales/daily", "sales/weekly"</span></span></code></pre></div>
-<p><code>datasets</code> and <code>to</code> limit it to some datasets
-or some secondaries. Here only the second copy is brought up to
-date:</p>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the primary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary locations.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-1   nothing copied</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> secondary  &lt;tempdir&gt;/locations/copy-2   would copy 1 dataset, 2 files (31.3 kB):</span></span>
+<span><span class="co">#&gt;   "sales/daily"</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Synced only the datasets already in each secondary location.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span>: 1 dataset not copied (1 file, 11.7 kB).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-2</span>: 1 dataset not copied (1 file, 11.7 kB).</span></span>
+<span><span class="co">#&gt;   Use `store_sync(st, all = TRUE)` to copy every dataset, or `datasets = ` to copy some.</span></span></code></pre></div>
+<p><code>to</code> limits the sync to some secondaries. Here only the
+second copy is brought up to date, for the dataset it holds:</p>
 <div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, to <span class="op">=</span> <span class="va">copy_2</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 1 secondary</span></span>
-<span><span class="co">#&gt;   location.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   2 datasets, 3/3 files sent  43.0 kB  0.2s</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 3 files sent to 1 location. Catalogs updated.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the primary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 1 secondary location.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   1 dataset, 2/2 files sent  31.3 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Synced only the datasets already in each secondary location.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-2</span>: 1 dataset not copied (1 file, 11.7 kB).</span></span>
+<span><span class="co">#&gt;   Use `store_sync(st, all = TRUE)` to copy every dataset, or `datasets = ` to copy some.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files sent to 1 location. Catalogs updated.</span></span>
 <span><span class="co">#&gt; Warning: `store_sync()` replaced 1 version held by the target locations:</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> '&lt;tempdir&gt;/locations/copy-2': "sales/daily" version 41ec22ed5b5602ce (updated</span></span>
-<span><span class="co">#&gt;   2026-11-27 18:58:50) replaced by version 0f1993a2e5855aa8 (updated 2026-11-27 18:58:52).</span></span></code></pre></div>
+<span><span class="co">#&gt;   2026-11-27 23:53:53) replaced by version 0f1993a2e5855aa8 (updated 2026-11-27 23:53:55).</span></span></code></pre></div>
+<p><code>datasets</code> names the datasets to copy, whether a secondary
+holds them or not, and <code>all = TRUE</code> copies every dataset of
+the source:</p>
+<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, datasets <span class="op">=</span> <span class="st">"sales/weekly"</span>, to <span class="op">=</span> <span class="va">copy_2</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 1 dataset from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 1 secondary</span></span>
+<span><span class="co">#&gt;   location.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   1 dataset, 1/1 files sent  11.7 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file sent to 1 location. Catalogs updated.</span></span></code></pre></div>
+<p>A sync to the primary, with <code>from</code> set to a secondary (see
+“Syncing from a secondary”), always sends every dataset there.</p>
+<p>A secondary that holds no dataset at all is announced when you
+connect, so that you can decide how much of the store to copy there:</p>
+<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">copy_3</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy-3"</span><span class="op">)</span></span>
+<span><span class="va">st_new</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">primary</span>, secondary <span class="op">=</span> <span class="va">copy_3</span>, create <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Secondary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-3</span> is empty.</span></span>
+<span><span class="co">#&gt;   Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st, datasets = )` to copy some.</span></span></code></pre></div>
+<p>A plain <code>store_sync(st_new)</code> would copy nothing there;
+<code>all = TRUE</code> fills it:</p>
+<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st_new</span>, all <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 1 secondary</span></span>
+<span><span class="co">#&gt;   location.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-3   2 datasets, 3/3 files sent  43.0 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 3 files sent to 1 location. Catalogs updated.</span></span></code></pre></div>
 <p><code><a href="../reference/store_copy.html">store_copy()</a></code> copies one dataset between any two
 locations of the connection, in either direction. The first copy still
 lacks <code>sales/weekly</code>; here it gets it from the second
 copy:</p>
-<div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_copy.html">store_copy</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/weekly"</span>, from <span class="op">=</span> <span class="va">copy_2</span>, to <span class="op">=</span> <span class="va">copy_1</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Copying <span style="color: #0000BB;">"sales/weekly"</span> (version 72f66b800c3fa743, 1 file) from</span></span>
 <span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-2</span> to</span></span>
@@ -427,7 +477,7 @@ removes a dataset from every location; it stops unless
 rebuilds a location’s catalog from the small description file (manifest)
 that every version of every dataset leaves next to its data files, for
 example after a catalog file was lost.</p>
-<div class="sourceCode" id="cb19"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_delete.html">store_delete</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/weekly"</span>, confirm <span class="op">=</span> <span class="st">"sales/weekly"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Deleting <span style="color: #0000BB;">"sales/weekly"</span> and its index table from every location, keeping its history.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary    &lt;tempdir&gt;/locations/primary  2 files deleted  11.7 kB</span></span>
@@ -439,11 +489,113 @@ example after a catalog file was lost.</p>
 <span><span class="co">#&gt;   versions.</span></span></code></pre></div>
 </div>
 <div class="section level2">
+<h2 id="local-working-copies-of-a-bucket">Local working copies of a bucket<a class="anchor" aria-label="anchor" href="#local-working-copies-of-a-bucket"></a>
+</h2>
+<p>With a bucket as primary, a local secondary is a <strong>working
+copy</strong>: it holds the datasets you read, so that later reads are
+fast and work without a network.</p>
+<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>, secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span><span class="op">)</span></span>
+<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span></code></pre></div>
+<p>When the local folder lacks <code>sales/daily</code>, or holds an
+older version of it, <code><a href="../reference/store_read.html">store_read()</a></code> first copies the current
+version of the whole dataset there, with its index table, and then reads
+from the copy. As in a sync, only the files the folder lacks are sent,
+each checked by its MD5, with a progress bar. The read says what it
+copied:</p>
+<pre><code>ℹ Copying "sales/daily" (version 3f9a1c0d2b4e5f60, 2 files, 41.2 kB) from 'gs://my-bucket/store' to '~/data/my-store' before reading.
+✔ 2/2 files sent to '~/data/my-store' (41.2 kB) in 0.8s, MD5 verified.
+ℹ Reading "sales/daily" from secondary ~/data/my-store.</code></pre>
+<p>The next read of <code>sales/daily</code> copies nothing and reads
+from the folder. After a new write on the bucket, the next read copies
+the new version, again sending only the files that changed. Filters,
+<code>columns</code> and <code>intersects</code> do not change this: the
+whole dataset is copied, and the filter is applied to the copy. With
+several local secondaries, each one gets the copy, and each file is
+downloaded once.</p>
+<p>When the folder holds the current version but another catalog entry
+of it (a raster whose legend or colours were written again for the same
+cells, say), the read updates only the entry and sends no file, whatever
+the limit below:</p>
+<pre><code>ℹ Updating the catalog entry of "sales/daily" in '~/data/my-store' to the primary's (version 3f9a1c0d2b4e5f60, no file sent).</code></pre>
+<p>A read copies only:</p>
+<ul>
+<li>to secondaries that are local folders and can be reached, and only
+when the primary is not local. Secondaries in buckets never get a copy
+from a read, and with a local primary a read copies nothing;</li>
+<li>the current version of a dataset;</li>
+<li>when the bytes to download are at or under a limit: 2 GB by default,
+set by <code>options(rcs.copy_on_read_max_bytes = )</code> in
+bytes.</li>
+</ul>
+<p>Above the limit nothing is copied. The read then fetches only what it
+needs from the bucket, and says how to copy:</p>
+<pre><code>ℹ "sales/daily" needs 3.4 GB, above the 2.0 GB limit for copying on read (`rcs.copy_on_read_max_bytes`). Reading from 'gs://my-bucket/store'.
+  Use `copy = TRUE`, or `store_sync(st, datasets = "sales/daily")`, to copy it.</code></pre>
+<p><code>copy</code> controls one read, and <code>copy_on_read</code>
+the whole connection:</p>
+<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="co"># Copy whatever the size</span></span>
+<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, copy <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Never copy, read from the bucket</span></span>
+<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, copy <span class="op">=</span> <span class="cn">FALSE</span><span class="op">)</span></span>
+<span></span>
+<span><span class="co"># Never copy on this connection, unless a read says copy = TRUE</span></span>
+<span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>,</span>
+<span>  secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span>,</span>
+<span>  copy_on_read <span class="op">=</span> <span class="cn">FALSE</span></span>
+<span><span class="op">)</span></span></code></pre></div>
+<p>With copying turned off, no message about copying is printed, and a
+local folder that already holds the current version is still read
+from.</p>
+<p>Earlier versions (<code>version =</code>) are not copied. When such a
+read comes from the bucket, it says so:</p>
+<pre><code>ℹ Read version 3f9a1c0d2b4e5f60 of "sales/daily" from 'gs://my-bucket/store'; old versions are not copied to secondary locations.
+  Use `copy = TRUE` to copy it.</code></pre>
+<p>With <code>copy = TRUE</code> the version is added to the history of
+the local secondaries that lack it; their current version of the dataset
+does not change.</p>
+<p>A local secondary whose version of a dataset was written later than
+the primary’s (by a connection to that folder alone, say) is never
+replaced by a read. It is left as it is and not read from, and a line
+says so:</p>
+<pre><code>! '~/data/my-store' holds a newer version of "sales/daily"; it is not replaced. See `store_sync()`.</code></pre>
+<p>A copy that fails (a network error, say) gives a warning, and the
+read goes on from the bucket; the next read tries again.
+<code><a href="../reference/store_sample.html">store_sample()</a></code>, <code><a href="../reference/store_glimpse.html">store_glimpse()</a></code>,
+<code><a href="../reference/store_open.html">store_open()</a></code> and <code><a href="../reference/store_duckdb.html">store_duckdb()</a></code> never copy:
+they read from the local folder when it already holds the current
+version, and from the bucket otherwise. Reading an index table never
+copies either.</p>
+<p>Copying on read and syncing work together. A working copy holds the
+datasets that were read, and a plain <code><a href="../reference/store_sync.html">store_sync()</a></code> refreshes
+exactly those (see “Bringing secondaries up to date”), so the copy stays
+small however large the bucket is. <code>datasets =</code> copies some
+more, and <code>all = TRUE</code> makes the folder a full copy of the
+store.</p>
+<p>The stores of this vignette are local folders, primary included, so
+their reads copy nothing. A new, empty secondary is announced when you
+connect, and a read leaves it empty:</p>
+<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">copy_4</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy-4"</span><span class="op">)</span></span>
+<span><span class="va">st_work</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">primary</span>, secondary <span class="op">=</span> <span class="va">copy_4</span>, create <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Secondary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-4</span> is empty.</span></span>
+<span><span class="co">#&gt;   Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st, datasets = )` to copy some.</span></span>
+<span><span class="va">x</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st_work</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/store_status.html">store_status</a></span><span class="op">(</span><span class="va">st_work</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"dataset"</span>, <span class="st">"status"</span><span class="op">)</span><span class="op">]</span></span>
+<span><span class="co">#&gt; Source: &lt;tempdir&gt;/locations/primary</span></span>
+<span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 2</span></span></span>
+<span><span class="co">#&gt;   dataset     status </span></span>
+<span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>       <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>  </span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/daily missing</span></span></code></pre></div>
+</div>
+<div class="section level2">
 <h2 id="syncing-from-a-secondary">Syncing from a secondary<a class="anchor" aria-label="anchor" href="#syncing-from-a-secondary"></a>
 </h2>
 <p>Work can also start on a secondary: on a laptop without network, say,
 a connection whose primary is the local copy writes there alone.</p>
-<div class="sourceCode" id="cb20"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">offline</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">copy_1</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">offline</span>, <span class="fu"><a href="../reference/rcs_sim_table.html">rcs_sim_table</a></span><span class="op">(</span><span class="fl">80</span>, seed <span class="op">=</span> <span class="fl">4</span><span class="op">)</span>, <span class="st">"sales/monthly"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Monthly sales"</span>,</span>
@@ -454,12 +606,16 @@ a connection whose primary is the local copy writes there alone.</p>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>Back on the full connection, <code>from</code> names the location to
 sync from. The targets are then every other location, the primary
-included; <code>to</code> limits them as before.</p>
-<div class="sourceCode" id="cb21"><pre class="downlit sourceCode r">
+included; <code>to</code> limits them as before. The primary receives
+every dataset of the source, here the new <code>sales/monthly</code>.
+The second copy, a secondary, would only have its own datasets refreshed
+and would not get <code>sales/monthly</code>; <code>all = TRUE</code>
+sends it there too:</p>
+<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_refresh.html">store_refresh</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span>
-<span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, from <span class="op">=</span> <span class="va">copy_1</span><span class="op">)</span></span>
+<span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, from <span class="op">=</span> <span class="va">copy_1</span>, all <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the secondary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span> to 2 locations.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary    &lt;tempdir&gt;/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary    &lt;tempdir&gt;/locations/primary  1 dataset, 1/1 files sent  13.1 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   1 dataset, 1/1 files sent  13.1 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files sent to 2 locations. Catalogs updated.</span></span>
 <span><span class="va">st</span></span>
@@ -472,8 +628,8 @@ included; <code>to</code> limits them as before.</p>
 <span><span class="co">#&gt; Datasets: 2</span></span>
 <span><span class="co">#&gt;   name       kind   rows     size  files  updated           1  2</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily    table   300  31.3 kB      2  2026-11-27 18:58  =  =</span></span>
-<span><span class="co">#&gt;     monthly  table    80  13.1 kB      1  2026-11-27 18:58  =  =</span></span>
+<span><span class="co">#&gt;     daily    table   300  31.3 kB      2  2026-11-27 23:53  =  =</span></span>
+<span><span class="co">#&gt;     monthly  table    80  13.1 kB      1  2026-11-27 23:54  =  =</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 </div>
 <div class="section level2">
@@ -482,7 +638,7 @@ included; <code>to</code> limits them as before.</p>
 <p>A dataset may have changed on both sides: here
 <code>sales/daily</code> is written through a connection to the primary
 alone, and later through the connection to the first copy alone.</p>
-<div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">only_primary</span>, <span class="fu"><a href="../reference/rcs_sim_table.html">rcs_sim_table</a></span><span class="op">(</span><span class="fl">120</span>, seed <span class="op">=</span> <span class="fl">5</span><span class="op">)</span>, <span class="st">"sales/daily"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Daily sales"</span>,</span>
 <span>  description <span class="op">=</span> <span class="st">"Simulated daily sales by shop and product."</span>,</span>
@@ -514,20 +670,20 @@ last target the call stops with an error of class
 <code>rcs_error_sync_conflict</code> that lists every conflict. The
 condition’s field <code>result</code> holds the result table, so a
 script can inspect it.</p>
-<div class="sourceCode" id="cb23"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb34"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary</span></span>
-<span><span class="co">#&gt;   locations.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the primary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary locations.</span></span>
 <span><span class="co">#&gt; <span style="color: #BB0000;">✖</span> secondary  &lt;tempdir&gt;/locations/copy-1   1 conflict, newer here: "sales/daily"</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   1 dataset, 2/2 files sent  24.7 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files sent to 1 location. Catalogs updated.</span></span>
 <span><span class="co">#&gt; Warning: `store_sync()` replaced 1 version held by the target locations:</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> '&lt;tempdir&gt;/locations/copy-2': "sales/daily" version 0f1993a2e5855aa8 (updated</span></span>
-<span><span class="co">#&gt;   2026-11-27 18:58:52) replaced by version 98d066b5654644d4 (updated 2026-11-27 18:58:57).</span></span>
+<span><span class="co">#&gt;   2026-11-27 23:53:55) replaced by version 98d066b5654644d4 (updated 2026-11-27 23:54:02).</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00; font-weight: bold;">Error</span><span style="font-weight: bold;"> in `store_sync()`:</span></span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> 1 dataset was not copied: the target holds a newer version.</span></span>
 <span><span class="co">#&gt; <span style="color: #BB0000;">✖</span> '&lt;tempdir&gt;/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated</span></span>
-<span><span class="co">#&gt;   2026-11-27 18:58:58) is newer than the source's version 98d066b5654644d4 (updated 2026-11-27 18:58:57).</span></span>
+<span><span class="co">#&gt;   2026-11-27 23:54:03) is newer than the source's version 98d066b5654644d4 (updated 2026-11-27 23:54:02).</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> The other copies and deletions were made.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Run with `force = TRUE` to copy the source over it, or sync from the location that holds the newer version.</span></span></code></pre></div>
 <p>Conflicts are detected by the times of the last writes recorded in
@@ -536,16 +692,16 @@ Decide which version to keep: to keep the primary’s,
 <code>force = TRUE</code> copies it over the newer one, and the warning
 names the version that was replaced. To keep the copy’s, sync from the
 copy instead.</p>
-<div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, force <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 2 datasets from the primary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary</span></span>
-<span><span class="co">#&gt;   locations.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the primary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/primary</span> to 2 secondary locations.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-1   1 dataset, 2/2 files sent  24.7 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   up to date</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files sent to 1 location. Catalogs updated.</span></span>
 <span><span class="co">#&gt; Warning: `store_sync()` replaced 1 version held by the target locations:</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> '&lt;tempdir&gt;/locations/copy-1': "sales/daily" version 7f31826d9513c336 (updated</span></span>
-<span><span class="co">#&gt;   2026-11-27 18:58:58) replaced by version 98d066b5654644d4 (updated 2026-11-27 18:58:57).</span></span></code></pre></div>
+<span><span class="co">#&gt;   2026-11-27 23:54:03) replaced by version 98d066b5654644d4 (updated 2026-11-27 23:54:02).</span></span></code></pre></div>
 <p>When the source is the newer side, the copy goes ahead without
 <code>force</code>; the warning (class
 <code>rcs_warning_sync_overwrite</code>) still lists every target
@@ -563,14 +719,15 @@ after the copies; history versions are kept, as with
 the deletions too.</p>
 <p>Here <code>sales/monthly</code> is deleted on the first copy only,
 then the deletion is synced from there:</p>
-<div class="sourceCode" id="cb25"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb36"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_delete.html">store_delete</a></span><span class="op">(</span><span class="va">offline</span>, <span class="st">"sales/monthly"</span>, confirm <span class="op">=</span> <span class="st">"sales/monthly"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Deleting <span style="color: #0000BB;">"sales/monthly"</span> and its index table from every location, keeping its history.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/locations/copy-1  2 files deleted  13.1 kB</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> <span style="color: #0000BB;">"sales/monthly"</span> is removed from 1 location.</span></span>
 <span><span class="fu"><a href="../reference/store_refresh.html">store_refresh</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, from <span class="op">=</span> <span class="va">copy_1</span>, delete <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 1 dataset from the secondary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span> to 2 locations.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the secondary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span> to 2 locations.</span></span>
 <span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> primary    &lt;tempdir&gt;/locations/primary  1 dataset kept, delete on primary needs</span></span>
 <span><span class="co">#&gt;   force: "sales/monthly"</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   1 dataset deleted: "sales/monthly"</span></span>
@@ -580,9 +737,10 @@ then the deletion is synced from there:</p>
 from the primary, the truth of the store, also needs
 <code>force = TRUE</code>. Until then the result lists it in the column
 <code>kept</code>.</p>
-<div class="sourceCode" id="cb26"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb37"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, from <span class="op">=</span> <span class="va">copy_1</span>, delete <span class="op">=</span> <span class="cn">TRUE</span>, force <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing 1 dataset from the secondary <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span> to 2 locations.</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Syncing the datasets already held by each secondary location, from the secondary</span></span>
+<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/locations/copy-1</span> to 2 locations.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary    &lt;tempdir&gt;/locations/primary  1 dataset deleted: "sales/monthly"</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> secondary  &lt;tempdir&gt;/locations/copy-2   up to date</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> 1 dataset deleted in 1 location.</span></span>
@@ -596,7 +754,7 @@ from the primary, the truth of the store, also needs
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated           1  2</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   120  24.7 kB      2  2026-11-27 18:58  =  =</span></span>
+<span><span class="co">#&gt;     daily  table   120  24.7 kB      2  2026-11-27 23:54  =  =</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 <p>Deletions run also when conflicts were found, and are reported with
 them.</p>
@@ -607,7 +765,7 @@ them.</p>
 <p>A Google Cloud Storage location is given by its address. Nothing else
 changes: the same functions work on buckets and on folders, in any
 mix.</p>
-<div class="sourceCode" id="cb27"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb38"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># A bucket alone</span></span>
 <span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span><span class="op">)</span></span>
 <span></span>
@@ -622,7 +780,11 @@ mix.</p>
 <span><span class="co"># A new, empty store in a bucket</span></span>
 <span><span class="fu"><a href="../reference/store_create.html">store_create</a></span><span class="op">(</span><span class="st">"gs://my-bucket/new-store"</span><span class="op">)</span></span></code></pre></div>
 <p>Data are streamed: a read with filters fetches only the files and
-blocks of rows it needs, without downloading whole datasets.</p>
+blocks of rows it needs, without downloading whole datasets. The
+exception is a local secondary of a bucket: there
+<code><a href="../reference/store_read.html">store_read()</a></code> first copies the whole dataset to the local
+folder, up to a size limit, and then reads from the copy (see “Local
+working copies of a bucket”).</p>
 <div class="section level3">
 <h3 id="credentials">Credentials<a class="anchor" aria-label="anchor" href="#credentials"></a>
 </h3>
@@ -670,7 +832,7 @@ login; <code>token</code> is an access token obtained elsewhere;
 is called. <code>auth</code> accepts such an object, the path of a key
 file, or a list named by address that gives each location its own
 credential (locations left out use the default lookup):</p>
-<div class="sourceCode" id="cb29"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb40"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># A service account for every bucket of the connection</span></span>
 <span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>,</span>
 <span>  auth <span class="op">=</span> <span class="fu"><a href="../reference/rcs_auth_gcs.html">rcs_auth_gcs</a></span><span class="op">(</span>key <span class="op">=</span> <span class="st">"~/keys/reader.json"</span><span class="op">)</span></span>
@@ -694,7 +856,7 @@ its issuer allows, usually an hour. Asking for the same source twice
 gives the same object, with its token. Printing a credential never
 contacts the network and never shows a secret; the identity (the
 account’s e-mail) is known after the first token:</p>
-<div class="sourceCode" id="cb30"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb41"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/rcs_auth_gcs.html">rcs_auth_gcs</a></span><span class="op">(</span>token <span class="op">=</span> <span class="st">"&lt;an access token&gt;"</span><span class="op">)</span></span>
 <span><span class="co">#&gt; &lt;rcs_auth_gcs&gt;</span></span>
 <span><span class="co">#&gt; Source:   an access token given to rcs_auth_gcs(token = )</span></span>
@@ -722,7 +884,7 @@ refresh it.</p>
 with a small probe and reports, without stopping, which work. Local
 folders need no credentials; each local location gives one row (the
 column <code>location</code>, the address, is left out here):</p>
-<div class="sourceCode" id="cb31"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb42"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="../reference/store_auth_check.html">store_auth_check</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span><span class="op">[</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"client"</span>, <span class="st">"ok"</span>, <span class="st">"note"</span><span class="op">)</span><span class="op">]</span></span>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 3 × 3</span></span></span>
 <span><span class="co">#&gt;   client ok    note                               </span></span>
@@ -735,7 +897,7 @@ up the catalog file, GDAL opens the first raster of the location
 (<code>ok</code> is <code>NA</code> when there is none), and DuckDB
 counts the rows of the catalog (<code>NA</code> when duckdb is not
 installed):</p>
-<div class="sourceCode" id="cb32"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb43"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span><span class="op">)</span></span>
 <span><span class="fu"><a href="../reference/store_auth_check.html">store_auth_check</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></code></pre></div>
 <p>When a location cannot be reached, the error names the credential in
@@ -753,7 +915,7 @@ cannot be reached”).</p>
 for its own writes, and a dataset for itself (see
 <code><a href="../articles/rcs.html">vignette("rcs")</a></code>). This store keeps no history by default; a
 connection can keep it for its own writes:</p>
-<div class="sourceCode" id="cb33"><pre class="downlit sourceCode r">
+<div class="sourceCode" id="cb44"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st_keep</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">primary</span>, secondary <span class="op">=</span> <span class="va">copy_1</span>, history <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="va">st_keep</span></span>
 <span><span class="co">#&gt; ── rcs store ───────────────────────────────────────────────────────────────────</span></span>
@@ -764,7 +926,7 @@ connection can keep it for its own writes:</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated           1</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   120  24.7 kB      2  2026-11-27 18:58  =</span></span>
+<span><span class="co">#&gt;     daily  table   120  24.7 kB      2  2026-11-27 23:54  =</span></span>
 <span><span class="co">#&gt; Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span></span></code></pre></div>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

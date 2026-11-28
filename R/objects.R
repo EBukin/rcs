@@ -89,6 +89,7 @@ validate_location <- function(x, arg = rlang::caller_arg(x), call = caller_env()
 #' | `history` | the connection's history override: `TRUE`, `FALSE`, or `NULL` to use the store's default |
 #' | `store_history` | the store's default, from `_store.json` of the primary; `FALSE` when the file is absent |
 #' | `connected_at` | `POSIXct`, UTC; set again by `store_refresh()` |
+#' | `copy_on_read` | `TRUE` or `FALSE`: whether `store_read()` copies to local secondaries (`store_connect(copy_on_read = )`); kept by `store_refresh()` |
 #'
 #' Read fields with `st$primary`; change a location only through
 #' `store_set_location()`.
@@ -99,6 +100,7 @@ validate_location <- function(x, arg = rlang::caller_arg(x), call = caller_env()
 #' @param history `TRUE`, `FALSE` or `NULL`.
 #' @param store_history `TRUE` or `FALSE`.
 #' @param connected_at `POSIXct`.
+#' @param copy_on_read `TRUE` or `FALSE`.
 #' @param x Object to validate.
 #' @param arg,call Used in the error message.
 #' @return `new_store()`: the object, validated. `validate_store()`: `x`,
@@ -107,13 +109,15 @@ validate_location <- function(x, arg = rlang::caller_arg(x), call = caller_env()
 #'   clear message.
 #' @noRd
 new_store <- function(primary, secondary = list(), history = NULL,
-                      store_history = FALSE, connected_at = now_utc()) {
+                      store_history = FALSE, connected_at = now_utc(),
+                      copy_on_read = TRUE) {
   st <- structure(new.env(parent = emptyenv()), class = "rcs_store")
   st$primary <- primary
   st$secondary <- unname(secondary)
   st$history <- history
   st$store_history <- store_history
   st$connected_at <- connected_at
+  st$copy_on_read <- copy_on_read
   # the validator returns invisibly; store_connect() must print at the console
   validate_store(st)
   st
@@ -152,6 +156,9 @@ validate_store <- function(x, arg = rlang::caller_arg(x), call = caller_env()) {
   }
   if (!inherits(x$connected_at, "POSIXct")) {
     fail("{.field connected_at} must be a time.")
+  }
+  if (!rlang::is_bool(x$copy_on_read)) {
+    fail("{.field copy_on_read} must be {.code TRUE} or {.code FALSE}.")
   }
   invisible(x)
 }

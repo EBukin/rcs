@@ -17,7 +17,7 @@ groups are read until n rows are found or the dataset is exhausted."></head><bod
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -143,6 +143,8 @@ geometry, with at most <code>n</code> rows.</p>
 sorted (by key, or spatially by H3 cell), so the rows of one row group
 are alike, and the sample covers only as many clusters as row groups
 were read. Use it to look at data, not to estimate.</p>
+<p>Unlike <code><a href="store_read.html">store_read()</a></code>, it never copies the dataset to a secondary
+location.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -159,7 +161,7 @@ were read. Use it to look at data, not to estimate.</p>
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 2,000 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-sample  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  89.1 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  89.1 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_sample</span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>, n <span class="op">=</span> <span class="fl">5</span>, <span class="va">qty</span> <span class="op">&gt;</span> <span class="fl">10</span>, seed <span class="op">=</span> <span class="fl">42</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 5 × 15</span></span>

@@ -12,7 +12,8 @@
 #' @param name One of `"rcs.quiet"`, `"rcs.trace"`, `"rcs.staging_dir"`,
 #'   `"rcs.chunk_size"`, `"rcs.workers"`, `"rcs.lock_timeout"`,
 #'   `"rcs.record_writer"`, `"rcs.print_rows"`, `"rcs.duckdb_batch_rows"`,
-#'   `"rcs.duckdb_stream"`, `"rcs.s2_rebuild_tol"`.
+#'   `"rcs.duckdb_stream"`, `"rcs.s2_rebuild_tol"`,
+#'   `"rcs.copy_on_read_max_bytes"`.
 #' @return The option's value, or its default when unset. Aborts (internal
 #'   error) on an unknown name.
 #' @noRd
@@ -30,6 +31,7 @@ rcs_option <- function(name) {
     rcs.duckdb_batch_rows = 5e5,
     rcs.duckdb_stream = TRUE,
     rcs.s2_rebuild_tol = 1e-3,
+    rcs.copy_on_read_max_bytes = 2e9,
     cli::cli_abort("Unknown option {.val {name}}.", .internal = TRUE)
   )
   getOption(name, default)

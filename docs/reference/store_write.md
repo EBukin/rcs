@@ -532,8 +532,10 @@ uploaded files are reused when the call is repeated (and removed by
 [`store_prune()`](https://ebukin.github.io/rcs/reference/store_prune.md)
 otherwise). If a secondary fails, the call warns, continues with the
 next location and reports the secondary as behind;
+`store_sync(st, datasets = "<name>")` repairs it, or
+`store_sync(st, all = TRUE)` for every dataset (a plain
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-repairs it.
+refreshes only the datasets a secondary already holds).
 
 ## See also
 
@@ -560,9 +562,9 @@ store_write(st, sales, "sales/daily",
 )
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  2/2
-#>   files sent  27.9 kB  0.2s
+#>   files sent  27.9 kB  0.1s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     2/2
-#>   files sent  27.9 kB  0.2s
+#>   files sent  27.9 kB  0.1s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 
 # The same data again: nothing is uploaded
@@ -591,9 +593,9 @@ store_write(st, year_2024, "sales/daily",
 #> • year = 2024: 97 rows -> 97 rows
 #> ℹ Writing "sales/daily": 200 rows in 2 files (partition year).
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/2
-#>   files sent  13.9 kB  0.2s
+#>   files sent  13.9 kB  0.1s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/2
-#>   files sent  13.9 kB  0.2s
+#>   files sent  13.9 kB  0.1s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 st
 #> ── rcs store ───────────────────────────────────────────────────────────────────
@@ -604,7 +606,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated           1
 #>   sales/
-#>     daily  table   200  27.9 kB      2  2026-11-27 13:56  =
+#>     daily  table   200  27.9 kB      2  2026-11-27 18:51  =
 #> Secondary copies: = same, ≠ differs, – missing, ? unavailable.
 
 # A class map: the codes go into the file, the legend and the colours
@@ -643,9 +645,9 @@ if (requireNamespace("terra", quietly = TRUE)) {
 }
 #> ℹ Writing "grids/cover": 4,800 cells in 1 file.
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/1
-#>   files sent  1.9 kB  0.2s
+#>   files sent  1.9 kB  0.1s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/1
-#>   files sent  1.9 kB  0.2s
+#>   files sent  1.9 kB  0.1s
 #> ✔ MD5 identical for 1 file in 2 locations. Catalogs updated.
 #> # A tibble: 1 × 4
 #>   name  type  r_type                                            description
@@ -653,7 +655,7 @@ if (requireNamespace("terra", quietly = TRUE)) {
 #> 1 cover INT1U raster layer (60 x 80 cells, nodata 0, 5 classes) NA         
 #> ℹ Writing "grids/cover_zstd": 4,800 cells in 1 file.
 #> ✔ primary    /tmp/Rtmp/rcs-example-write/primary  1/1
-#>   files sent  1.6 kB  0.2s
+#>   files sent  1.6 kB  0.1s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-write/copy     1/1
 #>   files sent  1.6 kB  0.1s
 #> ✔ MD5 identical for 1 file in 2 locations. Catalogs updated.

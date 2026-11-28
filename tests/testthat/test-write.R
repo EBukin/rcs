@@ -1311,6 +1311,30 @@ test_that("a secondary failing mid-write warns and is reported behind", {
   expect_store_valid(st, orphans_ok = TRUE)
 })
 
+test_that("a create that fails on a secondary names the dataset in its hint, and store_sync(datasets = ) repairs it", {
+  # A-T12 (red + guard; plan 0005, D-A7). Red: the hint says only "Run
+  # `store_sync()` to bring it up to date." Guard: store_sync(datasets = )
+  # copies the dataset to the secondary that missed it.
+  skip_below_level("default")
+  local_no_wait()
+  s <- local_store(secondaries = 2L)
+  stub <- local_backend_stub(uri = s$paths[[2]], generic = "be_put", path = "part-", fail_at = 1:3)
+  st <- store_connect(s$paths[[1]], secondary = s$paths[-1])
+  local_snapshot_output()
+  expect_warning(
+    write_sales(st, sales_data()),
+    regexp = '(?s)datasets = "sales/daily".*all = TRUE', perl = TRUE,
+    class = "rcs_warning_secondary_behind"
+  )
+
+  stub$fail_at <- NULL
+  stub_reset(stub)
+  out <- suppressMessages(store_sync(st, datasets = "sales/daily"))
+  expect_identical(out$status, c("synced", "same"))
+  expect_true(all(store_status(st)$status == "same"))
+  expect_store_valid(st)
+})
+
 test_that("the write guard aborts when the catalog changed during the write", {
   skip_below_level("default")
   s <- local_store()

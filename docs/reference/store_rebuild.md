@@ -67,7 +67,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-rebuild  2/2
-#>   files sent  23.8 kB  0.2s
+#>   files sent  23.8 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 # The catalogs are lost
 unlink(file.path(location, "_catalog.parquet"))
@@ -83,6 +83,6 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 13:56
+#>     daily  table   100  23.8 kB      2  2026-11-27 18:51
 unlink(location, recursive = TRUE)
 ```

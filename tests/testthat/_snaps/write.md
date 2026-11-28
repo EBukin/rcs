@@ -315,14 +315,14 @@
     Condition
       Warning:
       Writing "sales/daily" to the secondary location '<root>/secondary1' failed; it is behind.
-      i Run `store_sync()` to bring it up to date.
+      i Run `store_sync(st, datasets = "sales/daily")` to bring it up to date, or `store_sync(st, all = TRUE)` for every dataset.
       Caused by error in `abort_stub()`:
       ! Injected failure at backend call <n> (be_put).
     Message
       x secondary  <root>/secondary1  behind: Injected failure at backend call <n> (be_put).
       v secondary  <root>/secondary2  2/2 files sent  <bytes>  <time>
       v MD5 identical for 2 files in 2 locations. Catalogs updated.
-      ! 1 secondary location is behind; run `store_sync()` to bring it up to date.
+      ! 1 secondary location is behind; run `store_sync(st, datasets = "sales/daily")` to bring it up to date, or `store_sync(st, all = TRUE)` for every dataset.
 
 # the write guard aborts when the catalog changed during the write
 

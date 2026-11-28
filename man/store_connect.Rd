@@ -10,7 +10,8 @@ store_connect(
   env = "STORE",
   history = NULL,
   create = FALSE,
-  auth = NULL
+  auth = NULL,
+  copy_on_read = TRUE
 )
 }
 \arguments{
@@ -36,6 +37,14 @@ an object made by \code{\link[=rcs_auth_gcs]{rcs_auth_gcs()}} applies to every G
 string is the path of a key file; a list named by address (as given in
 the call) gives each location any of these, and locations left out use
 the default.}
+
+\item{copy_on_read}{\code{TRUE} (the default) lets \code{\link[=store_read]{store_read()}} copy the
+current version of a dataset from a primary that is not local (a
+bucket) to the local secondaries before reading it, when it is at or
+under the size limit (see "Copy to secondary locations" in
+\code{\link[=store_read]{store_read()}}). \code{FALSE} turns this off for the connection: reads
+neither copy nor say how to copy, unless called with \code{copy = TRUE}.
+\code{\link[=store_refresh]{store_refresh()}} keeps the setting.}
 }
 \value{
 An object of class \code{rcs_store}. Print it to see its locations and
@@ -62,6 +71,10 @@ again.
 \item A location without catalogs aborts, unless \code{create = TRUE}, which
 initialises it with empty catalogs (as \code{\link[=store_create]{store_create()}} does, with the
 store's history default off).
+\item An available secondary that holds no dataset while the primary holds
+some prints a notice that it is empty, with the \code{\link[=store_sync]{store_sync()}} calls
+that fill it (\code{all = TRUE} for every dataset, \verb{datasets = } for some).
+\code{\link[=store_refresh]{store_refresh()}} does not repeat it.
 }
 
 The object has reference semantics: functions that change a location

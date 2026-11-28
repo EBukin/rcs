@@ -34,6 +34,12 @@ invisibly; for a raster, the
 [`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html),
 invisibly.
 
+## Details
+
+Unlike
+[`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md),
+it never copies the dataset to a secondary location.
+
 ## See also
 
 [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md),
@@ -50,7 +56,7 @@ store_write(st, rcs_sim_table(500), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-glimpse  2/2
-#>   files sent  38.3 kB  0.1s
+#>   files sent  38.3 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_glimpse(st, "daily")
 #> Dataset:   sales/daily (table)

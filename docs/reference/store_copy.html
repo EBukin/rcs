@@ -15,7 +15,7 @@ geospatial dataset's index table travels with it."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -106,9 +106,10 @@ unique among the datasets of <code>from</code>.</p></dd>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
     <p>Copying into the primary changes the store's current version of the
-dataset; <code><a href="store_sync.html">store_sync()</a></code> then brings the other secondaries to it. Files of
-the version the target replaces are deleted when the dataset keeps no
-history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
+dataset; <code><a href="store_sync.html">store_sync()</a></code> then brings the other secondaries that hold it to
+that version (<code>datasets = </code> or <code>all = TRUE</code> also copies it to those that
+do not). Files of the version the target replaces are deleted when the
+dataset keeps no history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -133,6 +134,10 @@ history, as in <code><a href="store_write.html">store_write()</a></code>.</p>
 <span class="r-in"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="store_connect.html">store_connect</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"primary"</span><span class="op">)</span>,</span></span>
 <span class="r-in"><span>  secondary <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Secondary <span style="color: #0000BB;">/tmp/Rtmp/rcs-example-copy/copy</span> is</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   empty.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st,</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   datasets = )` to copy some.</span>
 <span class="r-in"><span><span class="fu">store_copy</span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span>,</span></span>
 <span class="r-in"><span>  from <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"primary"</span><span class="op">)</span>, to <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/file.path.html" class="external-link">file.path</a></span><span class="op">(</span><span class="va">root</span>, <span class="st">"copy"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>

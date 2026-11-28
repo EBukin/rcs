@@ -157,7 +157,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   300  31.4 kB      2  2026-11-27 18:59
+#>     daily  table   300  31.4 kB      2  2026-11-27 23:54
 ```
 
 [`store_datasets()`](https://ebukin.github.io/rcs/reference/store_datasets.md)
@@ -170,7 +170,7 @@ datasets
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   300 31399       2 <chr [1]> 66bd1c… 2026-11-27 18:59:07
+#> 1 sales/d… table Dail…   300 31399       2 <chr [1]> 66bd1c… 2026-11-27 23:54:14
 datasets$title
 #> [1] "Daily sales"
 ```
@@ -198,9 +198,9 @@ store_describe(st, "sales/daily")
 #> Source      –
 #> Inputs      –
 #> History     not set (the connection's setting applies)
-#> Created     2026-11-27 18:59:07 UTC
-#> Updated     2026-11-27 18:59:07 UTC
-#> Written by  R 4.6.2, rcs 0.0.0.9006
+#> Created     2026-11-27 23:54:14 UTC
+#> Updated     2026-11-27 23:54:14 UTC
+#> Written by  R 4.6.2, rcs 0.0.0.9007
 #> 
 #> Locations:
 #>   primary    <tempdir>/my-store
@@ -495,12 +495,7 @@ store_write(st, fix, "sales/daily",
 #> ℹ Updating "sales/daily": 1 partition replaced, 0 added, 1 kept.
 #> • year = 2024: 144 rows -> 144 rows
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> Warning: Cannot delete 2 replaced files in <tempdir>/my-store.
-#> ℹ They are no longer named by the catalogs; `store_prune()` removes them later.
-#> Caused by error in `be_delete()`:
-#> ! Cannot delete 1 file in <tempdir>/my-store:
-#>   <tempdir>/my-store/sales/daily/year=2024/part-66bd1cd34236c66b.parquet.
-#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.5 kB  0.3s
+#> ✔ primary  <tempdir>/my-store  1/2 files sent  15.5 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -532,7 +527,7 @@ store_write(sth, sales, "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 300 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/store-with-history  2/2 files sent  31.4 kB  0.2s
+#> ✔ primary  <tempdir>/store-with-history  2/2 files sent  31.4 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_write(sth, fix, "sales/daily",
   title = "Daily sales",

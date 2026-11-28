@@ -487,12 +487,13 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 5. When the work is ready to share, add a bucket as a secondary location
-   and copy the store there with `store_sync()` (see
-   `vignette("locations")`). Only then are cloud credentials needed.
+   and copy the whole store there with `store_sync(all = TRUE)` (see
+   `vignette("locations")`; a plain `store_sync()` copies nothing to an
+   empty secondary). Only then are cloud credentials needed.
 
 ```{r, eval = FALSE}
 st <- store_connect(path, secondary = "gs://my-bucket/store", create = TRUE)
-store_sync(st)
+store_sync(st, all = TRUE)
 ```
 
 Afterwards every write reaches both locations, and reads, DuckDB views

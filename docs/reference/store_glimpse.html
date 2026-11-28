@@ -15,7 +15,7 @@ as store_read() returns them."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -97,6 +97,11 @@ that is unique in the store.</p></dd>
 invisibly; for a raster, the <code><a href="https://rspatial.github.io/terra/reference/SpatRaster-class.html" class="external-link">terra::SpatRaster</a></code>, invisibly.</p>
     </div>
     <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>Unlike <code><a href="store_read.html">store_read()</a></code>, it never copies the dataset to a secondary
+location.</p>
+    </div>
+    <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
     <div class="dont-index"><p><code><a href="store_read.html">store_read()</a></code>, <code><a href="store_describe.html">store_describe()</a></code>.</p></div>
     </div>
@@ -111,7 +116,7 @@ invisibly; for a raster, the <code><a href="https://rspatial.github.io/terra/ref
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 500 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-glimpse  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.1s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_glimpse</span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Dataset:   sales/daily (table)</span>

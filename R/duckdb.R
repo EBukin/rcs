@@ -50,7 +50,8 @@ duckdb_qualified <- function(con, name) {
 #' columns and row groups the query needs. The file list comes from the
 #' catalog held by the connection `st`, so the views show the versions it
 #' knows: after [store_refresh()] call `store_duckdb()` again. One message
-#' names the views made.
+#' names the views made. Unlike [store_read()], it never copies a dataset
+#' to a secondary location.
 #'
 #' The views are queried with SQL (`DBI::dbGetQuery()`), with dbplyr
 #' (`dplyr::tbl(con, DBI::Id(schema = , table = ))`, or

@@ -21,16 +21,27 @@
 #'
 #' Copies datasets from one location, the source (by default the primary),
 #' to the other locations of the connection: every dataset whose copy in a
-#' target is missing or differs from the source's (another version, or
-#' another entry). Only the files a target lacks are sent, each verified by
-#' MD5; the catalogs of a target are switched last, so that its readers
-#' always see a complete version. A geospatial dataset's index table
-#' travels with it.
+#' target differs from the source's (another version, or another entry) or,
+#' where the scope below allows it, is missing. Only the files a target
+#' lacks are sent, each verified by MD5; the catalogs of a target are
+#' switched last, so that its readers always see a complete version. A
+#' geospatial dataset's index table travels with it.
 #'
 #' With `from` set to a secondary location, work done there (for example
 #' through a connection whose primary was that location, while the primary
 #' could not be reached) is brought to the primary and to the other
 #' secondaries.
+#'
+#' @section Scope:
+#' By default (`datasets = NULL`, `all = FALSE`) a secondary location
+#' receives only the datasets it already holds, at any version: they are
+#' brought to the source's version, and nothing new is copied there. The
+#' call says which datasets were not copied to each secondary, with the
+#' number of files and the bytes a full sync would send at most (an empty
+#' secondary is named as such). `all = TRUE` copies every dataset of the
+#' source; `datasets = ` copies the named datasets, whether or not a
+#' secondary holds them. The primary, as a target (`from` a secondary),
+#' always receives every dataset of the source.
 #'
 #' @section Conflicts:
 #' When a target holds another version of a dataset and its entry was
@@ -63,6 +74,10 @@
 #'   datasets (full names, or last parts that are unique in the source).
 #'   With `delete = TRUE` it restricts the deletions too, and a full name
 #'   the source does not hold is accepted.
+#' @param all `TRUE` copies every dataset of the source to every target,
+#'   including datasets a secondary does not hold. `FALSE` (the default)
+#'   refreshes in a secondary only the datasets it already holds (see
+#'   "Scope"). Cannot be combined with `datasets`.
 #' @param to `NULL` for every location other than the source, or the
 #'   addresses of some of them.
 #' @param from `NULL` for the primary, or the address of the location to
@@ -79,8 +94,12 @@
 #'   `"behind"` when it failed, `"unavailable"`, or `"to sync"` with
 #'   `dry_run = TRUE`), the list columns `datasets` (copied, or to copy),
 #'   `deleted` (deleted, or to delete), `kept` (not deleted from the primary
-#'   without `force`) and `conflicts`, then `files` (files sent, or to send),
-#'   `bytes` and `seconds`.
+#'   without `force`) and `conflicts`; then the datasets left out by the
+#'   default scope: `skipped` (a list column of names), `skipped_files` and
+#'   `skipped_bytes` (the files of those datasets the target lacks, and their
+#'   size: at most what `all = TRUE` would send); then `files` (files sent,
+#'   or to send), `bytes` and `seconds`. A status of `"same"` can go with
+#'   skipped datasets.
 #' @seealso [store_status()] to compare the locations, [store_copy()] for one
 #'   dataset between any two locations; `vignette("locations")` for syncs
 #'   from a secondary, conflicts and deletions.
@@ -99,8 +118,13 @@
 #'   secondary = file.path(root, "copy")
 #' )
 #' store_status(st)
-#' store_sync(st, dry_run = TRUE)
+#'
+#' # The secondary is empty: a default sync copies nothing and says so
 #' store_sync(st)
+#'
+#' # Every dataset
+#' store_sync(st, all = TRUE, dry_run = TRUE)
+#' store_sync(st, all = TRUE)
 #'
 #' # Work done on the secondary alone, brought back to the primary
 #' offline <- store_connect(file.path(root, "copy"))
@@ -110,17 +134,27 @@
 #' store_sync(st, from = file.path(root, "copy"))
 #' store_status(st)
 #' unlink(root, recursive = TRUE)
-store_sync <- function(st, datasets = NULL, to = NULL, from = NULL, delete = FALSE, force = FALSE,
-                       dry_run = FALSE) {
+store_sync <- function(st, datasets = NULL, all = FALSE, to = NULL, from = NULL, delete = FALSE,
+                       force = FALSE, dry_run = FALSE) {
   validate_store(st)
   local_trace("store_sync")
   call <- rlang::current_env()
+  check_flag(all, call = call)
   check_flag(delete, call = call)
   check_flag(force, call = call)
   check_flag(dry_run, call = call)
   if (!is.null(datasets) && (!is.character(datasets) || length(datasets) == 0 || anyNA(datasets))) {
     cli::cli_abort(
       "{.arg datasets} must be {.code NULL} or a character vector of dataset names, not {.obj_type_friendly {datasets}}.",
+      class = "rcs_error_argument", call = call
+    )
+  }
+  if (all && !is.null(datasets)) {
+    cli::cli_abort(
+      c(
+        "{.code all = TRUE} cannot be combined with {.arg datasets}.",
+        i = "Use {.code all = TRUE} to copy every dataset, or {.arg datasets} to copy some."
+      ),
       class = "rcs_error_argument", call = call
     )
   }
@@ -137,11 +171,19 @@ store_sync <- function(st, datasets = NULL, to = NULL, from = NULL, delete = FAL
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
   ctx <- write_context(st, dir)
   ctx$primary <- source$backend
-  units <- lapply(units, sync_fresh_manifests, dir = dir, now = now)
   restrict <- if (is.null(datasets)) NULL else names
+  # Fresh manifests only for the units a plan copies, written once each.
+  manifests <- new.env(parent = emptyenv())
+  with_manifests <- function(unit) {
+    if (is.null(manifests[[unit$dataset]])) {
+      manifests[[unit$dataset]] <- sync_fresh_manifests(unit, dir = dir, now = now)
+    }
+    manifests[[unit$dataset]]
+  }
 
   widths <- write_widths(store_locations(st))
-  sync_header(st, source, held, targets, dry_run)
+  restricted <- is.null(datasets) && !all && any(targets != st$primary$uri)
+  sync_header(st, source, held, targets, dry_run, restricted)
   results <- list()
   for (uri in targets) {
     role <- location_role(st, uri)
@@ -150,13 +192,26 @@ store_sync <- function(st, datasets = NULL, to = NULL, from = NULL, delete = FAL
         message = failed[[uri]]
       )
     } else {
-      plan <- sync_plan(st, source, current_location(st, uri), units, restrict, delete, force)
-      if (dry_run) sync_plan_location(st, uri, plan) else sync_location(st, uri, plan, ctx, now)
+      target <- current_location(st, uri)
+      plan <- sync_plan(st, source, target, units, restrict, delete, force, all)
+      lacking <- files_lacking(plan$skipped, target)
+      result <- if (dry_run) {
+        sync_plan_location(st, uri, plan)
+      } else {
+        plan$copy <- lapply(plan$copy, with_manifests)
+        sync_location(st, uri, plan, ctx, now)
+      }
+      result$skipped <- unit_names(plan$skipped)
+      result$skipped_files <- lacking$files
+      result$skipped_bytes <- lacking$bytes
+      result$empty <- !any(!is_index_entry(target$catalog))
+      result
     }
     sync_line(result, widths)
     results[[length(results) + 1L]] <- result
   }
   out <- vctrs::vec_rbind(sync_empty(), !!!lapply(results, sync_result_row))
+  sync_skipped_block(results)
   sync_footer(st, out, dry_run)
   if (!dry_run) {
     sync_warn_overwrite(results)
@@ -367,17 +422,18 @@ landed_anyway <- function(st, location, sets, drops, error) {
 #'   the start of the call.
 #' @param units The units of the source to sync.
 #' @param restrict `NULL`, or the dataset names deletions are restricted to.
-#' @param delete,force As in `store_sync()`.
+#' @param delete,force,all As in `store_sync()`.
 #' @return A list: `copy` (units to land), `conflicts` and `overwritten`
 #'   (lists of version records: `dataset`, `target_version`,
 #'   `target_updated`, `source_version`, `source_updated`), `delete` and
-#'   `kept` (dataset names).
+#'   `kept` (dataset names), `skipped` (units left out by `sync_scope()`).
 #' @noRd
-sync_plan <- function(st, source, target, units, restrict, delete, force) {
+sync_plan <- function(st, source, target, units, restrict, delete, force, all) {
+  scope <- sync_scope(st, target, units, restrict, all)
   copy <- list()
   conflicts <- list()
   overwritten <- list()
-  for (unit in units) {
+  for (unit in scope$keep) {
     if (!unit_needed(target, unit)) next
     entry <- unit$sets[[1]]$entry
     current <- catalog_entry(target$catalog, unit$dataset)
@@ -407,8 +463,51 @@ sync_plan <- function(st, source, target, units, restrict, delete, force) {
   list(
     copy = copy, conflicts = conflicts, overwritten = overwritten,
     delete = if (keep) character() else gone,
-    kept = if (keep) gone else character()
+    kept = if (keep) gone else character(),
+    skipped = scope$skip
   )
+}
+
+#' Which units a sync may copy to one target
+#'
+#' The default scope of `store_sync()`: a secondary target receives only the
+#' units whose dataset its held catalog lists, at any version (an index
+#' table alone does not count). The primary receives every unit, and so does
+#' every target with `all = TRUE` or with `datasets` given.
+#'
+#' @param st An `rcs_store`.
+#' @param target The target `rcs_location`.
+#' @param units The units of the source.
+#' @param restrict `NULL`, or the dataset names given to `store_sync()`.
+#' @param all As in `store_sync()`.
+#' @return A list: `keep` and `skip`, two lists of units.
+#' @noRd
+sync_scope <- function(st, target, units, restrict, all) {
+  if (all || !is.null(restrict) || identical(target$uri, st$primary$uri)) {
+    return(list(keep = units, skip = list()))
+  }
+  catalog <- target$catalog
+  held <- catalog$dataset[!is_index_entry(catalog)]
+  in_target <- vapply(units, function(u) u$dataset %in% held, logical(1))
+  list(keep = units[in_target], skip = units[!in_target])
+}
+
+#' The files of some units that a target lacks
+#'
+#' Compares path and MD5 with the target's held files table only: no
+#' history and no backend call, so the result is an upper bound of what a
+#' sync would send.
+#'
+#' @param units A list of units (index tables included).
+#' @param target An `rcs_location`.
+#' @return A list: `files` (integer) and `bytes` (numeric).
+#' @noRd
+files_lacking <- function(units, target) {
+  sets <- unlist(lapply(units, function(u) u$sets), recursive = FALSE)
+  rows <- vctrs::vec_rbind(files_empty(), !!!lapply(sets, function(s) s$files))
+  key <- paste(rows$path, rows$md5)
+  rows <- rows[!duplicated(key) & !key %in% paste(target$files$path, target$files$md5), ]
+  list(files = nrow(rows), bytes = sum(as.numeric(rows$bytes)))
 }
 
 unit_names <- function(units) {
@@ -537,14 +636,16 @@ sync_result <- function(uri, role, status, datasets = character(), deleted = cha
   list(
     location = uri, role = role, status = status, datasets = datasets, deleted = deleted,
     kept = kept, conflicts = conflicts, overwritten = overwritten, files = files, total = total,
-    bytes = bytes, seconds = seconds, message = message
+    bytes = bytes, seconds = seconds, message = message,
+    skipped = character(), skipped_files = 0L, skipped_bytes = 0, empty = FALSE
   )
 }
 
 sync_empty <- function() {
   tibble::tibble(
     location = character(), status = character(), datasets = list(), deleted = list(),
-    kept = list(), conflicts = list(), files = double(), bytes = double(), seconds = double()
+    kept = list(), conflicts = list(), skipped = list(), skipped_files = integer(),
+    skipped_bytes = double(), files = double(), bytes = double(), seconds = double()
   )
 }
 
@@ -552,6 +653,8 @@ sync_result_row <- function(r) {
   tibble::tibble(
     location = r$location, status = r$status, datasets = list(r$datasets),
     deleted = list(r$deleted), kept = list(r$kept), conflicts = list(record_names(r$conflicts)),
+    skipped = list(r$skipped), skipped_files = as.integer(r$skipped_files),
+    skipped_bytes = as.numeric(r$skipped_bytes),
     files = as.numeric(r$files), bytes = as.numeric(r$bytes), seconds = as.numeric(r$seconds)
   )
 }
@@ -561,7 +664,9 @@ target_noun <- function(st, targets) {
   if (st$primary$uri %in% targets) "location" else "secondary location"
 }
 
-sync_header <- function(st, source, names, targets, dry_run) {
+# `restricted`: the default scope applies to at least one secondary target,
+# so the count of the source's datasets is not what is synced.
+sync_header <- function(st, source, names, targets, dry_run, restricted = FALSE) {
   n <- length(names)
   k <- length(targets)
   uri <- source$uri
@@ -570,7 +675,34 @@ sync_header <- function(st, source, names, targets, dry_run) {
   if (dry_run) {
     rcs_inform(c(i = "Dry run: nothing is changed."))
   }
-  rcs_inform(c(i = "Syncing {n} dataset{?s} from the {role} {.path {uri}} to {k} {noun}."))
+  if (restricted) {
+    rcs_inform(c(i = "Syncing the datasets already held by each secondary location, from the {role} {.path {uri}} to {k} {noun}."))
+  } else {
+    rcs_inform(c(i = "Syncing {n} dataset{?s} from the {role} {.path {uri}} to {k} {noun}."))
+  }
+}
+
+# What the default scope left out, one line per secondary that skipped
+# datasets (dry runs too); nothing when no target skipped any.
+sync_skipped_block <- function(results) {
+  results <- Filter(function(r) length(r$skipped) > 0, results)
+  if (length(results) == 0) {
+    return(invisible())
+  }
+  plural <- function(n, what) paste0(format_count(n), " ", what, if (n == 1) "" else "s")
+  lines <- vapply(results, function(r) {
+    uri <- r$location
+    what <- paste0(
+      plural(length(r$skipped), "dataset"), " not copied (",
+      plural(r$skipped_files, "file"), ", ", format_bytes(r$skipped_bytes), ")."
+    )
+    cli::format_inline(if (r$empty) "{.path {uri}} is empty: {what}" else "{.path {uri}}: {what}")
+  }, character(1))
+  rcs_inform(c(
+    i = "Synced only the datasets already in each secondary location.",
+    rlang::set_names(escape_braces(lines), rep("i", length(lines))),
+    " " = "Use {.code store_sync(st, all = TRUE)} to copy every dataset, or {.code datasets = } to copy some."
+  ))
 }
 
 dataset_list_text <- function(datasets, max = 5L) {
@@ -622,7 +754,14 @@ sync_line <- function(r, widths) {
     r$status,
     behind = paste0("behind: ", r$message),
     unavailable = "unavailable, skipped",
-    if (length(parts) == 0) "up to date" else paste(parts, collapse = "; ")
+    if (length(parts) > 0) {
+      paste(parts, collapse = "; ")
+    } else if (length(r$skipped) > 0) {
+      # Not "up to date": the default scope left datasets out (see the block).
+      "nothing copied"
+    } else {
+      "up to date"
+    }
   )
   bullet <- switch(r$status, behind = "x", conflict = "x", unavailable = "!", `to sync` = "*",
     if (length(r$kept) > 0) "!" else "v"
@@ -646,7 +785,7 @@ sync_footer <- function(st, out, dry_run) {
     k <- sum(lengths(out$deleted) > 0)
     rcs_inform(c(v = "{n_deleted} dataset{?s} deleted in {k} location{?s}."))
   }
-  if (all(out$status == "same") && sum(lengths(out$kept)) == 0) {
+  if (all(out$status == "same") && sum(lengths(out$kept)) == 0 && sum(lengths(out$skipped)) == 0) {
     rcs_inform(c(v = paste0("Every ", noun, " is up to date.")))
   }
   n_kept <- sum(lengths(out$kept))
@@ -721,9 +860,10 @@ sync_abort_conflicts <- function(results, out, call) {
 #' geospatial dataset's index table travels with it.
 #'
 #' Copying into the primary changes the store's current version of the
-#' dataset; [store_sync()] then brings the other secondaries to it. Files of
-#' the version the target replaces are deleted when the dataset keeps no
-#' history, as in [store_write()].
+#' dataset; [store_sync()] then brings the other secondaries that hold it to
+#' that version (`datasets = ` or `all = TRUE` also copies it to those that
+#' do not). Files of the version the target replaces are deleted when the
+#' dataset keeps no history, as in [store_write()].
 #'
 #' @param st A store connection made by [store_connect()]. It is updated in
 #'   place.
@@ -772,25 +912,15 @@ store_copy <- function(st, dataset, from, to) {
   }
   source <- current_location(st, from_uri)
   name <- resolve_in_location(source, dataset, call)
-  now <- now_utc()
   dir <- sync_staging_dir("rcs-copy")
   on.exit(unlink(dir, recursive = TRUE), add = TRUE)
-  unit <- sync_fresh_manifests(sync_unit(st, source, name), dir, now)
   ctx <- write_context(st, dir)
-  ctx$primary <- source$backend
-  entry <- unit$sets[[1]]$entry
+  entry <- catalog_entry(source$catalog, name)
   version <- entry$version
   n_files <- as.numeric(entry$n_files)
   rcs_inform(c(i = "Copying {.val {name}} (version {version}, {n_files} file{?s}) from {.path {from_uri}} to {.path {to_uri}}."))
 
-  target <- current_location(st, to_uri)
-  landed <- tryCatch(
-    land_location(st, target, unit$sets, unit$drops, unit$keep_history, ctx, now),
-    error = function(e) e
-  )
-  if (inherits(landed, "error")) {
-    landed <- landed_anyway(st, target, unit$sets, unit$drops, landed)
-  }
+  landed <- copy_unit(st, source, to_uri, name, ctx)[[1]]
   if (inherits(landed, "error")) {
     if (!inherits(landed, write_error_classes)) {
       rlang::cnd_signal(landed)
@@ -819,6 +949,140 @@ store_copy <- function(st, dataset, from, to) {
     files = as.numeric(landed$total), uploaded = as.numeric(landed$uploaded),
     bytes = as.numeric(landed$bytes), seconds = as.numeric(landed$seconds)
   ))
+}
+
+#' Copy one dataset of a source location to target locations
+#'
+#' The copy body shared by `store_copy()` and `store_read()`'s copy on read
+#' (`copy_before_read()`): builds the unit (the dataset and its index table,
+#' `sync_unit()`) once, writes its manifests anew with one `written` time,
+#' then lands it in each target with `land_location()`; a failure is passed
+#' to `landed_anyway()`. Every target shares the unit and `ctx`, so each
+#' file is downloaded from the source once. Prints nothing: each caller
+#' prints its own lines.
+#'
+#' @param st An `rcs_store`; the targets are updated in place.
+#' @param source The source `rcs_location`, with its catalogs as refreshed by
+#'   the caller.
+#' @param targets Addresses of the target locations, refreshed by the
+#'   caller.
+#' @param dataset Full name of the dataset in the source's catalog.
+#' @param ctx A write context (`write_context()`): its `dir` receives the
+#'   manifests and the downloads; its `primary` is set to the source's
+#'   backend.
+#' @return A list named by target address: the landing result of
+#'   `land_location()` (`status`, `total`, `uploaded`, `bytes`, `seconds`),
+#'   or the error condition.
+#' @noRd
+copy_unit <- function(st, source, targets, dataset, ctx) {
+  now <- now_utc()
+  ctx$primary <- source$backend
+  unit <- sync_fresh_manifests(sync_unit(st, source, dataset), ctx$dir, now)
+  out <- list()
+  for (uri in targets) {
+    target <- current_location(st, uri)
+    landed <- tryCatch(
+      land_location(st, target, unit$sets, unit$drops, unit$keep_history, ctx, now),
+      error = function(e) e
+    )
+    if (inherits(landed, "error")) {
+      landed <- landed_anyway(st, target, unit$sets, unit$drops, landed)
+    }
+    out[[uri]] <- landed
+  }
+  out
+}
+
+#' Add an old version of a dataset to the history of one location
+#'
+#' Used by `store_read(version = <old>, copy = TRUE)` (plan 0005, D-B6).
+#' Reads the target's `_history.parquet` once; when it already has rows of
+#' the version, nothing is done (history rows are never duplicated).
+#' Otherwise it informs, uploads the version's files that the target lacks
+#' with `upload_verified()`, copies the version's manifest from the source
+#' **unchanged** (its `written` time is kept: a new one would make
+#' `store_rebuild()` turn the version into the current one), and, under
+#' `write_guard()`, appends the history rows of the version, with their
+#' `replaced` times unchanged, by `location_write()`. The target's catalog
+#' and files tables are written back as they are: its current entry does
+#' not change, whether or not it holds the dataset.
+#'
+#' The history rows come from the source's `_history.parquet`; when the
+#' source holds the version as its current entry (it has no such rows),
+#' from the primary's. They are read once per call of `store_read()` and
+#' kept in `ctx`.
+#'
+#' @param st An `rcs_store`; the target is updated in place.
+#' @param source The `rcs_location` the version is read from
+#'   (`choose_location()`).
+#' @param target The target `rcs_location`, refreshed by the caller (its
+#'   `token` is the write guard's).
+#' @param dataset Full name of the dataset.
+#' @param version The old version, 16 hex characters.
+#' @param ctx A write context (`write_context()`) whose `primary` is the
+#'   source's backend: files and the manifest are downloaded from there once
+#'   for every target.
+#' @return A list: `status` (`"written"`, or `"same"` when the target's
+#'   history already has the version or no history row of it was found),
+#'   `total` (files of the version), `uploaded`, `bytes`, `seconds`. Aborts
+#'   on failure; the target's history is then unchanged.
+#' @noRd
+land_history <- function(st, source, target, dataset, version, ctx) {
+  start <- Sys.time()
+  be <- target$backend
+  same <- list(status = "same", total = 0, uploaded = 0, bytes = 0, seconds = 0)
+  history <- history_read(be)
+  if (any(history$dataset == dataset & history$version == version)) {
+    return(same)
+  }
+  rows <- land_history_rows(st, source, dataset, version, ctx)
+  if (nrow(rows) == 0) {
+    return(same)
+  }
+  files <- rows[!duplicated(rows$path), c("path", "md5")]
+  held <- paste(c(target$files$path, history$path), c(target$files$md5, history$md5))
+  todo <- files[!paste(files$path, files$md5) %in% held, ]
+  if (nrow(todo) > 0) {
+    stored <- be_md5(be, todo$path)
+    todo <- todo[is.na(stored) | stored != todo$md5, ]
+  }
+
+  from <- source$uri
+  uri <- target$uri
+  n <- nrow(todo)
+  size <- format_bytes(sum(as.numeric(rows$bytes[match(todo$path, rows$path)])))
+  rcs_inform(c(i = "Copying {.val {dataset}} (version {version}, {n} file{?s}, {size}) from {.path {from}} to the history of {.path {uri}} before reading."))
+  bytes <- upload_verified(be, todo, ctx)
+  manifest <- manifest_path(dataset, version)
+  local <- source_file(ctx, manifest, NA_character_)
+  with_retry(function() be_put(be, local, manifest))
+  verify_md5(be, manifest, md5_file(local))
+
+  guard <- write_guard(target)
+  written <- with_retry(function() {
+    location_write(target, target$catalog, target$files, vctrs::vec_rbind(history, rows))
+  })
+  guard$switched <- TRUE
+  store_set_location(st, written)
+  list(
+    status = "written", total = nrow(files), uploaded = n, bytes = bytes,
+    seconds = as.numeric(difftime(Sys.time(), start, units = "secs"))
+  )
+}
+
+# History rows of one version for `land_history()`: the source's, else (the
+# source holds the version as its current entry) the primary's; read once
+# per context.
+land_history_rows <- function(st, source, dataset, version, ctx) {
+  if (is.null(ctx$history_rows)) {
+    pick <- function(history) history[history$dataset == dataset & history$version == version, ]
+    rows <- pick(history_read(source$backend))
+    if (nrow(rows) == 0 && !identical(source$uri, st$primary$uri)) {
+      rows <- pick(history_read(st$primary$backend))
+    }
+    ctx$history_rows <- rows
+  }
+  ctx$history_rows
 }
 
 # A dataset name resolved in the catalog of one location: the full name, or

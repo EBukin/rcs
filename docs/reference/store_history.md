@@ -69,8 +69,8 @@ store_history(st, "sales/daily")
 #> # A tibble: 2 × 8
 #>   version    current written             replaced            n_files  rows bytes
 #>   <chr>      <lgl>   <dttm>              <dttm>                <int> <dbl> <dbl>
-#> 1 e359aee05… TRUE    2026-11-27 13:56:30 NA                        1   100 13733
-#> 2 9eda87d6a… FALSE   2026-11-27 13:56:30 2026-11-27 13:56:30       1   100 13733
+#> 1 e359aee05… TRUE    2026-11-27 18:51:31 NA                        1   100 13733
+#> 2 9eda87d6a… FALSE   2026-11-27 18:51:30 2026-11-27 18:51:31       1   100 13733
 #> # ℹ 1 more variable: complete <lgl>
 unlink(root, recursive = TRUE)
 ```

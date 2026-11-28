@@ -2,11 +2,11 @@
 
 Copies datasets from one location, the source (by default the primary),
 to the other locations of the connection: every dataset whose copy in a
-target is missing or differs from the source's (another version, or
-another entry). Only the files a target lacks are sent, each verified by
-MD5; the catalogs of a target are switched last, so that its readers
-always see a complete version. A geospatial dataset's index table
-travels with it.
+target differs from the source's (another version, or another entry) or,
+where the scope below allows it, is missing. Only the files a target
+lacks are sent, each verified by MD5; the catalogs of a target are
+switched last, so that its readers always see a complete version. A
+geospatial dataset's index table travels with it.
 
 ## Usage
 
@@ -14,6 +14,7 @@ travels with it.
 store_sync(
   st,
   datasets = NULL,
+  all = FALSE,
   to = NULL,
   from = NULL,
   delete = FALSE,
@@ -36,6 +37,13 @@ store_sync(
   names, or last parts that are unique in the source). With
   `delete = TRUE` it restricts the deletions too, and a full name the
   source does not hold is accepted.
+
+- all:
+
+  `TRUE` copies every dataset of the source to every target, including
+  datasets a secondary does not hold. `FALSE` (the default) refreshes in
+  a secondary only the datasets it already holds (see "Scope"). Cannot
+  be combined with `datasets`.
 
 - to:
 
@@ -68,8 +76,11 @@ when the target holds a newer version of a dataset, `"behind"` when it
 failed, `"unavailable"`, or `"to sync"` with `dry_run = TRUE`), the list
 columns `datasets` (copied, or to copy), `deleted` (deleted, or to
 delete), `kept` (not deleted from the primary without `force`) and
-`conflicts`, then `files` (files sent, or to send), `bytes` and
-`seconds`.
+`conflicts`; then the datasets left out by the default scope: `skipped`
+(a list column of names), `skipped_files` and `skipped_bytes` (the files
+of those datasets the target lacks, and their size: at most what
+`all = TRUE` would send); then `files` (files sent, or to send), `bytes`
+and `seconds`. A status of `"same"` can go with skipped datasets.
 
 ## Details
 
@@ -77,6 +88,18 @@ With `from` set to a secondary location, work done there (for example
 through a connection whose primary was that location, while the primary
 could not be reached) is brought to the primary and to the other
 secondaries.
+
+## Scope
+
+By default (`datasets = NULL`, `all = FALSE`) a secondary location
+receives only the datasets it already holds, at any version: they are
+brought to the source's version, and nothing new is copied there. The
+call says which datasets were not copied to each secondary, with the
+number of files and the bytes a full sync would send at most (an empty
+secondary is named as such). `all = TRUE` copies every dataset of the
+source; `datasets = ` copies the named datasets, whether or not a
+secondary holds them. The primary, as a target (`from` a secondary),
+always receives every dataset of the source.
 
 ## Conflicts
 
@@ -139,6 +162,10 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 st <- store_connect(file.path(root, "primary"),
   secondary = file.path(root, "copy")
 )
+#> ℹ Secondary /tmp/Rtmp/rcs-example-sync/copy is
+#>   empty.
+#>   Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st,
+#>   datasets = )` to copy some.
 store_status(st)
 #> Source: /tmp/Rtmp/rcs-example-sync/primary
 #> Locations: [1] /tmp/Rtmp/rcs-example-sync/copy
@@ -147,14 +174,29 @@ store_status(st)
 #>   <chr>       <chr>    <chr>   <chr> <chr>            <chr>           
 #> 1 sales/daily [1]      missing NA    0f9e01793cbea58a NA              
 #> # ℹ 2 more variables: primary_updated <dttm>, location_updated <dttm>
-store_sync(st, dry_run = TRUE)
+
+# The secondary is empty: a default sync copies nothing and says so
+store_sync(st)
+#> ℹ Syncing the datasets already held by each secondary location, from the
+#>   primary /tmp/Rtmp/rcs-example-sync/primary
+#>   to 1 secondary location.
+#> ✔ secondary  /tmp/Rtmp/rcs-example-sync/copy     nothing
+#>   copied
+#> ℹ Synced only the datasets already in each secondary location.
+#> ℹ /tmp/Rtmp/rcs-example-sync/copy is empty: 1
+#>   dataset not copied (2 files, 23.8 kB).
+#>   Use `store_sync(st, all = TRUE)` to copy every dataset, or `datasets = ` to
+#>   copy some.
+
+# Every dataset
+store_sync(st, all = TRUE, dry_run = TRUE)
 #> ℹ Dry run: nothing is changed.
 #> ℹ Syncing 1 dataset from the primary
 #>   /tmp/Rtmp/rcs-example-sync/primary to 1
 #>   secondary location.
 #> • secondary  /tmp/Rtmp/rcs-example-sync/copy     would
 #>   copy 1 dataset, 2 files (23.8 kB): "sales/daily"
-store_sync(st)
+store_sync(st, all = TRUE)
 #> ℹ Syncing 1 dataset from the primary
 #>   /tmp/Rtmp/rcs-example-sync/primary to 1
 #>   secondary location.

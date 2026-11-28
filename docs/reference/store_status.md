@@ -66,7 +66,9 @@ dataset:
 The attribute `source` holds the address of the source. Zero rows when
 the connection has no other location.
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-brings missing and differing datasets up to date.
+brings differing datasets up to date in the secondaries that hold them;
+`store_sync(st, datasets = "<name>")` or `store_sync(st, all = TRUE)`
+also copies missing ones.
 
 ## Details
 
@@ -98,7 +100,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 #> ✔ primary    /tmp/Rtmp/rcs-example-status/primary  2/2
 #>   files sent  23.8 kB  0.2s
 #> ✔ secondary  /tmp/Rtmp/rcs-example-status/copy     2/2
-#>   files sent  23.8 kB  0.2s
+#>   files sent  23.8 kB  0.1s
 #> ✔ MD5 identical for 2 files in 2 locations. Catalogs updated.
 store_status(st)
 #> Source: /tmp/Rtmp/rcs-example-status/primary

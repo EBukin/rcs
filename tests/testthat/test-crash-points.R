@@ -61,7 +61,7 @@ setup_prunable <- function(paths) {
 op_create <- function(st) g_write(st, g_sim(20, 1), check = FALSE)
 op_replace <- function(st) g_write(st, g_sim(20, 2), mode = "replace", check = FALSE)
 op_update <- function(st) g_write(st, g_sim(8, 3, years = c(2024L, 2025L)), mode = "update", check = FALSE)
-op_sync <- function(st) store_sync(st)
+op_sync <- function(st) store_sync(st, all = TRUE)
 op_delete <- function(st) store_delete(st, "sales/daily", confirm = "sales/daily", history = TRUE)
 op_prune <- function(st) store_prune(st, keep = 0)
 

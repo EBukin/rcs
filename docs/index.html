@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -119,7 +119,7 @@
 <span>  partition <span class="op">=</span> <span class="st">"year"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; ℹ Writing "sales/daily": 500 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; ✔ primary  &lt;tempdir&gt;/my-store  2/2 files sent  38.2 kB  0.4s</span></span>
+<span><span class="co">#&gt; ✔ primary  &lt;tempdir&gt;/my-store  2/2 files sent  38.3 kB  0.3s</span></span>
 <span><span class="co">#&gt; ✔ MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>See what the store holds:</p>
 <div class="sourceCode" id="cb3"><pre class="downlit sourceCode r">
@@ -131,14 +131,14 @@
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   500  38.2 kB      2  2026-11-22 13:26</span></span></code></pre></div>
+<span><span class="co">#&gt;     daily  table   500  38.3 kB      2  2026-11-27 23:24</span></span></code></pre></div>
 <p>Open a dataset. Nothing is read yet; printing shows a header and the first rows.</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_open.html">store_open</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"sales/daily"</span><span class="op">)</span></span>
 <span><span class="va">q</span></span>
 <span><span class="co">#&gt; # Dataset:  sales/daily [500 x 15] (table)</span></span>
 <span><span class="co">#&gt; # Location: primary (local)</span></span>
-<span><span class="co">#&gt; # Version:  b454e301 (current)</span></span>
+<span><span class="co">#&gt; # Version:  99995a06 (current)</span></span>
 <span><span class="co">#&gt; # Files:    2 of 2</span></span>
 <span><span class="co">#&gt;    shop_id date        year product   qty price promo grade delivered      big</span></span>
 <span><span class="co">#&gt;      &lt;int&gt; &lt;date&gt;     &lt;int&gt; &lt;fct&gt;   &lt;int&gt; &lt;dbl&gt; &lt;lgl&gt; &lt;ord&gt; &lt;date&gt;     &lt;int64&gt;</span></span>
@@ -198,6 +198,7 @@
 <p>Keep the same store in a bucket and in a local copy; writes reach both and reads use the local copy:</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="st">"gs://my-bucket/store"</span>, secondary <span class="op">=</span> <span class="st">"~/data/my-store"</span><span class="op">)</span></span></code></pre></div>
+<p>A read of a dataset that the local copy lacks, or holds at an older version, first copies it there (up to 2 GB by default), so the next reads are local.</p>
 </div>
 <div class="section level2">
 <h2 id="learn-more">Learn more<a class="anchor" aria-label="anchor" href="#learn-more"></a>

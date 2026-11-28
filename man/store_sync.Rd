@@ -7,6 +7,7 @@
 store_sync(
   st,
   datasets = NULL,
+  all = FALSE,
   to = NULL,
   from = NULL,
   delete = FALSE,
@@ -22,6 +23,11 @@ place.}
 datasets (full names, or last parts that are unique in the source).
 With \code{delete = TRUE} it restricts the deletions too, and a full name
 the source does not hold is accepted.}
+
+\item{all}{\code{TRUE} copies every dataset of the source to every target,
+including datasets a secondary does not hold. \code{FALSE} (the default)
+refreshes in a secondary only the datasets it already holds (see
+"Scope"). Cannot be combined with \code{datasets}.}
 
 \item{to}{\code{NULL} for every location other than the source, or the
 addresses of some of them.}
@@ -45,17 +51,21 @@ A tibble, invisibly, one row per target location: \code{location},
 \code{"behind"} when it failed, \code{"unavailable"}, or \code{"to sync"} with
 \code{dry_run = TRUE}), the list columns \code{datasets} (copied, or to copy),
 \code{deleted} (deleted, or to delete), \code{kept} (not deleted from the primary
-without \code{force}) and \code{conflicts}, then \code{files} (files sent, or to send),
-\code{bytes} and \code{seconds}.
+without \code{force}) and \code{conflicts}; then the datasets left out by the
+default scope: \code{skipped} (a list column of names), \code{skipped_files} and
+\code{skipped_bytes} (the files of those datasets the target lacks, and their
+size: at most what \code{all = TRUE} would send); then \code{files} (files sent,
+or to send), \code{bytes} and \code{seconds}. A status of \code{"same"} can go with
+skipped datasets.
 }
 \description{
 Copies datasets from one location, the source (by default the primary),
 to the other locations of the connection: every dataset whose copy in a
-target is missing or differs from the source's (another version, or
-another entry). Only the files a target lacks are sent, each verified by
-MD5; the catalogs of a target are switched last, so that its readers
-always see a complete version. A geospatial dataset's index table
-travels with it.
+target differs from the source's (another version, or another entry) or,
+where the scope below allows it, is missing. Only the files a target
+lacks are sent, each verified by MD5; the catalogs of a target are
+switched last, so that its readers always see a complete version. A
+geospatial dataset's index table travels with it.
 }
 \details{
 With \code{from} set to a secondary location, work done there (for example
@@ -63,6 +73,19 @@ through a connection whose primary was that location, while the primary
 could not be reached) is brought to the primary and to the other
 secondaries.
 }
+\section{Scope}{
+
+By default (\code{datasets = NULL}, \code{all = FALSE}) a secondary location
+receives only the datasets it already holds, at any version: they are
+brought to the source's version, and nothing new is copied there. The
+call says which datasets were not copied to each secondary, with the
+number of files and the bytes a full sync would send at most (an empty
+secondary is named as such). \code{all = TRUE} copies every dataset of the
+source; \verb{datasets = } copies the named datasets, whether or not a
+secondary holds them. The primary, as a target (\code{from} a secondary),
+always receives every dataset of the source.
+}
+
 \section{Conflicts}{
 
 When a target holds another version of a dataset and its entry was
@@ -106,8 +129,13 @@ st <- store_connect(file.path(root, "primary"),
   secondary = file.path(root, "copy")
 )
 store_status(st)
-store_sync(st, dry_run = TRUE)
+
+# The secondary is empty: a default sync copies nothing and says so
 store_sync(st)
+
+# Every dataset
+store_sync(st, all = TRUE, dry_run = TRUE)
+store_sync(st, all = TRUE)
 
 # Work done on the secondary alone, brought back to the primary
 offline <- store_connect(file.path(root, "copy"))

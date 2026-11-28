@@ -131,6 +131,10 @@ reads use the local copy:
 st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
 ```
 
+A read of a dataset that the local copy lacks, or holds at an older
+version, first copies it there (up to 2 GB by default), so the next reads
+are local.
+
 ## Learn more
 
 - `vignette("rcs")`: getting started with a local store: write, open,

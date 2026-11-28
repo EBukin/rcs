@@ -116,8 +116,10 @@ is_index_entry <- function(catalog) {
 #'     `primary_updated` in the source.
 #'
 #'   The attribute `source` holds the address of the source. Zero rows when
-#'   the connection has no other location. `store_sync()` brings missing
-#'   and differing datasets up to date.
+#'   the connection has no other location. `store_sync()` brings differing
+#'   datasets up to date in the secondaries that hold them;
+#'   `store_sync(st, datasets = "<name>")` or `store_sync(st, all = TRUE)`
+#'   also copies missing ones.
 #' @seealso [store_datasets()], [store_refresh()], [store_sync()].
 #' @export
 #' @examples

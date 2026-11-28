@@ -30,9 +30,10 @@ geospatial dataset's index table travels with it.
 }
 \details{
 Copying into the primary changes the store's current version of the
-dataset; \code{\link[=store_sync]{store_sync()}} then brings the other secondaries to it. Files of
-the version the target replaces are deleted when the dataset keeps no
-history, as in \code{\link[=store_write]{store_write()}}.
+dataset; \code{\link[=store_sync]{store_sync()}} then brings the other secondaries that hold it to
+that version (\verb{datasets = } or \code{all = TRUE} also copies it to those that
+do not). Files of the version the target replaces are deleted when the
+dataset keeps no history, as in \code{\link[=store_write]{store_write()}}.
 }
 \examples{
 root <- file.path(tempdir(), "rcs-example-copy")

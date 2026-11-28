@@ -11,7 +11,7 @@ groups and columns are read."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -77,6 +77,7 @@ groups and columns are read.</p>
 <span>  intersects <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  geometry <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  version <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  copy <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  exact <span class="op">=</span> <span class="cn">TRUE</span>,</span>
 <span>  exact_engine <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -124,6 +125,16 @@ tibble.</p></dd>
 <dt id="arg-version">version<a class="anchor" aria-label="anchor" href="#arg-version"></a></dt>
 <dd><p><code>NULL</code> for the current version, or the 16 hex characters of
 an earlier version kept in the history.</p></dd>
+
+
+<dt id="arg-copy">copy<a class="anchor" aria-label="anchor" href="#arg-copy"></a></dt>
+<dd><p>Whether to copy the dataset to the local secondary locations
+before reading (see "Copy to secondary locations"). <code>NULL</code> (the
+default) copies the current version when the connection's
+<code>copy_on_read</code> is <code>TRUE</code> and the bytes to download are at or under the
+limit. <code>TRUE</code> copies whatever the limit and the connection's setting,
+and copies an earlier version too, into the secondaries' history.
+<code>FALSE</code> never copies.</p></dd>
 
 
 <dt id="arg-exact">exact<a class="anchor" aria-label="anchor" href="#arg-exact"></a></dt>
@@ -177,15 +188,25 @@ and <code>exact_engine</code> do not apply to rasters and abort.</p></li>
 
 <p>A raster is returned as a <code><a href="https://rspatial.github.io/terra/reference/SpatRaster-class.html" class="external-link">terra::SpatRaster</a></code> that points to the stored
 file: at the location itself for a local store, through GDAL's virtual
-file system for a bucket. No cell is read until it is needed, and the
-file is not downloaded.</p><ul><li><p><strong>The whole raster.</strong> <code>store_read(st, "name")</code> returns every layer,
+file system for a bucket. No cell is read until it is needed: GDAL
+fetches only the tiles a calculation or a window needs, from the location
+read from. The file itself is copied only by a copy to a secondary
+location (below).</p>
+<p>A raster is one file, so copying it to a secondary location is all or
+nothing (see "Copy to secondary locations"). With a primary in a bucket
+and a local secondary that lacks the raster or holds an older version,
+the whole file is first copied to the secondary when it is at or under
+the size limit, and the raster, or its window, is then read from that
+copy. With <code>copy = FALSE</code>, a connection made with <code>copy_on_read = FALSE</code>, or a file above the limit, nothing is copied and the read stays
+on the bucket.</p><ul><li><p><strong>The whole raster.</strong> <code>store_read(st, "name")</code> returns every layer,
 with the layer names, the data type and the NoData value of the file.
 Cells that hold the NoData value are missing (<code>NA</code>).</p></li>
 <li><p><strong>A window.</strong> <code>intersects</code> returns only the part inside the bounding
 box of the query, in the raster's CRS, rounded outwards to whole
 cells; a point or a line gives the cells it touches. The cells of the
-window are read at once, straight from the bucket for a store in a
-bucket: this is the way to work with a map too large to read whole.
+window are read at once, from the location read from (straight from
+the bucket when no local copy holds the version): this is the way to
+work with a map too large to read whole.
 The query takes the same forms as for geospatial data (an <code>sf</code>, <code>sfc</code>
 or <code>bbox</code> object in any CRS, or H3 cells). A query that does not
 overlap the raster aborts; one that crosses the antimeridian or holds
@@ -210,6 +231,53 @@ dataset at the primary's version, a local one first, then the primary,
 then the other secondaries. Reading from a secondary prints a line
 saying so (silenced by <code>options(rcs.quiet = TRUE)</code>). Reads use the
 catalogs held by the connection; <code><a href="store_refresh.html">store_refresh()</a></code> reads them again.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="copy-to-secondary-locations">Copy to secondary locations<a class="anchor" aria-label="anchor" href="#copy-to-secondary-locations"></a></h2>
+
+
+<p>When the primary location is not local (a bucket) and a secondary is a
+local folder, <code>store_read()</code> first copies the dataset there, so that
+this read and the next ones come from the local copy. It copies only:</p><ul><li><p>to secondaries that are available and local, while the primary is
+not local: with a local primary, or with secondaries in buckets
+only, a read copies nothing;</p></li>
+<li><p>the current version, to a secondary that lacks the dataset or its
+index table, or holds an older version of it. The dataset is copied
+from the primary with its index table, and only the files the
+secondary lacks are sent, each verified by its MD5;</p></li>
+<li><p>when the connection's <code>copy_on_read</code> is <code>TRUE</code> (the default of
+<code><a href="store_connect.html">store_connect()</a></code>) and <code>copy</code> is not <code>FALSE</code>;</p></li>
+<li><p>when the bytes to download, for the secondary that lacks the most,
+are at or under the limit <code>getOption("rcs.copy_on_read_max_bytes")</code>,
+2 GB (<code>2e9</code>) by default. Above it nothing is copied and a message
+says how to copy (<code>copy = TRUE</code>, or <code><a href="store_sync.html">store_sync()</a></code> with
+<code>datasets = </code>).</p></li>
+</ul><p>Filters, <code>columns</code> and <code>intersects</code> do not change the rule: the whole
+dataset is copied, then read from the copy. A secondary whose version
+was written later than the primary's is never replaced by a read; a
+message says so. A secondary that holds the primary's version under
+another catalog entry (for example a raster written again with another
+legend or other colours) gets the primary's entry, without any file
+sent and whatever the limit. A copy that fails gives a warning, and the
+read goes on from the primary; the next read tries again. Reading an
+index table never copies; nor do <code><a href="store_sample.html">store_sample()</a></code>, <code><a href="store_glimpse.html">store_glimpse()</a></code>,
+<code><a href="store_open.html">store_open()</a></code> and <code><a href="store_duckdb.html">store_duckdb()</a></code>.</p>
+<p>Earlier versions (<code>version = </code>) are not copied by default. When such a
+read comes from the primary while an available local secondary could
+hold a copy, a message says so (unless copying is turned off).
+<code>copy = TRUE</code> adds the version to the history of each of these
+secondaries, other than the one it is read from, that holds neither it
+as its current version nor it in its history: its files, its manifest
+unchanged, and its rows of the history. With no such secondary at all,
+a message says there is none to copy to. The secondary's current version of the dataset does not
+change, and a secondary that does not hold the dataset still does not
+list it. One effect to know: <code><a href="store_rebuild.html">store_rebuild()</a></code> of a secondary that
+holds only an earlier version of a dataset makes that version its
+current one.</p>
+<p>To turn copying off, connect with <code>store_connect(copy_on_read = FALSE)</code>,
+or pass <code>copy = FALSE</code> to one read: nothing is copied and no message
+about copying is printed (a secondary that already holds the version is
+still read from). Messages are silenced by <code>options(rcs.quiet = TRUE)</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -255,7 +323,7 @@ catalogs held by the connection; <code><a href="store_refresh.html">store_refres
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons"</span>: 200 rows in 1 file, and its index table in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.2 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  41.2 kB  0.3s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">area</span> <span class="op">&lt;-</span> <span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_as_sfc.html" class="external-link">st_as_sfc</a></span><span class="op">(</span><span class="fu">sf</span><span class="fu">::</span><span class="fu"><a href="https://r-spatial.github.io/sf/reference/st_bbox.html" class="external-link">st_bbox</a></span><span class="op">(</span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>xmin <span class="op">=</span> <span class="op">-</span><span class="fl">28</span>, ymin <span class="op">=</span> <span class="fl">7</span>, xmax <span class="op">=</span> <span class="op">-</span><span class="fl">27</span>, ymax <span class="op">=</span> <span class="fl">8</span><span class="op">)</span>,</span></span>
@@ -336,7 +404,7 @@ catalogs held by the connection; <code><a href="store_refresh.html">store_refres
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 4,800 cells in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-read  1/1</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> class       : SpatRaster</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> size        : 60, 80, 1  (nrow, ncol, nlyr)</span>

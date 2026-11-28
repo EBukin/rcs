@@ -55,6 +55,9 @@ This is a cluster sample, not a simple random sample: rows are stored
 sorted (by key, or spatially by H3 cell), so the rows of one row group
 are alike, and the sample covers only as many clusters as row groups
 were read. Use it to look at data, not to estimate.
+
+Unlike \code{\link[=store_read]{store_read()}}, it never copies the dataset to a secondary
+location.
 }
 \examples{
 location <- file.path(tempdir(), "rcs-example-sample")

@@ -6,14 +6,16 @@ no data: DuckDB reads the Parquet files when a query runs, and only the
 columns and row groups the query needs. The file list comes from the
 catalog held by the connection st, so the views show the versions it
 knows: after store_refresh() call store_duckdb() again. One message
-names the views made."><meta property="og:description" content="Creates one DuckDB view per dataset of the store's primary catalog
+names the views made. Unlike store_read(), it never copies a dataset
+to a secondary location."><meta property="og:description" content="Creates one DuckDB view per dataset of the store's primary catalog
 (rasters excluded, the H3 index tables of geospatial datasets included),
 so that the datasets can be queried with SQL or with dbplyr. A view stores
 no data: DuckDB reads the Parquet files when a query runs, and only the
 columns and row groups the query needs. The file list comes from the
 catalog held by the connection st, so the views show the versions it
 knows: after store_refresh() call store_duckdb() again. One message
-names the views made."></head><body>
+names the views made. Unlike store_read(), it never copies a dataset
+to a secondary location."></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -21,7 +23,7 @@ names the views made."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -79,7 +81,8 @@ no data: DuckDB reads the Parquet files when a query runs, and only the
 columns and row groups the query needs. The file list comes from the
 catalog held by the connection <code>st</code>, so the views show the versions it
 knows: after <code><a href="store_refresh.html">store_refresh()</a></code> call <code>store_duckdb()</code> again. One message
-names the views made.</p>
+names the views made. Unlike <code><a href="store_read.html">store_read()</a></code>, it never copies a dataset
+to a secondary location.</p>
     </div>
 
     <div class="section level2">

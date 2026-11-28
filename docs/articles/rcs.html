@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -230,7 +230,7 @@ by folder.</p>
 <span><span class="co">#&gt; Datasets: 1</span></span>
 <span><span class="co">#&gt;   name     kind   rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   sales/</span></span>
-<span><span class="co">#&gt;     daily  table   300  31.4 kB      2  2026-11-27 18:59</span></span></code></pre></div>
+<span><span class="co">#&gt;     daily  table   300  31.4 kB      2  2026-11-27 23:54</span></span></code></pre></div>
 <p><code><a href="../reference/store_datasets.html">store_datasets()</a></code> returns the same list as a tibble, one
 row per dataset.</p>
 <div class="sourceCode" id="cb7"><pre class="downlit sourceCode r">
@@ -239,7 +239,7 @@ row per dataset.</p>
 <span><span class="co">#&gt; <span style="color: #949494;"># A tibble: 1 × 9</span></span></span>
 <span><span class="co">#&gt;   dataset  kind  title  rows bytes n_files partition version updated            </span></span>
 <span><span class="co">#&gt;   <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span> <span style="color: #949494; font-style: italic;">&lt;dbl&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;int&gt;</span> <span style="color: #949494; font-style: italic;">&lt;list&gt;</span>    <span style="color: #949494; font-style: italic;">&lt;chr&gt;</span>   <span style="color: #949494; font-style: italic;">&lt;dttm&gt;</span>             </span></span>
-<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>399       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> 66bd1c… 2026-11-27 <span style="color: #949494;">18:59:07</span></span></span>
+<span><span class="co">#&gt; <span style="color: #BCBCBC;">1</span> sales/d… table Dail…   300 <span style="text-decoration: underline;">31</span>399       2 <span style="color: #949494;">&lt;chr [1]&gt;</span> 66bd1c… 2026-11-27 <span style="color: #949494;">23:54:14</span></span></span>
 <span><span class="va">datasets</span><span class="op">$</span><span class="va">title</span></span>
 <span><span class="co">#&gt; [1] "Daily sales"</span></span></code></pre></div>
 <p><code><a href="../reference/store_describe.html">store_describe()</a></code> shows everything the catalog knows
@@ -262,9 +262,9 @@ their types, and the files of the current version.</p>
 <span><span class="co">#&gt; Source      –</span></span>
 <span><span class="co">#&gt; Inputs      –</span></span>
 <span><span class="co">#&gt; History     not set (the connection's setting applies)</span></span>
-<span><span class="co">#&gt; Created     2026-11-27 18:59:07 UTC</span></span>
-<span><span class="co">#&gt; Updated     2026-11-27 18:59:07 UTC</span></span>
-<span><span class="co">#&gt; Written by  R 4.6.2, rcs 0.0.0.9006</span></span>
+<span><span class="co">#&gt; Created     2026-11-27 23:54:14 UTC</span></span>
+<span><span class="co">#&gt; Updated     2026-11-27 23:54:14 UTC</span></span>
+<span><span class="co">#&gt; Written by  R 4.6.2, rcs 0.0.0.9007</span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; Locations:</span></span>
 <span><span class="co">#&gt;   primary    &lt;tempdir&gt;/my-store</span></span>
@@ -527,12 +527,7 @@ must match.</p>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Updating <span style="color: #0000BB;">"sales/daily"</span>: 1 partition replaced, 0 added, 1 kept.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">•</span> year = 2024: 144 rows -&gt; 144 rows</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; Warning: Cannot delete 2 replaced files in <span style="color: #0000BB;">&lt;tempdir&gt;/my-store</span>.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> They are no longer named by the catalogs; `store_prune()` removes them later.</span></span>
-<span><span class="co">#&gt; Caused by error in `be_delete()`:</span></span>
-<span><span class="co">#&gt; <span style="color: #BBBB00;">!</span> Cannot delete 1 file in <span style="color: #0000BB;">&lt;tempdir&gt;/my-store</span>:</span></span>
-<span><span class="co">#&gt;   <span style="color: #0000BB;">&lt;tempdir&gt;/my-store/sales/daily/year=2024/part-66bd1cd34236c66b.parquet</span>.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.5 kB  0.3s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/my-store  1/2 files sent  15.5 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The message lists every replaced partition with its old and new
 number of rows. Check it: a row of a replaced partition that is missing
@@ -562,7 +557,7 @@ the connection’s, and the connection’s over the store’s.</p>
 <span>  partition <span class="op">=</span> <span class="st">"year"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 300 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  2/2 files sent  31.4 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/store-with-history  2/2 files sent  31.4 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span>
 <span><span class="fu"><a href="../reference/store_write.html">store_write</a></span><span class="op">(</span><span class="va">sth</span>, <span class="va">fix</span>, <span class="st">"sales/daily"</span>,</span>
 <span>  title <span class="op">=</span> <span class="st">"Daily sales"</span>,</span>

@@ -25,6 +25,10 @@
 #' * A location without catalogs aborts, unless `create = TRUE`, which
 #'   initialises it with empty catalogs (as [store_create()] does, with the
 #'   store's history default off).
+#' * An available secondary that holds no dataset while the primary holds
+#'   some prints a notice that it is empty, with the [store_sync()] calls
+#'   that fill it (`all = TRUE` for every dataset, `datasets = ` for some).
+#'   [store_refresh()] does not repeat it.
 #'
 #' The object has reference semantics: functions that change a location
 #' update it in place, so the same object serves several writes in a row.
@@ -48,6 +52,13 @@
 #'   string is the path of a key file; a list named by address (as given in
 #'   the call) gives each location any of these, and locations left out use
 #'   the default.
+#' @param copy_on_read `TRUE` (the default) lets [store_read()] copy the
+#'   current version of a dataset from a primary that is not local (a
+#'   bucket) to the local secondaries before reading it, when it is at or
+#'   under the size limit (see "Copy to secondary locations" in
+#'   [store_read()]). `FALSE` turns this off for the connection: reads
+#'   neither copy nor say how to copy, unless called with `copy = TRUE`.
+#'   [store_refresh()] keeps the setting.
 #' @return An object of class `rcs_store`. Print it to see its locations and
 #'   datasets.
 #' @seealso [store_create()], [store_refresh()], [store_datasets()],
@@ -66,12 +77,14 @@
 #' withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
 #' unlink(primary, recursive = TRUE)
 store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
-                          history = NULL, create = FALSE, auth = NULL) {
+                          history = NULL, create = FALSE, auth = NULL,
+                          copy_on_read = TRUE) {
   local_trace("store_connect")
   call <- rlang::current_env()
   check_string(env)
   check_flag(history, allow_null = TRUE)
   check_flag(create)
+  check_flag(copy_on_read)
   check_string(primary, allow_null = TRUE)
   check_addresses(secondary)
 
@@ -112,12 +125,33 @@ store_connect <- function(primary = NULL, secondary = NULL, env = "STORE",
     connect_secondary,
     create = create, store_history = store_history, call = call
   )
-  new_store(
+  st <- new_store(
     primary = primary_location,
     secondary = secondary_locations,
     history = history,
-    store_history = store_history
+    store_history = store_history,
+    copy_on_read = copy_on_read
   )
+  inform_empty_secondaries(st)
+  st
+}
+
+# One notice per available secondary whose catalog holds no dataset while
+# the primary holds at least one (at connection only, not on refresh).
+inform_empty_secondaries <- function(st) {
+  holds_dataset <- function(location) any(!is_index_entry(location$catalog))
+  if (!holds_dataset(st$primary)) {
+    return(invisible())
+  }
+  for (location in st$secondary) {
+    if (!location$available || holds_dataset(location)) next
+    uri <- location$uri
+    rcs_inform(c(
+      i = "Secondary {.path {uri}} is empty.",
+      " " = "Use {.code store_sync(st, all = TRUE)} to copy every dataset, or {.code store_sync(st, datasets = )} to copy some."
+    ))
+  }
+  invisible()
 }
 
 #' Initialise an empty store

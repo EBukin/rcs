@@ -117,8 +117,8 @@ print(st, index = TRUE)
 #> Datasets: 2
 #>   name            kind        rows     size  files  updated
 #>   shapes/
-#>     polygons      geospatial   500  62.6 kB      1  2026-11-27 18:58
-#>     polygons__h3  table        533  10.2 kB      1  2026-11-27 18:58
+#>     polygons      geospatial   500  62.6 kB      1  2026-11-27 23:53
+#>     polygons__h3  table        533  10.2 kB      1  2026-11-27 23:53
 ```
 
 `h3` and `bbox` come back with the data.
@@ -392,7 +392,7 @@ store_write(st, polys, "shapes/polygons_by_cell",
   max_files = 10
 )
 #> ℹ Writing "shapes/polygons_by_cell": 500 rows in 7 files (partition h3_p2), and its index table in 1 file.
-#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.5 kB  0.2s
+#> ✔ primary  <tempdir>/geo-store  8/8 files sent  157.5 kB  0.3s
 #> ✔ MD5 identical for 8 files in 1 location. Catalogs updated.
 ```
 
@@ -855,9 +855,11 @@ map[1, 1]
 
 **6. Read a window.** `intersects` reads only the cells inside the
 query’s bounding box, rounded outwards to whole cells. From a bucket
-they are read through GDAL, and the file is not downloaded as a whole.
-The window keeps the legend and the colours, so counts come with labels
-and a plot with the colours of the classes.
+they are read through GDAL, and the file is not downloaded as a whole,
+unless a local secondary location first gets a copy of it (see “Read
+windows” under “Large maps”). The window keeps the legend and the
+colours, so counts come with labels and a plot with the colours of the
+classes.
 
 ``` r
 
@@ -935,7 +937,7 @@ store_write(st, grid, "grids/simulated_zstd",
   gdal = c("COMPRESS=ZSTD", "LEVEL=9")
 )
 #> ℹ Writing "grids/simulated_zstd": 40,000 cells in 1 file.
-#> ✔ primary  <tempdir>/geo-store  1/1 files sent  673.7 kB  0.2s
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  673.7 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 ```
 
@@ -962,7 +964,7 @@ store_write(st, big, "grids/cover_from_file",
   description = "A simulated class map in open ocean, written from a GeoTIFF."
 )
 #> ℹ Writing "grids/cover_from_file": 40,000 cells in 1 file.
-#> ✔ primary  <tempdir>/geo-store  1/1 files sent  4.7 kB  0.2s
+#> ✔ primary  <tempdir>/geo-store  1/1 files sent  4.7 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 terra::datatype(store_read(st, "grids/cover_from_file"))
 #> [1] "INT1U"
@@ -994,7 +996,16 @@ terra::datatype(store_read(st, "grids/cover_from_file"))
   drive when needed.
 - **Read windows.** `store_read(st, "name", intersects = area)` reads
   the part of the map you need; `store_read(st, "name")` only opens the
-  file, and cells are read when a calculation asks for them.
+  file, and cells are read when a calculation asks for them. With a
+  bucket as primary and a local secondary location that lacks the map,
+  or holds an older version, a read first copies the whole file to the
+  local folder when it is at or under the limit for copying on read (2
+  GB by default, `options(rcs.copy_on_read_max_bytes = )`), and the
+  window is then read from that copy. Above the limit, the window is
+  read from the bucket. `copy = FALSE` on the read, or
+  `copy_on_read = FALSE` on the connection, keeps the read on the bucket
+  (see “Local working copies of a bucket” in
+  [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)).
 - **Every location gets the map.** A write lands in the primary and in
   every secondary location of the connection. A dataset cannot yet be
   kept in the primary only.

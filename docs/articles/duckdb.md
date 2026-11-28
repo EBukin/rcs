@@ -530,7 +530,7 @@ store_write(st, sales, "sales/daily",
   mode = "replace"
 )
 #> ℹ Replacing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.1s
+#> ✔ primary  <tempdir>/duckdb-store  2/2 files sent  38.3 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -587,16 +587,18 @@ DBI::dbDisconnect(con, shutdown = TRUE)
 ```
 
 5.  When the work is ready to share, add a bucket as a secondary
-    location and copy the store there with
+    location and copy the whole store there with
+    `store_sync(all = TRUE)` (see
+    [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md);
+    a plain
     [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-    (see
-    [`vignette("locations")`](https://ebukin.github.io/rcs/articles/locations.md)).
-    Only then are cloud credentials needed.
+    copies nothing to an empty secondary). Only then are cloud
+    credentials needed.
 
 ``` r
 
 st <- store_connect(path, secondary = "gs://my-bucket/store", create = TRUE)
-store_sync(st)
+store_sync(st, all = TRUE)
 ```
 
 Afterwards every write reaches both locations, and reads, DuckDB views

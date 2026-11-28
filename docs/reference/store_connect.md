@@ -14,7 +14,8 @@ store_connect(
   env = "STORE",
   history = NULL,
   create = FALSE,
-  auth = NULL
+  auth = NULL,
+  copy_on_read = TRUE
 )
 ```
 
@@ -59,6 +60,19 @@ store_connect(
   list named by address (as given in the call) gives each location any
   of these, and locations left out use the default.
 
+- copy_on_read:
+
+  `TRUE` (the default) lets
+  [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
+  copy the current version of a dataset from a primary that is not local
+  (a bucket) to the local secondaries before reading it, when it is at
+  or under the size limit (see "Copy to secondary locations" in
+  [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)).
+  `FALSE` turns this off for the connection: reads neither copy nor say
+  how to copy, unless called with `copy = TRUE`.
+  [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
+  keeps the setting.
+
 ## Value
 
 An object of class `rcs_store`. Print it to see its locations and
@@ -86,6 +100,14 @@ secondaries of another store.
   initialises it with empty catalogs (as
   [`store_create()`](https://ebukin.github.io/rcs/reference/store_create.md)
   does, with the store's history default off).
+
+- An available secondary that holds no dataset while the primary holds
+  some prints a notice that it is empty, with the
+  [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+  calls that fill it (`all = TRUE` for every dataset, `datasets = ` for
+  some).
+  [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
+  does not repeat it.
 
 The object has reference semantics: functions that change a location
 update it in place, so the same object serves several writes in a row.
@@ -122,7 +144,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 13:56
+#>     daily  table   100  23.8 kB      2  2026-11-27 18:51
 
 # The same, with the address in the environment
 withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
@@ -133,6 +155,6 @@ withr::with_envvar(c(STORE_PRIMARY = primary), store_connect())
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   100  23.8 kB      2  2026-11-27 13:56
+#>     daily  table   100  23.8 kB      2  2026-11-27 18:51
 unlink(primary, recursive = TRUE)
 ```

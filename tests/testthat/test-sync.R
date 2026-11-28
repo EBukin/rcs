@@ -32,12 +32,12 @@ test_that("store_sync() copies missing and differing datasets; a dry run changes
     c("differs", "missing")
   )
   g_snapshot_output()
-  expect_snapshot(dry <- store_sync(st, dry_run = TRUE), transform = g_scrub(root))
+  expect_snapshot(dry <- store_sync(st, all = TRUE, dry_run = TRUE), transform = g_scrub(root))
   expect_identical(dry$status, c("same", "to sync"))
   expect_identical(dry$datasets[[2]], c("sales/daily", "sales/summary"))
   expect_identical(store_status(st)$status, status$status)
 
-  expect_snapshot(out <- store_sync(st), transform = g_scrub(root))
+  expect_snapshot(out <- store_sync(st, all = TRUE), transform = g_scrub(root))
   expect_identical(out$status, c("same", "synced"))
   expect_identical(out$files, dry$files)
   expect_true(all(store_status(st)$status == "same"))
@@ -47,7 +47,7 @@ test_that("store_sync() copies missing and differing datasets; a dry run changes
     store_read(st, "sales/daily")
   )
 
-  expect_snapshot(again <- store_sync(st), transform = g_scrub(root))
+  expect_snapshot(again <- store_sync(st, all = TRUE), transform = g_scrub(root))
   expect_identical(again$status, c("same", "same"))
 })
 
@@ -87,7 +87,7 @@ test_that("store_sync() follows datasets and to; index tables travel with their 
     title = "Polygons", description = "d", geocode = FALSE, mode = "replace"
   ))
   store_refresh(st)
-  g_quiet(store_sync(st))
+  g_quiet(store_sync(st, all = TRUE))
   expect_identical(st$secondary[[2]]$catalog$dataset, c("sales/daily", "shapes/polygons"))
   expect_true(all(store_status(st)$status == "same"))
   expect_store_valid(st)
@@ -120,7 +120,7 @@ test_that("store_sync() repairs a secondary that failed during a write", {
   expect_store_valid(st, orphans_ok = TRUE)
   stub$fail_at <- NULL
   stub_reset(stub)
-  out <- g_quiet(store_sync(st))
+  out <- g_quiet(store_sync(st, datasets = "sales/daily"))
   expect_identical(out$status, c("synced", "same"))
   # The file sent before the failure is reused.
   expect_identical(g_data_puts(stub), 1L)
@@ -136,12 +136,12 @@ test_that("a secondary failing during store_sync() warns, is reported behind, an
   stub <- local_backend_stub(uri = paths[[2]], generic = "be_put", path = "part-", fail_at = 2:4)
   st <- g_connect(paths)
   g_snapshot_output()
-  expect_snapshot(out <- store_sync(st), transform = g_scrub(dirname(paths[[1]])))
+  expect_snapshot(out <- store_sync(st, all = TRUE), transform = g_scrub(dirname(paths[[1]])))
   expect_identical(out$status, c("behind", "synced"))
   expect_store_valid(st, orphans_ok = TRUE)
   stub$fail_at <- NULL
   stub_reset(stub)
-  out <- g_quiet(store_sync(st))
+  out <- g_quiet(store_sync(st, all = TRUE))
   expect_identical(out$status, c("synced", "same"))
   expect_identical(g_data_puts(stub), 1L)
   expect_store_valid(st)
@@ -239,7 +239,7 @@ s_check_offline <- function(paths, stub = NULL) {
   if (!is.null(stub)) stub_reset(stub)
 
   expect_warning(
-    out <- suppressMessages(store_sync(st, from = paths[[2]])),
+    out <- suppressMessages(store_sync(st, from = paths[[2]], all = TRUE)),
     class = "rcs_warning_sync_overwrite"
   )
   expect_identical(out$location, paths[c(1, 3)])
@@ -419,7 +419,7 @@ test_that("store_sync() reports kept datasets, conflicts and deletions in its re
     transform = g_scrub(sc$root)
   )
   out <- err$result
-  expect_named(out, c("location", "status", "datasets", "deleted", "kept", "conflicts", "files", "bytes", "seconds"))
+  expect_named(out, c("location", "status", "datasets", "deleted", "kept", "conflicts", "skipped", "skipped_files", "skipped_bytes", "files", "bytes", "seconds"))
   expect_identical(out$location, sc$paths[1:2])
   expect_identical(out$status, c("same", "conflict"))
   expect_identical(out$kept, list("new/one", character()))
@@ -493,6 +493,278 @@ test_that("store_sync() in both directions works with a GCS secondary", {
   }
   s_check_delete(gcs_paths())
   s_check_offline(gcs_paths())
+})
+
+# Plan 0005: sync restricted to held datasets ------------------------------------
+# Decisions D-A1 to D-A8 of plan 0005. Each test names its id (A-Tn), whether
+# it is red (fails before the change, for the reason given) or a guard
+# (passes before and after).
+
+# A primary holding sales/daily, sales/summary and sales/weekly; each of the
+# `secondaries` holds sales/daily only, at an older version. `skipped_files`
+# and `skipped_bytes` are the files of the two datasets the secondaries lack,
+# from the primary's files table.
+s_held <- function(secondaries = 1L, frame = parent.frame()) {
+  paths <- g_paths(secondaries = secondaries, frame = frame)
+  g_write(g_connect(paths), g_sim(20, 1))
+  primary <- g_connect(paths[[1]])
+  g_write(primary, g_sim(20, 2), mode = "replace")
+  g_write(primary, g_sim(15, 3), "sales/summary")
+  g_write(primary, g_sim(10, 4), "sales/weekly")
+  st <- g_connect(paths)
+  skipped <- c("sales/summary", "sales/weekly")
+  files <- st$primary$files[st$primary$files$dataset %in% skipped, ]
+  list(
+    paths = paths, st = st, root = dirname(paths[[1]]), skipped = skipped,
+    skipped_files = nrow(files), skipped_bytes = sum(as.numeric(files$bytes))
+  )
+}
+
+# The messages of `expr` as one plain string; warnings (the overwrite of an
+# older version) are muffled.
+s_messages <- function(expr) {
+  paste(cli::ansi_strip(suppressWarnings(testthat::capture_messages(expr))), collapse = "")
+}
+
+s_file_set <- function(path) {
+  files <- location_read(g_plain_backend(path))$files
+  sort(paste(files$path, files$md5), method = "radix")
+}
+
+test_that("a default store_sync() refreshes only the datasets a secondary holds", {
+  # A-T1 (red). Red: sales/summary and sales/weekly are copied too, and the
+  # result has no columns `skipped`, `skipped_files`, `skipped_bytes`.
+  skip_below_level("default")
+  fx <- s_held()
+  out <- g_quiet(store_sync(fx$st))
+  expect_identical(g_listed(fx$paths[[2]]), "sales/daily")
+  versions <- s_versions(fx$paths)
+  expect_identical(versions[[2]][["sales/daily"]], versions[[1]][["sales/daily"]])
+  expect_identical(out$status, "synced")
+  expect_identical(out$datasets, list("sales/daily"))
+  expect_setequal(as.character(out[["skipped"]][[1]]), fx$skipped)
+  expect_identical(out[["skipped_files"]], fx$skipped_files)
+  expect_identical(out[["skipped_bytes"]], fx$skipped_bytes)
+  expect_store_valid(fx$st)
+})
+
+test_that("a default store_sync() says what it did not copy and how to copy everything", {
+  # A-T2 (red). Red: the header counts every dataset of the primary and no
+  # "not copied" block is printed.
+  skip_below_level("default")
+  g_snapshot_output()
+  fx <- s_held()
+  text <- s_messages(store_sync(fx$st))
+  expect_match(text, "Syncing the datasets already held by each secondary location", fixed = TRUE)
+  expect_match(text, "not copied", fixed = TRUE)
+  expect_no_match(text, "Every secondary location is up to date", fixed = TRUE)
+
+  # A secondary that holds every dataset: nothing skipped, no block.
+  paths <- g_paths(secondaries = 1L)
+  g_write(g_connect(paths), g_sim(20, 1))
+  g_write(g_connect(paths[[1]]), g_sim(20, 2), mode = "replace")
+  text <- s_messages(store_sync(g_connect(paths)))
+  expect_no_match(text, "not copied", fixed = TRUE)
+  expect_no_match(text, "Synced only the datasets", fixed = TRUE)
+
+  fx <- s_held()
+  expect_snapshot(out <- store_sync(fx$st), transform = g_scrub(fx$root))
+})
+
+test_that("store_sync(all = TRUE) copies every dataset, as datasets = <every name> does", {
+  # A-T3 (red). Red: unused argument (all = TRUE).
+  skip_below_level("default")
+  fx <- s_held(secondaries = 2L)
+  names <- fx$st$primary$catalog$dataset
+  out <- g_quiet(store_sync(fx$st, all = TRUE, to = fx$paths[[2]]))
+  g_quiet(store_sync(fx$st, datasets = names, to = fx$paths[[3]]))
+  expect_setequal(out$datasets[[1]], names)
+  expect_identical(g_listed(fx$paths[[2]]), sort(names, method = "radix"))
+  versions <- s_versions(fx$paths)
+  expect_identical(versions[[2]], versions[[1]])
+  expect_identical(versions[[2]], versions[[3]])
+  expect_identical(s_file_set(fx$paths[[2]]), s_file_set(fx$paths[[3]]))
+  expect_store_valid(fx$st)
+})
+
+test_that("store_sync(datasets = ) copies a dataset to a secondary that does not hold it", {
+  # A-T4 (guard).
+  skip_below_level("default")
+  fx <- s_held()
+  out <- g_quiet(store_sync(fx$st, datasets = "sales/summary"))
+  expect_identical(out$status, "synced")
+  expect_identical(out$datasets, list("sales/summary"))
+  expect_identical(g_listed(fx$paths[[2]]), c("sales/daily", "sales/summary"))
+  status <- store_status(fx$st)
+  expect_identical(status$status[status$dataset == "sales/summary"], "same")
+  expect_store_valid(fx$st)
+})
+
+test_that("store_sync() checks all", {
+  # A-T5 (red). Red: unused argument (all = TRUE), a plain error without
+  # class rcs_error_argument.
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 1L)
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  expect_error(store_sync(st, datasets = "sales/daily", all = TRUE), class = "rcs_error_argument")
+  expect_error(store_sync(st, all = NA), class = "rcs_error_argument")
+  expect_error(store_sync(st, all = "yes"), class = "rcs_error_argument")
+  g_snapshot_output()
+  expect_snapshot(store_sync(st, datasets = "sales/daily", all = TRUE),
+    error = TRUE, transform = g_scrub(dirname(paths[[1]]))
+  )
+})
+
+test_that("store_sync(from = <secondary>) sends everything to the primary and only held datasets to other secondaries", {
+  # A-T6 (red + guard). Guard: the primary receives the update and the new
+  # dataset. Red: the second secondary receives sales/new too, and the
+  # result has no column `skipped`.
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 2L)
+  g_write(g_connect(paths), g_sim(30, 1))
+  offline <- g_connect(paths[[2]])
+  g_write(offline, g_sim(12, 5, years = 2025L), mode = "update")
+  g_write(offline, g_sim(15, 6), "sales/new")
+  st <- g_connect(paths)
+  out <- g_quiet(store_sync(st, from = paths[[2]]))
+  expect_identical(out$location, paths[c(1, 3)])
+  versions <- s_versions(paths)
+  expect_identical(versions[[1]], versions[[2]])
+  expect_setequal(out$datasets[[1]], c("sales/daily", "sales/new"))
+
+  expect_identical(g_listed(paths[[3]]), "sales/daily")
+  expect_identical(versions[[3]][["sales/daily"]], versions[[2]][["sales/daily"]])
+  expect_identical(out$datasets[[2]], "sales/daily")
+  expect_identical(out[["skipped"]], list(character(), "sales/new"))
+  expect_store_valid(st)
+})
+
+test_that("a default store_sync() copies nothing to an empty secondary and says what a full sync would copy", {
+  # A-T7 (red). Red: every dataset is copied (status "synced"), and no
+  # "is empty" line is printed.
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 1L)
+  primary <- g_connect(paths[[1]])
+  g_write(primary, g_sim(20, 1))
+  g_write(primary, g_sim(15, 3), "sales/summary")
+  st <- g_connect(paths)
+  files <- st$primary$files
+  bytes <- sum(as.numeric(files$bytes))
+  g_snapshot_output()
+  text <- s_messages(out <- store_sync(st))
+  expect_identical(g_listed(paths[[2]]), character())
+  expect_identical(out$status, "same")
+  expect_identical(out$datasets, list(character()))
+  expect_setequal(as.character(out[["skipped"]][[1]]), c("sales/daily", "sales/summary"))
+  expect_identical(out[["skipped_files"]], nrow(files))
+  expect_identical(out[["skipped_bytes"]], bytes)
+  lines <- strsplit(text, "\n", fixed = TRUE)[[1]]
+  empty <- grep("is empty", lines, fixed = TRUE, value = TRUE)
+  expect_length(empty, 1)
+  expect_match(empty, paths[[2]], fixed = TRUE)
+  expect_match(
+    empty,
+    paste0("2 datasets not copied (", format_count(nrow(files)), " files, ", format_bytes(bytes), ")"),
+    fixed = TRUE
+  )
+  expect_no_match(text, "up to date", fixed = TRUE)
+})
+
+test_that("a dry run of a default store_sync() reports the restricted plan and what it skips, and changes nothing", {
+  # A-T8 (red). Red: the dry run plans all three datasets, the result has no
+  # `skipped` columns and no "not copied" line is printed.
+  skip_below_level("default")
+  fx <- s_held()
+  md5 <- s_catalog_md5(fx$paths)
+  listing <- be_list(g_plain_backend(fx$paths[[2]]))[c("path", "bytes")]
+  g_snapshot_output()
+  text <- s_messages(dry <- store_sync(fx$st, dry_run = TRUE))
+  expect_identical(dry$status, "to sync")
+  expect_identical(dry$datasets, list("sales/daily"))
+  expect_setequal(as.character(dry[["skipped"]][[1]]), fx$skipped)
+  expect_identical(dry[["skipped_files"]], fx$skipped_files)
+  expect_identical(dry[["skipped_bytes"]], fx$skipped_bytes)
+  expect_match(text, "not copied", fixed = TRUE)
+  expect_match(text, format_bytes(fx$skipped_bytes), fixed = TRUE)
+  expect_identical(s_catalog_md5(fx$paths), md5)
+  expect_identical(be_list(g_plain_backend(fx$paths[[2]]))[c("path", "bytes")], listing)
+})
+
+test_that("store_sync(delete = TRUE) deletes from a secondary the datasets the source no longer holds", {
+  # A-T9 (guard).
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 1L)
+  st <- g_connect(paths)
+  g_write(st, g_sim(20, 1))
+  g_write(st, g_sim(10, 7), "old/gone")
+  g_quiet(store_delete(g_connect(paths[[1]]), "old/gone", confirm = "old/gone"))
+  store_refresh(st)
+  out <- g_quiet(store_sync(st, delete = TRUE))
+  expect_identical(out$status, "synced")
+  expect_identical(out$deleted, list("old/gone"))
+  expect_identical(g_listed(paths[[2]]), "sales/daily")
+  expect_true(all(store_status(st)$status == "same"))
+  expect_store_valid(st)
+})
+
+test_that("a default store_sync() costs the backend calls and catalog reads of a sync of the held dataset", {
+  # A-T10 (red). Red: the default sync also copies sales/summary and
+  # sales/weekly, so it makes more backend calls.
+  skip_below_level("default")
+  restricted <- s_held()
+  named <- s_held()
+  withr::local_options(rcs.trace = TRUE)
+  cost <- function(st, ...) {
+    rcs_trace_reset()
+    g_quiet(store_sync(st, ...))
+    trace <- rcs_trace()
+    c(
+      backend_call = sum(trace$n[trace$counter == "backend_call"]),
+      catalog_read = sum(trace$n[trace$counter == "catalog_read"])
+    )
+  }
+  expect_identical(cost(restricted$st), cost(named$st, datasets = "sales/daily"))
+})
+
+test_that("a default store_sync() refreshes a held raster whose legend changed under the same version", {
+  # A-T13 (guard). unit_needed() compares whole entries, so the secondary's
+  # entry is refreshed without a file sent; passes before and after.
+  skip_if_not_installed("terra")
+  skip_below_level("default")
+  paths <- g_paths(secondaries = 1L)
+  st <- g_connect(paths)
+  write_cover <- function(st, x, mode) {
+    suppressMessages(store_write(st, x, "grids/cover",
+      title = "Cover", description = "Simulated class map.", nodata = 0, mode = mode
+    ))
+  }
+  x <- sim_landcover(nrow = 12, ncol = 16, legend = TRUE)
+  write_cover(st, x, "create")
+  labels <- c("lake", sim_landcover_labels[-1])
+  levels(x) <- data.frame(value = 1:5, label = labels)
+  names(x) <- "cover"
+  write_cover(g_connect(paths[[1]]), x, "replace")
+  store_refresh(st)
+
+  entry <- function(location) {
+    location$catalog[location$catalog$dataset == "grids/cover", c("version", "columns", "updated")]
+  }
+  expect_identical(entry(st$secondary[[1]])$version, entry(st$primary)$version)
+  expect_false(identical(entry(st$secondary[[1]])$columns, entry(st$primary)$columns))
+  expect_identical(store_status(st)$status, "same")
+
+  out <- g_quiet(store_sync(st))
+  expect_identical(out$datasets, list("grids/cover"))
+  expect_identical(out$files, 0)
+  expect_identical(entry(st$secondary[[1]]), entry(st$primary))
+  expect_identical(entry(location_read(g_plain_backend(paths[[2]]))), entry(st$primary))
+  read <- g_read_at(paths[[2]], "grids/cover")
+  expect_identical(as.character(terra::cats(read)[[1]]$label), labels)
+
+  again <- g_quiet(store_sync(st))
+  expect_identical(again$status, "same")
+  expect_identical(again$datasets, list(character()))
 })
 
 # store_copy() -------------------------------------------------------------------

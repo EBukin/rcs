@@ -505,7 +505,7 @@ test_that("store_sync() and store_copy() work between an old-format location and
   expect_true(all(is.na(st$secondary[[1]]$catalog$geocode_engine)))
 
   # new primary -> old secondary
-  out <- store_sync(st)
+  out <- store_sync(st, all = TRUE)
   expect_true("shapes/engine" %in% unlist(out$datasets))
   expect_true("geocode_engine" %in% catalog_file_columns(secondary))
   engines <- catalog_file_engines(secondary)

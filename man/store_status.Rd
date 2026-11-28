@@ -42,8 +42,10 @@ A hint only: the clocks of the machines that wrote may differ;
 }
 
 The attribute \code{source} holds the address of the source. Zero rows when
-the connection has no other location. \code{store_sync()} brings missing
-and differing datasets up to date.
+the connection has no other location. \code{store_sync()} brings differing
+datasets up to date in the secondaries that hold them;
+\code{store_sync(st, datasets = "<name>")} or \code{store_sync(st, all = TRUE)}
+also copies missing ones.
 }
 \description{
 For each location other than the source and each dataset, compares the

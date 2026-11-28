@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -207,7 +207,10 @@ among others:</p>
 files: no catalog changes, and repeating the call succeeds and copies
 only what is missing;</li>
 <li>a failure of a secondary during a write: a warning, the secondary is
-reported as behind, and <code><a href="../reference/store_sync.html">store_sync()</a></code> repairs it;</li>
+reported as behind, and <code><a href="../reference/store_sync.html">store_sync()</a></code> with the dataset named
+in <code>datasets</code>, or with <code>all = TRUE</code>, repairs it (a
+plain <code><a href="../reference/store_sync.html">store_sync()</a></code> would not copy a dataset that the
+secondary never received);</li>
 <li>a transient error on the first two attempts of one file: the write
 succeeds;</li>
 <li>an upload that silently alters a file: the MD5 check stops the
@@ -234,18 +237,18 @@ secondary: at level <code>full</code> at every call 1, 2, …, N; at level
 <code>default</code> at one call of some of the matrices, plus every
 <code>be_unlock()</code> call. After each failure the invariants hold,
 every location holds the old or the new version of each dataset and
-never a mixture, and repeating the call (or <code><a href="../reference/store_sync.html">store_sync()</a></code>
-for a secondary left behind by a write) succeeds, sends only the files
-that are missing, and ends in the state of a run without failure.
-Orphans left by the failure are then removed by
-<code><a href="../reference/store_prune.html">store_prune()</a></code>.</p>
+never a mixture, and repeating the call (or
+<code>store_sync(all = TRUE)</code> for a secondary left behind by a
+write) succeeds, sends only the files that are missing, and ends in the
+state of a run without failure. Orphans left by the failure are then
+removed by <code><a href="../reference/store_prune.html">store_prune()</a></code>.</p>
 <p>The matrix is the helper <code>crash_matrix()</code> in
 <code>tests/testthat/helper-model.R</code>; a test file calls it like
 this:</p>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu">crash_matrix</span><span class="op">(</span><span class="st">"store_sync()"</span>,</span>
 <span>  setup <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">paths</span><span class="op">)</span> <span class="op">{</span> <span class="va">...</span> <span class="op">}</span>,   <span class="co"># builds the start state in three folders</span></span>
-<span>  op <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">st</span><span class="op">)</span> <span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span>,  <span class="co"># the operation on a connection</span></span>
+<span>  op <span class="op">=</span> <span class="kw">function</span><span class="op">(</span><span class="va">st</span><span class="op">)</span> <span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, all <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span>,  <span class="co"># the operation on a connection</span></span>
 <span>  stub_at <span class="op">=</span> <span class="fl">1L</span>,                      <span class="co"># 1: fail in the primary, 2: in a secondary</span></span>
 <span>  points <span class="op">=</span> <span class="cn">NULL</span>,                     <span class="co"># NULL: every call; a number: that many</span></span>
 <span>  repair <span class="op">=</span> <span class="st">"repeat"</span>,                 <span class="co"># what follows a failure</span></span>
@@ -400,10 +403,27 @@ accepted when equal and refused when changed, are tested in
 <code>test-write.R</code>.</li>
 <li>
 <strong>Sync</strong> (<code>test-sync.R</code>): syncs from the
-primary and from a secondary, deletions with and without
-<code>force</code>, a conflict (target newer) and an overwrite (source
-newer), dry runs, and one injected failure per phase, after which the
-invariants hold and a repeat sends only what is missing.</li>
+primary and from a secondary, the default scope (a secondary gets only
+the datasets it holds, and the call says what it left out) against
+<code>all = TRUE</code> and <code>datasets =</code>, deletions with and
+without <code>force</code>, a conflict (target newer) and an overwrite
+(source newer), dry runs, and one injected failure per phase, after
+which the invariants hold and a repeat sends only what is missing.</li>
+<li>
+<strong>Copy on read</strong> (<code>test-copy-on-read.R</code>):
+with a simulated cloud primary, <code><a href="../reference/store_read.html">store_read()</a></code> copies a
+dataset to an empty or outdated local secondary and then reads from it,
+sending only the changed files after an update; the size limit,
+<code>copy = TRUE</code> and <code>copy = FALSE</code>, and
+<code>store_connect(copy_on_read = FALSE)</code>; old versions, copied
+only with <code>copy = TRUE</code> and then into the history; no copy
+without an eligible secondary, to a secondary holding a newer version,
+or by <code><a href="../reference/store_sample.html">store_sample()</a></code>, <code><a href="../reference/store_glimpse.html">store_glimpse()</a></code>,
+<code><a href="../reference/store_open.html">store_open()</a></code>, <code><a href="../reference/store_duckdb.html">store_duckdb()</a></code> and reads of an
+index table; two secondaries served by one download; a dataset’s index
+table and a raster copied whole; a failing copy that warns while the
+read goes on; a windowed read of a class map; and one test against a
+bucket primary at level <code>full</code>.</li>
 </ul>
 </div>
 <div class="section level2">

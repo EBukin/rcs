@@ -603,7 +603,9 @@ map[1, 1]
 
 **6. Read a window.** `intersects` reads only the cells inside the query's
 bounding box, rounded outwards to whole cells. From a bucket they are read
-through GDAL, and the file is not downloaded as a whole. The window keeps
+through GDAL, and the file is not downloaded as a whole, unless a local
+secondary location first gets a copy of it (see "Read windows" under
+"Large maps"). The window keeps
 the legend and the colours, so counts come with labels and a plot with the
 colours of the classes.
 
@@ -715,7 +717,15 @@ terra::datatype(store_read(st, "grids/cover_from_file"))
   Point `options(rcs.staging_dir = )` to a larger drive when needed.
 - **Read windows.** `store_read(st, "name", intersects = area)` reads the
   part of the map you need; `store_read(st, "name")` only opens the file,
-  and cells are read when a calculation asks for them.
+  and cells are read when a calculation asks for them. With a bucket as
+  primary and a local secondary location that lacks the map, or holds an
+  older version, a read first copies the whole file to the local folder
+  when it is at or under the limit for copying on read (2 GB by default,
+  `options(rcs.copy_on_read_max_bytes = )`), and the window is then read
+  from that copy. Above the limit, the window is read from the bucket.
+  `copy = FALSE` on the read, or `copy_on_read = FALSE` on the connection,
+  keeps the read on the bucket (see "Local working copies of a bucket" in
+  `vignette("locations")`).
 - **Every location gets the map.** A write lands in the primary and in
   every secondary location of the connection. A dataset cannot yet be kept
   in the primary only.

@@ -8,7 +8,9 @@ only the columns and row groups the query needs. The file list comes
 from the catalog held by the connection `st`, so the views show the
 versions it knows: after
 [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
-call `store_duckdb()` again. One message names the views made.
+call `store_duckdb()` again. One message names the views made. Unlike
+[`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md),
+it never copies a dataset to a secondary location.
 
 ## Usage
 

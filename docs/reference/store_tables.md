@@ -57,13 +57,13 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-tables  1/1
-#>   files sent  13.7 kB  0.2s
+#>   files sent  13.7 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 store_tables(st)
 #> # A tibble: 1 × 10
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 13733       1 <chr [0]> 9eda87… 2026-11-27 13:56:52
+#> 1 sales/d… table Dail…   100 13733       1 <chr [0]> 9eda87… 2026-11-27 18:51:52
 #> # ℹ 1 more variable: duckdb_view <chr>
 con <- store_duckdb(st)
 #> ✔ DuckDB view (native mode, nothing read yet): `sales.daily`.

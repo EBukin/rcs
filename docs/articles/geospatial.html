@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -197,8 +197,8 @@ deleted with its dataset, and is hidden unless asked for:</p>
 <span><span class="co">#&gt; Datasets: 2</span></span>
 <span><span class="co">#&gt;   name            kind        rows     size  files  updated</span></span>
 <span><span class="co">#&gt;   shapes/</span></span>
-<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-27 18:58</span></span>
-<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-27 18:58</span></span></code></pre></div>
+<span><span class="co">#&gt;     polygons      geospatial   500  62.6 kB      1  2026-11-27 23:53</span></span>
+<span><span class="co">#&gt;     polygons__h3  table        533  10.2 kB      1  2026-11-27 23:53</span></span></code></pre></div>
 <p><code>h3</code> and <code>bbox</code> come back with the data.
 <code><a href="../reference/store_h3_hex.html">store_h3_hex()</a></code> turns the cell columns of a data frame into
 the 15-character text form that other H3 tools use:</p>
@@ -422,7 +422,7 @@ filter pay off”).</p>
 <span>  max_files <span class="op">=</span> <span class="fl">10</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"shapes/polygons_by_cell"</span>: 500 rows in 7 files (partition h3_p2), and its index table in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  157.5 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  8/8 files sent  157.5 kB  0.3s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 8 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <p>The work counters show which files a read opened:</p>
 <div class="sourceCode" id="cb18"><pre class="downlit sourceCode r">
@@ -832,8 +832,10 @@ missing.</p>
 <p><strong>6. Read a window.</strong> <code>intersects</code> reads only
 the cells inside the query’s bounding box, rounded outwards to whole
 cells. From a bucket they are read through GDAL, and the file is not
-downloaded as a whole. The window keeps the legend and the colours, so
-counts come with labels and a plot with the colours of the classes.</p>
+downloaded as a whole, unless a local secondary location first gets a
+copy of it (see “Read windows” under “Large maps”). The window keeps the
+legend and the colours, so counts come with labels and a plot with the
+colours of the classes.</p>
 <div class="sourceCode" id="cb35"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">window</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover"</span>, intersects <span class="op">=</span> <span class="va">area</span><span class="op">)</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/dim.html" class="external-link">dim</a></span><span class="op">(</span><span class="va">window</span><span class="op">)</span></span>
@@ -902,7 +904,7 @@ here ZSTD compression:</p>
 <span>  gdal <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="st">"COMPRESS=ZSTD"</span>, <span class="st">"LEVEL=9"</span><span class="op">)</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/simulated_zstd"</span>: 40,000 cells in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  673.7 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  673.7 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span></code></pre></div>
 </div>
 <div class="section level3">
@@ -927,7 +929,7 @@ marks <code>0</code> as NoData itself.</p>
 <span>  description <span class="op">=</span> <span class="st">"A simulated class map in open ocean, written from a GeoTIFF."</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover_from_file"</span>: 40,000 cells in 1 file.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  4.7 kB  0.2s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/geo-store  1/1 files sent  4.7 kB  0.1s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 1 location. Catalogs updated.</span></span>
 <span><span class="fu">terra</span><span class="fu">::</span><span class="fu"><a href="https://rspatial.github.io/terra/reference/datatype.html" class="external-link">datatype</a></span><span class="op">(</span><span class="fu"><a href="../reference/store_read.html">store_read</a></span><span class="op">(</span><span class="va">st</span>, <span class="st">"grids/cover_from_file"</span><span class="op">)</span><span class="op">)</span></span>
 <span><span class="co">#&gt; [1] "INT1U"</span></span></code></pre></div>
@@ -967,7 +969,16 @@ needed.</li>
 <strong>Read windows.</strong>
 <code>store_read(st, "name", intersects = area)</code> reads the part of
 the map you need; <code>store_read(st, "name")</code> only opens the
-file, and cells are read when a calculation asks for them.</li>
+file, and cells are read when a calculation asks for them. With a bucket
+as primary and a local secondary location that lacks the map, or holds
+an older version, a read first copies the whole file to the local folder
+when it is at or under the limit for copying on read (2 GB by default,
+<code>options(rcs.copy_on_read_max_bytes = )</code>), and the window is
+then read from that copy. Above the limit, the window is read from the
+bucket. <code>copy = FALSE</code> on the read, or
+<code>copy_on_read = FALSE</code> on the connection, keeps the read on
+the bucket (see “Local working copies of a bucket” in
+<code><a href="../articles/locations.html">vignette("locations")</a></code>).</li>
 <li>
 <strong>Every location gets the map.</strong> A write lands in the
 primary and in every secondary location of the connection. A dataset

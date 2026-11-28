@@ -544,7 +544,7 @@ run_layout <- function(spec) {
       {
         st_both <- store_connect(uri, secondary = gcs_uri, create = TRUE)
         start <- bench::hires_time()
-        store_sync(st_both)
+        store_sync(st_both, all = TRUE)
         sync_s <- as.numeric(bench::hires_time() - start)
         gcs_timed <- list()
         holder <- new.env()

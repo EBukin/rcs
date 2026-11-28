@@ -60,7 +60,7 @@ store_write(st, rcs_sim_table(500, seed = 1), "sales/daily",
   partition = "year"
 )
 #> ℹ Writing "sales/daily": 500 rows in 2 files (partition year).
-#> ✔ primary  <tempdir>/my-store  2/2 files sent  38.2 kB  0.4s
+#> ✔ primary  <tempdir>/my-store  2/2 files sent  38.3 kB  0.3s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 ```
 
@@ -76,7 +76,7 @@ st
 #> Datasets: 1
 #>   name     kind   rows     size  files  updated
 #>   sales/
-#>     daily  table   500  38.2 kB      2  2026-11-22 13:26
+#>     daily  table   500  38.3 kB      2  2026-11-27 23:24
 ```
 
 Open a dataset. Nothing is read yet; printing shows a header and the
@@ -88,7 +88,7 @@ q <- store_open(st, "sales/daily")
 q
 #> # Dataset:  sales/daily [500 x 15] (table)
 #> # Location: primary (local)
-#> # Version:  b454e301 (current)
+#> # Version:  99995a06 (current)
 #> # Files:    2 of 2
 #>    shop_id date        year product   qty price promo grade delivered      big
 #>      <int> <date>     <int> <fct>   <int> <dbl> <lgl> <ord> <date>     <int64>
@@ -165,6 +165,10 @@ and reads use the local copy:
 
 st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
 ```
+
+A read of a dataset that the local copy lacks, or holds at an older
+version, first copies it there (up to 2 GB by default), so the next
+reads are local.
 
 ## Learn more
 

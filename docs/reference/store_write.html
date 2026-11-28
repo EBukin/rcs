@@ -17,7 +17,7 @@ version."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -545,7 +545,9 @@ its catalog is switched, the call aborts and no catalog has changed;
 uploaded files are reused when the call is repeated (and removed by
 <code><a href="store_prune.html">store_prune()</a></code> otherwise). If a secondary fails, the call warns,
 continues with the next location and reports the secondary as behind;
-<code><a href="store_sync.html">store_sync()</a></code> repairs it.</p>
+<code>store_sync(st, datasets = "&lt;name&gt;")</code> repairs it, or
+<code>store_sync(st, all = TRUE)</code> for every dataset (a plain <code><a href="store_sync.html">store_sync()</a></code>
+refreshes only the datasets a secondary already holds).</p>
     </div>
     <div class="section level2">
     <h2 id="see-also">See also<a class="anchor" aria-label="anchor" href="#see-also"></a></h2>
@@ -569,9 +571,9 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  27.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># The same data again: nothing is uploaded</span></span></span>
@@ -600,9 +602,9 @@ continues with the next location and reports the secondary as behind;
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">•</span> year = 2024: 97 rows -&gt; 97 rows</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 200 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  13.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">st</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> ── rcs store ───────────────────────────────────────────────────────────────────</span>
@@ -613,7 +615,7 @@ continues with the next location and reports the secondary as behind;
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated           1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.9 kB      2  2026-11-27 13:56  =</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   200  27.9 kB      2  2026-11-27 18:51  =</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Secondary copies: = same, ≠ differs, – missing, ? unavailable.</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># A class map: the codes go into the file, the legend and the colours</span></span></span>
@@ -652,9 +654,9 @@ continues with the next location and reports the secondary as behind;
 <span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover"</span>: 4,800 cells in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/1</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/1</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.9 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 2 locations. Catalogs updated.</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #949494;"># A tibble: 1 × 4</span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name  type  r_type                                            description</span>
@@ -662,7 +664,7 @@ continues with the next location and reports the secondary as behind;
 <span class="r-out co"><span class="r-pr">#&gt;</span> <span style="color: #BCBCBC;">1</span> cover INT1U raster layer (60 x 80 cells, nodata 0, 5 classes) <span style="color: #BB0000;">NA</span>         </span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"grids/cover_zstd"</span>: 4,800 cells in 1 file.</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-write/primary  1/1</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.6 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.6 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-write/copy     1/1</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  1.6 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 1 file in 2 locations. Catalogs updated.</span>

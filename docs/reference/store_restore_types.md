@@ -85,7 +85,7 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-restore-types  1/1
-#>   files sent  13.7 kB  0.2s
+#>   files sent  13.7 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 path <- list.files(file.path(root, "sales/daily"),
   pattern = "\\.parquet$", full.names = TRUE

@@ -60,7 +60,7 @@
 # store_sync() copies missing and differing datasets; a dry run changes nothing
 
     Code
-      dry <- store_sync(st, dry_run = TRUE)
+      dry <- store_sync(st, all = TRUE, dry_run = TRUE)
     Message
       i Dry run: nothing is changed.
       i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
@@ -70,7 +70,7 @@
 ---
 
     Code
-      out <- store_sync(st)
+      out <- store_sync(st, all = TRUE)
     Message
       i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
       v secondary  <root>/secondary1  up to date
@@ -84,7 +84,7 @@
 ---
 
     Code
-      again <- store_sync(st)
+      again <- store_sync(st, all = TRUE)
     Message
       i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
       v secondary  <root>/secondary1  up to date
@@ -94,7 +94,7 @@
 # a secondary failing during store_sync() warns, is reported behind, and the next call completes it
 
     Code
-      out <- store_sync(st)
+      out <- store_sync(st, all = TRUE)
     Message
       i Syncing 1 dataset from the primary '<root>/primary' to 2 secondary locations.
     Condition
@@ -115,7 +115,7 @@
       dry <- store_sync(sc$st, delete = TRUE, dry_run = TRUE)
     Message
       i Dry run: nothing is changed.
-      i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
+      i Syncing the datasets already held by each secondary location, from the primary '<root>/primary' to 2 secondary locations.
       * secondary  <root>/secondary1  would copy 1 dataset, 2 files (<bytes>): "sales/summary"; would delete 1 dataset: "old/gone"; 1 conflict, newer here: "sales/daily"
       * secondary  <root>/secondary2  would copy 2 datasets, 4 files (<bytes>): "sales/daily", "sales/summary"; would delete 1 dataset: "old/gone"
 
@@ -125,7 +125,7 @@
       dry <- store_sync(sc$st, from = sc$paths[[3]], delete = TRUE, dry_run = TRUE)
     Message
       i Dry run: nothing is changed.
-      i Syncing 3 datasets from the secondary '<root>/secondary2' to 2 locations.
+      i Syncing the datasets already held by each secondary location, from the secondary '<root>/secondary2' to 2 locations.
       * primary    <root>/primary     would copy 1 dataset, 2 files (<bytes>): "old/gone"; 2 conflicts, newer here: "sales/daily", "sales/summary"
       * secondary  <root>/secondary1  1 conflict, newer here: "sales/daily"
 
@@ -134,7 +134,7 @@
     Code
       store_sync(st, delete = TRUE)
     Message
-      i Syncing 2 datasets from the primary '<root>/primary' to 2 secondary locations.
+      i Syncing the datasets already held by each secondary location, from the primary '<root>/primary' to 2 secondary locations.
       x secondary  <root>/secondary1  1 dataset, 2/2 files sent  <bytes>  <time>; 1 dataset deleted: "old/gone"; 1 conflict, newer here: "sales/daily"
       v secondary  <root>/secondary2  2 datasets, 4/4 files sent  <bytes>  <time>; 1 dataset deleted: "old/gone"
       v MD5 identical for 6 files sent to 2 locations. Catalogs updated.
@@ -156,10 +156,35 @@
     Code
       err <- tryCatch(store_sync(st, from = sc$paths[[3]], delete = TRUE), rcs_error_sync_conflict = function(e) e)
     Message
-      i Syncing 2 datasets from the secondary '<root>/secondary2' to 2 locations.
+      i Syncing the datasets already held by each secondary location, from the secondary '<root>/secondary2' to 2 locations.
       ! primary    <root>/primary     1 dataset kept, delete on primary needs force: "new/one"
       x secondary  <root>/secondary1  1 conflict, newer here: "sales/daily"
       ! 1 dataset kept in the primary: delete on primary needs force (`force = TRUE`).
+
+# a default store_sync() says what it did not copy and how to copy everything
+
+    Code
+      out <- store_sync(fx$st)
+    Message
+      i Syncing the datasets already held by each secondary location, from the primary '<root>/primary' to 1 secondary location.
+      v secondary  <root>/secondary1  1 dataset, 2/2 files sent  <bytes>  <time>
+      i Synced only the datasets already in each secondary location.
+      i '<root>/secondary1': 2 datasets not copied (4 files, <bytes>).
+        Use `store_sync(st, all = TRUE)` to copy every dataset, or `datasets = ` to copy some.
+      v MD5 identical for 2 files sent to 1 location. Catalogs updated.
+    Condition
+      Warning:
+      `store_sync()` replaced 1 version held by the target locations:
+      * '<root>/secondary1': "sales/daily" version <version> (updated <date>) replaced by version <version> (updated <date>).
+
+# store_sync() checks all
+
+    Code
+      store_sync(st, datasets = "sales/daily", all = TRUE)
+    Condition
+      Error in `store_sync()`:
+      ! `all = TRUE` cannot be combined with `datasets`.
+      i Use `all = TRUE` to copy every dataset, or `datasets` to copy some.
 
 # store_copy() checks its arguments
 

@@ -83,7 +83,8 @@ the cells as \link{rcs_h3} vectors.
 }
 
 The query reads from the location chosen as for \code{\link[=store_read]{store_read()}}, with the
-catalogs held by the connection.
+catalogs held by the connection. Unlike \code{\link[=store_read]{store_read()}}, it never copies
+the dataset to a secondary location.
 }
 \section{Printing}{
 

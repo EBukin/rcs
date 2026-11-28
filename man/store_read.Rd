@@ -12,6 +12,7 @@ store_read(
   intersects = NULL,
   geometry = TRUE,
   version = NULL,
+  copy = NULL,
   exact = TRUE,
   exact_engine = NULL
 )
@@ -42,6 +43,14 @@ tibble.}
 
 \item{version}{\code{NULL} for the current version, or the 16 hex characters of
 an earlier version kept in the history.}
+
+\item{copy}{Whether to copy the dataset to the local secondary locations
+before reading (see "Copy to secondary locations"). \code{NULL} (the
+default) copies the current version when the connection's
+\code{copy_on_read} is \code{TRUE} and the bytes to download are at or under the
+limit. \code{TRUE} copies whatever the limit and the connection's setting,
+and copies an earlier version too, into the secondaries' history.
+\code{FALSE} never copies.}
 
 \item{exact}{\code{TRUE} tests the candidate rows of a spatial filter exactly,
 on the sphere or in the plane as \code{exact_engine} says.}
@@ -92,8 +101,18 @@ and \code{exact_engine} do not apply to rasters and abort.
 
 A raster is returned as a \code{terra::SpatRaster} that points to the stored
 file: at the location itself for a local store, through GDAL's virtual
-file system for a bucket. No cell is read until it is needed, and the
-file is not downloaded.
+file system for a bucket. No cell is read until it is needed: GDAL
+fetches only the tiles a calculation or a window needs, from the location
+read from. The file itself is copied only by a copy to a secondary
+location (below).
+
+A raster is one file, so copying it to a secondary location is all or
+nothing (see "Copy to secondary locations"). With a primary in a bucket
+and a local secondary that lacks the raster or holds an older version,
+the whole file is first copied to the secondary when it is at or under
+the size limit, and the raster, or its window, is then read from that
+copy. With \code{copy = FALSE}, a connection made with \code{copy_on_read = FALSE}, or a file above the limit, nothing is copied and the read stays
+on the bucket.
 \itemize{
 \item \strong{The whole raster.} \code{store_read(st, "name")} returns every layer,
 with the layer names, the data type and the NoData value of the file.
@@ -101,8 +120,9 @@ Cells that hold the NoData value are missing (\code{NA}).
 \item \strong{A window.} \code{intersects} returns only the part inside the bounding
 box of the query, in the raster's CRS, rounded outwards to whole
 cells; a point or a line gives the cells it touches. The cells of the
-window are read at once, straight from the bucket for a store in a
-bucket: this is the way to work with a map too large to read whole.
+window are read at once, from the location read from (straight from
+the bucket when no local copy holds the version): this is the way to
+work with a map too large to read whole.
 The query takes the same forms as for geospatial data (an \code{sf}, \code{sfc}
 or \code{bbox} object in any CRS, or H3 cells). A query that does not
 overlap the raster aborts; one that crosses the antimeridian or holds
@@ -130,6 +150,58 @@ dataset at the primary's version, a local one first, then the primary,
 then the other secondaries. Reading from a secondary prints a line
 saying so (silenced by \code{options(rcs.quiet = TRUE)}). Reads use the
 catalogs held by the connection; \code{\link[=store_refresh]{store_refresh()}} reads them again.
+}
+
+\section{Copy to secondary locations}{
+
+When the primary location is not local (a bucket) and a secondary is a
+local folder, \code{store_read()} first copies the dataset there, so that
+this read and the next ones come from the local copy. It copies only:
+\itemize{
+\item to secondaries that are available and local, while the primary is
+not local: with a local primary, or with secondaries in buckets
+only, a read copies nothing;
+\item the current version, to a secondary that lacks the dataset or its
+index table, or holds an older version of it. The dataset is copied
+from the primary with its index table, and only the files the
+secondary lacks are sent, each verified by its MD5;
+\item when the connection's \code{copy_on_read} is \code{TRUE} (the default of
+\code{\link[=store_connect]{store_connect()}}) and \code{copy} is not \code{FALSE};
+\item when the bytes to download, for the secondary that lacks the most,
+are at or under the limit \code{getOption("rcs.copy_on_read_max_bytes")},
+2 GB (\code{2e9}) by default. Above it nothing is copied and a message
+says how to copy (\code{copy = TRUE}, or \code{\link[=store_sync]{store_sync()}} with
+\verb{datasets = }).
+}
+
+Filters, \code{columns} and \code{intersects} do not change the rule: the whole
+dataset is copied, then read from the copy. A secondary whose version
+was written later than the primary's is never replaced by a read; a
+message says so. A secondary that holds the primary's version under
+another catalog entry (for example a raster written again with another
+legend or other colours) gets the primary's entry, without any file
+sent and whatever the limit. A copy that fails gives a warning, and the
+read goes on from the primary; the next read tries again. Reading an
+index table never copies; nor do \code{\link[=store_sample]{store_sample()}}, \code{\link[=store_glimpse]{store_glimpse()}},
+\code{\link[=store_open]{store_open()}} and \code{\link[=store_duckdb]{store_duckdb()}}.
+
+Earlier versions (\verb{version = }) are not copied by default. When such a
+read comes from the primary while an available local secondary could
+hold a copy, a message says so (unless copying is turned off).
+\code{copy = TRUE} adds the version to the history of each of these
+secondaries, other than the one it is read from, that holds neither it
+as its current version nor it in its history: its files, its manifest
+unchanged, and its rows of the history. With no such secondary at all,
+a message says there is none to copy to. The secondary's current version of the dataset does not
+change, and a secondary that does not hold the dataset still does not
+list it. One effect to know: \code{\link[=store_rebuild]{store_rebuild()}} of a secondary that
+holds only an earlier version of a dataset makes that version its
+current one.
+
+To turn copying off, connect with \code{store_connect(copy_on_read = FALSE)},
+or pass \code{copy = FALSE} to one read: nothing is copied and no message
+about copying is printed (a secondary that already holds the version is
+still read from). Messages are silenced by \code{options(rcs.quiet = TRUE)}.
 }
 
 \examples{

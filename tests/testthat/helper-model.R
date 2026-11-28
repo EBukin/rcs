@@ -286,7 +286,7 @@ crash_matrix <- function(label, setup, op, stub_at, points = NULL, repair = c("s
       stub_reset(stub)
       again <- withr::with_options(
         list(rcs.lock_timeout = 0),
-        g_capture(if (!is.null(res$error) || repair == "repeat") op(st) else store_sync(st))
+        g_capture(if (!is.null(res$error) || repair == "repeat") op(st) else store_sync(st, all = TRUE))
       )
       testthat::expect(
         is.null(again$error) && !again$behind,
@@ -366,7 +366,7 @@ random_sequence <- function(seed, n_ops = 50L, frame = parent.frame()) {
     if (!is.null(res$error) || res$behind) {
       again <- withr::with_options(
         list(rcs.lock_timeout = 0),
-        g_capture(if (!is.null(res$error) || repair == "repeat") call() else store_sync(st))
+        g_capture(if (!is.null(res$error) || repair == "repeat") call() else store_sync(st, all = TRUE))
       )
       synced <- is.null(res$error) && repair == "sync"
       if (!is.null(again$error) || again$behind) {
@@ -455,7 +455,7 @@ random_sequence <- function(seed, n_ops = 50L, frame = parent.frame()) {
       },
       sync = {
         note(sprintf("sync%s", tag))
-        run(function() store_sync(st), fail_at)
+        run(function() store_sync(st, all = TRUE), fail_at)
         sync_model()
       },
       prune = {

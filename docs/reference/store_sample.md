@@ -78,6 +78,10 @@ sorted (by key, or spatially by H3 cell), so the rows of one row group
 are alike, and the sample covers only as many clusters as row groups
 were read. Use it to look at data, not to estimate.
 
+Unlike
+[`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md),
+it never copies the dataset to a secondary location.
+
 ## See also
 
 [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md).
@@ -93,7 +97,7 @@ store_write(st, rcs_sim_table(2000), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 2,000 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-sample  2/2
-#>   files sent  89.1 kB  0.2s
+#>   files sent  89.1 kB  0.1s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_sample(st, "sales/daily", n = 5, qty > 10, seed = 42)
 #> # A tibble: 5 × 15

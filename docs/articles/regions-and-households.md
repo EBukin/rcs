@@ -166,8 +166,8 @@ print(st, index = TRUE)
 #> Datasets: 2
 #>   name           kind        rows     size  files  updated
 #>   admin/
-#>     regions      geospatial     3  13.4 kB      1  2026-11-27 18:59
-#>     regions__h3  table        282   6.3 kB      1  2026-11-27 18:59
+#>     regions      geospatial     3  13.4 kB      1  2026-11-27 23:54
+#>     regions__h3  table        282   6.3 kB      1  2026-11-27 23:54
 ```
 
 ## 3. The regions as H3 cells

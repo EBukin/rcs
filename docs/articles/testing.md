@@ -89,7 +89,10 @@ silently alters a written file. With it the tests check, among others:
 - a failure of a secondary during a write: a warning, the secondary is
   reported as behind, and
   [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-  repairs it;
+  with the dataset named in `datasets`, or with `all = TRUE`, repairs it
+  (a plain
+  [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+  would not copy a dataset that the secondary never received);
 - a transient error on the first two attempts of one file: the write
   succeeds;
 - an upload that silently alters a file: the MD5 check stops the write;
@@ -118,11 +121,10 @@ primary and on a secondary: at level `full` at every call 1, 2, …, N; at
 level `default` at one call of some of the matrices, plus every
 `be_unlock()` call. After each failure the invariants hold, every
 location holds the old or the new version of each dataset and never a
-mixture, and repeating the call (or
-[`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-for a secondary left behind by a write) succeeds, sends only the files
-that are missing, and ends in the state of a run without failure.
-Orphans left by the failure are then removed by
+mixture, and repeating the call (or `store_sync(all = TRUE)` for a
+secondary left behind by a write) succeeds, sends only the files that
+are missing, and ends in the state of a run without failure. Orphans
+left by the failure are then removed by
 [`store_prune()`](https://ebukin.github.io/rcs/reference/store_prune.md).
 
 The matrix is the helper `crash_matrix()` in
@@ -132,7 +134,7 @@ The matrix is the helper `crash_matrix()` in
 
 crash_matrix("store_sync()",
   setup = function(paths) { ... },   # builds the start state in three folders
-  op = function(st) store_sync(st),  # the operation on a connection
+  op = function(st) store_sync(st, all = TRUE),  # the operation on a connection
   stub_at = 1L,                      # 1: fail in the primary, 2: in a secondary
   points = NULL,                     # NULL: every call; a number: that many
   repair = "repeat",                 # what follows a failure
@@ -284,10 +286,29 @@ tests themselves):
   points, lines and polygons. Prepared writes, accepted when equal and
   refused when changed, are tested in `test-write.R`.
 - **Sync** (`test-sync.R`): syncs from the primary and from a secondary,
+  the default scope (a secondary gets only the datasets it holds, and
+  the call says what it left out) against `all = TRUE` and `datasets =`,
   deletions with and without `force`, a conflict (target newer) and an
   overwrite (source newer), dry runs, and one injected failure per
   phase, after which the invariants hold and a repeat sends only what is
   missing.
+- **Copy on read** (`test-copy-on-read.R`): with a simulated cloud
+  primary,
+  [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md)
+  copies a dataset to an empty or outdated local secondary and then
+  reads from it, sending only the changed files after an update; the
+  size limit, `copy = TRUE` and `copy = FALSE`, and
+  `store_connect(copy_on_read = FALSE)`; old versions, copied only with
+  `copy = TRUE` and then into the history; no copy without an eligible
+  secondary, to a secondary holding a newer version, or by
+  [`store_sample()`](https://ebukin.github.io/rcs/reference/store_sample.md),
+  [`store_glimpse()`](https://ebukin.github.io/rcs/reference/store_glimpse.md),
+  [`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md),
+  [`store_duckdb()`](https://ebukin.github.io/rcs/reference/store_duckdb.md)
+  and reads of an index table; two secondaries served by one download; a
+  dataset’s index table and a raster copied whole; a failing copy that
+  warns while the read goes on; a windowed read of a class map; and one
+  test against a bucket primary at level `full`.
 
 ## DuckDB
 

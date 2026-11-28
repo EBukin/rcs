@@ -15,6 +15,7 @@ store_read(
   intersects = NULL,
   geometry = TRUE,
   version = NULL,
+  copy = NULL,
   exact = TRUE,
   exact_engine = NULL
 )
@@ -66,6 +67,16 @@ store_read(
 
   `NULL` for the current version, or the 16 hex characters of an earlier
   version kept in the history.
+
+- copy:
+
+  Whether to copy the dataset to the local secondary locations before
+  reading (see "Copy to secondary locations"). `NULL` (the default)
+  copies the current version when the connection's `copy_on_read` is
+  `TRUE` and the bytes to download are at or under the limit. `TRUE`
+  copies whatever the limit and the connection's setting, and copies an
+  earlier version too, into the secondaries' history. `FALSE` never
+  copies.
 
 - exact:
 
@@ -130,7 +141,18 @@ A raster is returned as a
 [`terra::SpatRaster`](https://rspatial.github.io/terra/reference/SpatRaster-class.html)
 that points to the stored file: at the location itself for a local
 store, through GDAL's virtual file system for a bucket. No cell is read
-until it is needed, and the file is not downloaded.
+until it is needed: GDAL fetches only the tiles a calculation or a
+window needs, from the location read from. The file itself is copied
+only by a copy to a secondary location (below).
+
+A raster is one file, so copying it to a secondary location is all or
+nothing (see "Copy to secondary locations"). With a primary in a bucket
+and a local secondary that lacks the raster or holds an older version,
+the whole file is first copied to the secondary when it is at or under
+the size limit, and the raster, or its window, is then read from that
+copy. With `copy = FALSE`, a connection made with
+`copy_on_read = FALSE`, or a file above the limit, nothing is copied and
+the read stays on the bucket.
 
 - **The whole raster.** `store_read(st, "name")` returns every layer,
   with the layer names, the data type and the NoData value of the file.
@@ -139,12 +161,13 @@ until it is needed, and the file is not downloaded.
 - **A window.** `intersects` returns only the part inside the bounding
   box of the query, in the raster's CRS, rounded outwards to whole
   cells; a point or a line gives the cells it touches. The cells of the
-  window are read at once, straight from the bucket for a store in a
-  bucket: this is the way to work with a map too large to read whole.
-  The query takes the same forms as for geospatial data (an `sf`, `sfc`
-  or `bbox` object in any CRS, or H3 cells). A query that does not
-  overlap the raster aborts; one that crosses the antimeridian or holds
-  a pole returns the raster uncropped.
+  window are read at once, from the location read from (straight from
+  the bucket when no local copy holds the version): this is the way to
+  work with a map too large to read whole. The query takes the same
+  forms as for geospatial data (an `sf`, `sfc` or `bbox` object in any
+  CRS, or H3 cells). A query that does not overlap the raster aborts;
+  one that crosses the antimeridian or holds a pole returns the raster
+  uncropped.
 
 - **Legend.** A layer written with categories (see "Rasters" in
   [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md))
@@ -179,6 +202,66 @@ saying so (silenced by `options(rcs.quiet = TRUE)`). Reads use the
 catalogs held by the connection;
 [`store_refresh()`](https://ebukin.github.io/rcs/reference/store_refresh.md)
 reads them again.
+
+## Copy to secondary locations
+
+When the primary location is not local (a bucket) and a secondary is a
+local folder, `store_read()` first copies the dataset there, so that
+this read and the next ones come from the local copy. It copies only:
+
+- to secondaries that are available and local, while the primary is not
+  local: with a local primary, or with secondaries in buckets only, a
+  read copies nothing;
+
+- the current version, to a secondary that lacks the dataset or its
+  index table, or holds an older version of it. The dataset is copied
+  from the primary with its index table, and only the files the
+  secondary lacks are sent, each verified by its MD5;
+
+- when the connection's `copy_on_read` is `TRUE` (the default of
+  [`store_connect()`](https://ebukin.github.io/rcs/reference/store_connect.md))
+  and `copy` is not `FALSE`;
+
+- when the bytes to download, for the secondary that lacks the most, are
+  at or under the limit `getOption("rcs.copy_on_read_max_bytes")`, 2 GB
+  (`2e9`) by default. Above it nothing is copied and a message says how
+  to copy (`copy = TRUE`, or
+  [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
+  with `datasets = `).
+
+Filters, `columns` and `intersects` do not change the rule: the whole
+dataset is copied, then read from the copy. A secondary whose version
+was written later than the primary's is never replaced by a read; a
+message says so. A secondary that holds the primary's version under
+another catalog entry (for example a raster written again with another
+legend or other colours) gets the primary's entry, without any file sent
+and whatever the limit. A copy that fails gives a warning, and the read
+goes on from the primary; the next read tries again. Reading an index
+table never copies; nor do
+[`store_sample()`](https://ebukin.github.io/rcs/reference/store_sample.md),
+[`store_glimpse()`](https://ebukin.github.io/rcs/reference/store_glimpse.md),
+[`store_open()`](https://ebukin.github.io/rcs/reference/store_open.md)
+and
+[`store_duckdb()`](https://ebukin.github.io/rcs/reference/store_duckdb.md).
+
+Earlier versions (`version = `) are not copied by default. When such a
+read comes from the primary while an available local secondary could
+hold a copy, a message says so (unless copying is turned off).
+`copy = TRUE` adds the version to the history of each of these
+secondaries, other than the one it is read from, that holds neither it
+as its current version nor it in its history: its files, its manifest
+unchanged, and its rows of the history. With no such secondary at all, a
+message says there is none to copy to. The secondary's current version
+of the dataset does not change, and a secondary that does not hold the
+dataset still does not list it. One effect to know:
+[`store_rebuild()`](https://ebukin.github.io/rcs/reference/store_rebuild.md)
+of a secondary that holds only an earlier version of a dataset makes
+that version its current one.
+
+To turn copying off, connect with `store_connect(copy_on_read = FALSE)`,
+or pass `copy = FALSE` to one read: nothing is copied and no message
+about copying is printed (a secondary that already holds the version is
+still read from). Messages are silenced by `options(rcs.quiet = TRUE)`.
 
 ## See also
 
@@ -226,7 +309,7 @@ store_write(st, rcs_sim_polygons(200), "shapes/polygons",
 )
 #> ℹ Writing "shapes/polygons": 200 rows in 1 file, and its index table in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  2/2
-#>   files sent  41.2 kB  0.2s
+#>   files sent  41.2 kB  0.3s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 area <- sf::st_as_sfc(sf::st_bbox(
   c(xmin = -28, ymin = 7, xmax = -27, ymax = 8),
@@ -307,7 +390,7 @@ if (requireNamespace("terra", quietly = TRUE)) {
 }
 #> ℹ Writing "grids/cover": 4,800 cells in 1 file.
 #> ✔ primary  /tmp/Rtmp/rcs-example-read  1/1
-#>   files sent  1.9 kB  0.2s
+#>   files sent  1.9 kB  0.1s
 #> ✔ MD5 identical for 1 file in 1 location. Catalogs updated.
 #> class       : SpatRaster
 #> size        : 60, 80, 1  (nrow, ncol, nlyr)

@@ -58,17 +58,17 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 )
 #> ℹ Writing "sales/daily": 100 rows in 2 files (partition year).
 #> ✔ primary  /tmp/Rtmp/rcs-example-datasets/primary  2/2
-#>   files sent  23.8 kB  0.1s
+#>   files sent  23.8 kB  0.2s
 #> ✔ MD5 identical for 2 files in 1 location. Catalogs updated.
 store_datasets(st)
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 13:56:22
+#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 18:51:22
 store_datasets(st, pattern = "^sales/", kind = "table")
 #> # A tibble: 1 × 9
 #>   dataset  kind  title  rows bytes n_files partition version updated            
 #>   <chr>    <chr> <chr> <dbl> <dbl>   <int> <list>    <chr>   <dttm>             
-#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 13:56:22
+#> 1 sales/d… table Dail…   100 23832       2 <chr [1]> 0f9e01… 2026-11-27 18:51:22
 unlink(root, recursive = TRUE)
 ```

@@ -107,8 +107,8 @@ st
 A read picks, among the locations that hold the dataset at the primary's
 version, a local folder first, then the primary, then the other
 secondaries. With a bucket as primary and a local folder as secondary,
-reads come from the local folder as long as it is up to date, and a line
-says so:
+reads come from the local folder when it holds the primary's version, and
+a line says so:
 
 ```{r, eval = FALSE}
 st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
@@ -116,8 +116,15 @@ x <- store_read(st, "sales/daily")
 #> ℹ Reading "sales/daily" from secondary ~/data/my-store.
 ```
 
-`options(rcs.quiet = TRUE)` silences that line. A secondary that is behind
-is skipped, and the read goes to the primary.
+`options(rcs.quiet = TRUE)` silences that line. When the local folder
+lacks the dataset or holds an older version, `store_read()` first copies
+the dataset there and then reads from the copy (see "Local working copies
+of a bucket"). A secondary that is behind and is not brought up to date
+that way, for example another bucket, is skipped, and the read goes to the
+primary.
+
+Here all three locations are local folders. The primary is local too, so
+reads come from it, and a read never copies anything.
 
 ## Addresses from the environment
 
@@ -198,10 +205,17 @@ store_write(st, rcs_sim_table(300, seed = 2), "sales/daily",
 )
 ```
 
+The message names the call that repairs it later:
+`store_sync(st, datasets = "sales/daily")`, or `store_sync(st, all = TRUE)`
+for every dataset. Name the dataset: a plain `store_sync()` refreshes only
+the datasets a secondary already holds (see "Bringing secondaries up to
+date"), so it would not copy a new dataset whose first write missed that
+secondary.
+
 If a secondary fails during a write (a network error, say), the write goes
 on with the next location and reports the failed one as behind in the same
-way. Only a failure in the primary stops a write, and then no catalog of any
-location has changed.
+way, with the same hint. Only a failure in the primary stops a write, and
+then no catalog of any location has changed.
 
 ## A secondary that is behind
 
@@ -254,21 +268,52 @@ secondary up to date for that dataset, whatever version it held.
 ## Bringing secondaries up to date
 
 `store_sync()` copies datasets from one location, the *source*, to the
-others, the *targets*: by default from the primary, every dataset that is
-missing or differs, to every secondary. Like a write, it copies only the
-files a location lacks, checks each by MD5 and switches the catalog last.
-By default it never deletes a dataset. `dry_run = TRUE` shows what it would
-do and changes nothing.
+others, the *targets*: by default from the primary to every secondary.
+Like a write, it copies only the files a location lacks, checks each by
+MD5 and switches the catalog last. By default it never deletes a dataset.
+`dry_run = TRUE` shows what it would do and changes nothing.
+
+A plain `store_sync()` refreshes in each secondary only the datasets it
+already holds, at whatever version: a local copy that holds a few datasets
+of a large bucket stays small. It then says which datasets it did not copy
+to each secondary, and how many files and bytes a full sync would send
+there at most. Here both copies lack `sales/weekly`, and the second copy
+holds an old version of `sales/daily`:
 
 ```{r needs-sync-dry-run}
 store_sync(st, dry_run = TRUE)
 ```
 
-`datasets` and `to` limit it to some datasets or some secondaries. Here
-only the second copy is brought up to date:
+`to` limits the sync to some secondaries. Here only the second copy is
+brought up to date, for the dataset it holds:
 
 ```{r needs-sync-run}
 store_sync(st, to = copy_2)
+```
+
+`datasets` names the datasets to copy, whether a secondary holds them or
+not, and `all = TRUE` copies every dataset of the source:
+
+```{r needs-sync-datasets}
+store_sync(st, datasets = "sales/weekly", to = copy_2)
+```
+
+A sync to the primary, with `from` set to a secondary (see "Syncing from a
+secondary"), always sends every dataset there.
+
+A secondary that holds no dataset at all is announced when you connect,
+so that you can decide how much of the store to copy there:
+
+```{r needs-sync-empty}
+copy_3 <- file.path(root, "copy-3")
+st_new <- store_connect(primary, secondary = copy_3, create = TRUE)
+```
+
+A plain `store_sync(st_new)` would copy nothing there; `all = TRUE` fills
+it:
+
+```{r needs-sync-all}
+store_sync(st_new, all = TRUE)
 ```
 
 `store_copy()` copies one dataset between any two locations of the
@@ -296,6 +341,125 @@ store_delete(st, "sales/weekly", confirm = "sales/weekly")
 store_rebuild(st, copy_2)
 ```
 
+## Local working copies of a bucket
+
+With a bucket as primary, a local secondary is a **working copy**: it
+holds the datasets you read, so that later reads are fast and work
+without a network.
+
+```{r, eval = FALSE}
+st <- store_connect("gs://my-bucket/store", secondary = "~/data/my-store")
+x <- store_read(st, "sales/daily")
+```
+
+When the local folder lacks `sales/daily`, or holds an older version of
+it, `store_read()` first copies the current version of the whole dataset
+there, with its index table, and then reads from the copy. As in a sync,
+only the files the folder lacks are sent, each checked by its MD5, with a
+progress bar. The read says what it copied:
+
+```
+ℹ Copying "sales/daily" (version 3f9a1c0d2b4e5f60, 2 files, 41.2 kB) from 'gs://my-bucket/store' to '~/data/my-store' before reading.
+✔ 2/2 files sent to '~/data/my-store' (41.2 kB) in 0.8s, MD5 verified.
+ℹ Reading "sales/daily" from secondary ~/data/my-store.
+```
+
+The next read of `sales/daily` copies nothing and reads from the folder.
+After a new write on the bucket, the next read copies the new version,
+again sending only the files that changed. Filters, `columns` and
+`intersects` do not change this: the whole dataset is copied, and the
+filter is applied to the copy. With several local secondaries, each one
+gets the copy, and each file is downloaded once.
+
+When the folder holds the current version but another catalog entry of
+it (a raster whose legend or colours were written again for the same
+cells, say), the read updates only the entry and sends no file, whatever
+the limit below:
+
+```
+ℹ Updating the catalog entry of "sales/daily" in '~/data/my-store' to the primary's (version 3f9a1c0d2b4e5f60, no file sent).
+```
+
+A read copies only:
+
+- to secondaries that are local folders and can be reached, and only when
+  the primary is not local. Secondaries in buckets never get a copy from
+  a read, and with a local primary a read copies nothing;
+- the current version of a dataset;
+- when the bytes to download are at or under a limit: 2 GB by default,
+  set by `options(rcs.copy_on_read_max_bytes = )` in bytes.
+
+Above the limit nothing is copied. The read then fetches only what it
+needs from the bucket, and says how to copy:
+
+```
+ℹ "sales/daily" needs 3.4 GB, above the 2.0 GB limit for copying on read (`rcs.copy_on_read_max_bytes`). Reading from 'gs://my-bucket/store'.
+  Use `copy = TRUE`, or `store_sync(st, datasets = "sales/daily")`, to copy it.
+```
+
+`copy` controls one read, and `copy_on_read` the whole connection:
+
+```{r, eval = FALSE}
+# Copy whatever the size
+x <- store_read(st, "sales/daily", copy = TRUE)
+
+# Never copy, read from the bucket
+x <- store_read(st, "sales/daily", copy = FALSE)
+
+# Never copy on this connection, unless a read says copy = TRUE
+st <- store_connect("gs://my-bucket/store",
+  secondary = "~/data/my-store",
+  copy_on_read = FALSE
+)
+```
+
+With copying turned off, no message about copying is printed, and a local
+folder that already holds the current version is still read from.
+
+Earlier versions (`version = `) are not copied. When such a read comes
+from the bucket, it says so:
+
+```
+ℹ Read version 3f9a1c0d2b4e5f60 of "sales/daily" from 'gs://my-bucket/store'; old versions are not copied to secondary locations.
+  Use `copy = TRUE` to copy it.
+```
+
+With `copy = TRUE` the version is added to the history of the local
+secondaries that lack it; their current version of the dataset does not
+change.
+
+A local secondary whose version of a dataset was written later than the
+primary's (by a connection to that folder alone, say) is never replaced
+by a read. It is left as it is and not read from, and a line says so:
+
+```
+! '~/data/my-store' holds a newer version of "sales/daily"; it is not replaced. See `store_sync()`.
+```
+
+A copy that fails (a network error, say) gives a warning, and the read
+goes on from the bucket;
+the next read tries again. `store_sample()`, `store_glimpse()`,
+`store_open()` and `store_duckdb()` never copy: they read from the local
+folder when it already holds the current version, and from the bucket
+otherwise. Reading an index table never copies either.
+
+Copying on read and syncing work together. A working copy holds the
+datasets that were read, and a plain `store_sync()` refreshes exactly
+those (see "Bringing secondaries up to date"), so the copy stays small
+however large the bucket is. `datasets = ` copies some more, and
+`all = TRUE` makes the folder a full copy of the store.
+
+The stores of this vignette are local folders, primary included, so their
+reads copy nothing. A new, empty secondary is announced when you connect,
+and a read leaves it empty:
+
+```{r working-copy-local}
+copy_4 <- file.path(root, "copy-4")
+st_work <- store_connect(primary, secondary = copy_4, create = TRUE)
+x <- store_read(st_work, "sales/daily")
+store_status(st_work)[c("dataset", "status")]
+```
+
 ## Syncing from a secondary
 
 Work can also start on a secondary: on a laptop without network, say, a
@@ -311,11 +475,14 @@ store_write(offline, rcs_sim_table(80, seed = 4), "sales/monthly",
 
 Back on the full connection, `from` names the location to sync from. The
 targets are then every other location, the primary included; `to` limits
-them as before.
+them as before. The primary receives every dataset of the source, here
+the new `sales/monthly`. The second copy, a secondary, would only have its
+own datasets refreshed and would not get `sales/monthly`; `all = TRUE`
+sends it there too:
 
 ```{r}
 store_refresh(st)
-store_sync(st, from = copy_1)
+store_sync(st, from = copy_1, all = TRUE)
 st
 ```
 
@@ -421,7 +588,10 @@ store_create("gs://my-bucket/new-store")
 ```
 
 Data are streamed: a read with filters fetches only the files and blocks of
-rows it needs, without downloading whole datasets.
+rows it needs, without downloading whole datasets. The exception is a
+local secondary of a bucket: there `store_read()` first copies the whole
+dataset to the local folder, up to a size limit, and then reads from the
+copy (see "Local working copies of a bucket").
 
 ### Credentials
 

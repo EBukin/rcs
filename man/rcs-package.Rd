@@ -26,6 +26,7 @@ defaults.\tabular{lll}{
    \code{rcs.duckdb_batch_rows} \tab \code{5e5} \tab Rows per batch when writing from DuckDB. \cr
    \code{rcs.duckdb_stream} \tab \code{TRUE} \tab Write a partitioned lazy DuckDB table one partition at a time; \code{FALSE} copies the whole query first. \cr
    \code{rcs.s2_rebuild_tol} \tab \code{1e-3} \tab Relative area change accepted for a geometry repaired on the sphere. \cr
+   \code{rcs.copy_on_read_max_bytes} \tab \code{2e9} \tab Largest download, in bytes, that \code{\link[=store_read]{store_read()}} copies to a local secondary location before reading; above it the read comes from the primary. \cr
 }
 }
 

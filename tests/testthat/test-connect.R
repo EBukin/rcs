@@ -212,6 +212,31 @@ test_that("store_refresh() aborts when the primary cannot be reached", {
   expect_error(store_refresh(list()), class = "rcs_error_object")
 })
 
+test_that("store_connect() announces an empty secondary of a non-empty primary, once", {
+  # A-T11 (red; plan 0005, D-A6). Red: store_connect() prints no notice.
+  fx <- local_test_store(secondaries = 1L)
+  dir <- withr::local_tempdir()
+  empty <- file.path(dir, "empty")
+  suppressMessages(store_create(empty))
+  expect_message(
+    st <- store_connect(fx$primary, secondary = empty),
+    "Secondary .*empty.* is empty"
+  )
+  local_snapshot_output()
+  expect_snapshot(
+    again <- store_connect(fx$primary, secondary = empty),
+    transform = function(x) scrub_paths(dir)(scrub_paths(dirname(fx$primary))(x))
+  )
+
+  # Not repeated by store_refresh().
+  expect_no_message(store_refresh(st), message = "is empty")
+  # Not when the secondary holds a dataset, nor when the primary is empty too.
+  expect_no_message(store_connect(fx$primary, secondary = fx$secondary), message = "is empty")
+  other <- file.path(dir, "other")
+  suppressMessages(store_create(other))
+  expect_no_message(store_connect(other, secondary = empty), message = "is empty")
+})
+
 # Credentials ------------------------------------------------------------------
 
 # Fake bucket for connecting: every Arrow file system made for a credential is
@@ -321,6 +346,6 @@ test_that("auth = is checked", {
 })
 
 test_that("store_connect() and store_create() take auth", {
-  expect_identical(names(formals(store_connect)), c("primary", "secondary", "env", "history", "create", "auth"))
+  expect_identical(names(formals(store_connect)), c("primary", "secondary", "env", "history", "create", "auth", "copy_on_read"))
   expect_identical(names(formals(store_create)), c("location", "history", "auth"))
 })

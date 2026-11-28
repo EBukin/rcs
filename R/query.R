@@ -44,7 +44,8 @@
 #'   the cells as [rcs_h3] vectors.
 #'
 #' The query reads from the location chosen as for [store_read()], with the
-#' catalogs held by the connection.
+#' catalogs held by the connection. Unlike [store_read()], it never copies
+#' the dataset to a secondary location.
 #'
 #' @section Printing:
 #' Printing a query reads its first rows, and only those: `head(n + 1)` of

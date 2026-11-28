@@ -23,7 +23,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -558,7 +558,7 @@ and the file is opened without rcs:</p>
 <span>  mode <span class="op">=</span> <span class="st">"replace"</span></span>
 <span><span class="op">)</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Replacing <span style="color: #0000BB;">"sales/daily"</span>: 500 rows in 2 files (partition year).</span></span>
-<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/duckdb-store  2/2 files sent  38.3 kB  0.1s</span></span>
+<span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> primary  &lt;tempdir&gt;/duckdb-store  2/2 files sent  38.3 kB  0.2s</span></span>
 <span><span class="co">#&gt; <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span></span></code></pre></div>
 <div class="sourceCode" id="cb22"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">con</span> <span class="op">&lt;-</span> <span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbConnect.html" class="external-link">dbConnect</a></span><span class="op">(</span><span class="fu">duckdb</span><span class="fu">::</span><span class="fu"><a href="https://r.duckdb.org/reference/duckdb.html" class="external-link">duckdb</a></span><span class="op">(</span>dbdir <span class="op">=</span> <span class="va">db</span><span class="op">)</span>, bigint <span class="op">=</span> <span class="st">"integer64"</span><span class="op">)</span></span>
@@ -610,13 +610,15 @@ refreshes the views.</li>
 <span><span class="fu">DBI</span><span class="fu">::</span><span class="fu"><a href="https://dbi.r-dbi.org/reference/dbDisconnect.html" class="external-link">dbDisconnect</a></span><span class="op">(</span><span class="va">con</span>, shutdown <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <ol start="5" style="list-style-type: decimal">
 <li>When the work is ready to share, add a bucket as a secondary
-location and copy the store there with <code><a href="../reference/store_sync.html">store_sync()</a></code> (see
-<code><a href="../articles/locations.html">vignette("locations")</a></code>). Only then are cloud credentials
+location and copy the whole store there with
+<code>store_sync(all = TRUE)</code> (see
+<code><a href="../articles/locations.html">vignette("locations")</a></code>; a plain <code><a href="../reference/store_sync.html">store_sync()</a></code>
+copies nothing to an empty secondary). Only then are cloud credentials
 needed.</li>
 </ol>
 <div class="sourceCode" id="cb24"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">st</span> <span class="op">&lt;-</span> <span class="fu"><a href="../reference/store_connect.html">store_connect</a></span><span class="op">(</span><span class="va">path</span>, secondary <span class="op">=</span> <span class="st">"gs://my-bucket/store"</span>, create <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
-<span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu"><a href="../reference/store_sync.html">store_sync</a></span><span class="op">(</span><span class="va">st</span>, all <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></code></pre></div>
 <p>Afterwards every write reaches both locations, and reads, DuckDB
 views included, keep using the local copy.</p>
 </div>

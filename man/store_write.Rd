@@ -460,7 +460,9 @@ its catalog is switched, the call aborts and no catalog has changed;
 uploaded files are reused when the call is repeated (and removed by
 \code{\link[=store_prune]{store_prune()}} otherwise). If a secondary fails, the call warns,
 continues with the next location and reports the secondary as behind;
-\code{store_sync()} repairs it.
+\code{store_sync(st, datasets = "<name>")} repairs it, or
+\code{store_sync(st, all = TRUE)} for every dataset (a plain \code{store_sync()}
+refreshes only the datasets a secondary already holds).
 }
 
 \examples{

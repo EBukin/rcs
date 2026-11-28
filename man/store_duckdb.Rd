@@ -44,7 +44,8 @@ no data: DuckDB reads the Parquet files when a query runs, and only the
 columns and row groups the query needs. The file list comes from the
 catalog held by the connection \code{st}, so the views show the versions it
 knows: after \code{\link[=store_refresh]{store_refresh()}} call \code{store_duckdb()} again. One message
-names the views made.
+names the views made. Unlike \code{\link[=store_read]{store_read()}}, it never copies a dataset
+to a secondary location.
 }
 \details{
 The views are queried with SQL (\code{DBI::dbGetQuery()}), with dbplyr

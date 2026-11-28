@@ -23,6 +23,10 @@ first file, read from one row group. Opens one file. For a raster, the
 \code{terra::SpatRaster} is printed instead, with its categories and colours
 as \code{\link[=store_read]{store_read()}} returns them.
 }
+\details{
+Unlike \code{\link[=store_read]{store_read()}}, it never copies the dataset to a secondary
+location.
+}
 \examples{
 location <- file.path(tempdir(), "rcs-example-glimpse")
 st <- store_connect(location, create = TRUE)

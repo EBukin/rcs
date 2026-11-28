@@ -328,7 +328,9 @@
 #' uploaded files are reused when the call is repeated (and removed by
 #' [store_prune()] otherwise). If a secondary fails, the call warns,
 #' continues with the next location and reports the secondary as behind;
-#' `store_sync()` repairs it.
+#' `store_sync(st, datasets = "<name>")` repairs it, or
+#' `store_sync(st, all = TRUE)` for every dataset (a plain `store_sync()`
+#' refreshes only the datasets a secondary already holds).
 #'
 #' @param st A store connection made by [store_connect()]. It is updated in
 #'   place, so that it can be used for further writes without refreshing.
@@ -694,7 +696,7 @@ write_refresh <- function(st, call = caller_env()) {
       }
       cli::cli_warn(
         c("Cannot read the catalogs of the secondary location {.path {uri}}; it is skipped.",
-          i = "Run {.fn store_sync} once it can be reached."),
+          i = "Once it can be reached, run {.code store_sync(st, datasets = )}, or {.code store_sync(st, all = TRUE)} for every dataset."),
         class = "rcs_warning_secondary_behind", parent = fresh
       )
       failed[[uri]] <- first_line(conditionMessage(fresh))
@@ -1896,7 +1898,7 @@ land_secondary <- function(st, location, sets, drops, keep_history, ctx, replace
     cli::cli_warn(
       c(
         "Writing {.val {dataset}} to the secondary location {.path {uri}} failed; it is behind.",
-        i = "Run {.fn store_sync} to bring it up to date."
+        i = "Run {.code store_sync(st, datasets = \"{dataset}\")} to bring it up to date, or {.code store_sync(st, all = TRUE)} for every dataset."
       ),
       class = "rcs_warning_secondary_behind", parent = result
     )
@@ -2001,7 +2003,8 @@ write_footer <- function(out, src) {
   }
   if (nrow(behind) > 0) {
     n <- nrow(behind)
-    rcs_inform(c("!" = "{n} secondary location{?s} {?is/are} behind; run {.fn store_sync} to bring {?it/them} up to date."))
+    name <- src$entry$dataset
+    rcs_inform(c("!" = "{n} secondary location{?s} {?is/are} behind; run {.code store_sync(st, datasets = \"{name}\")} to bring {cli::qty(n)}{?it/them} up to date, or {.code store_sync(st, all = TRUE)} for every dataset."))
   }
   invisible()
 }

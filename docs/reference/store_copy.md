@@ -41,8 +41,10 @@ A one-row tibble, invisibly: `dataset`, `from`, `to`, `version`,
 Copying into the primary changes the store's current version of the
 dataset;
 [`store_sync()`](https://ebukin.github.io/rcs/reference/store_sync.md)
-then brings the other secondaries to it. Files of the version the target
-replaces are deleted when the dataset keeps no history, as in
+then brings the other secondaries that hold it to that version
+(`datasets = ` or `all = TRUE` also copies it to those that do not).
+Files of the version the target replaces are deleted when the dataset
+keeps no history, as in
 [`store_write()`](https://ebukin.github.io/rcs/reference/store_write.md).
 
 ## See also
@@ -68,6 +70,10 @@ store_write(st, rcs_sim_table(100, seed = 1), "sales/daily",
 st <- store_connect(file.path(root, "primary"),
   secondary = file.path(root, "copy")
 )
+#> ℹ Secondary /tmp/Rtmp/rcs-example-copy/copy is
+#>   empty.
+#>   Use `store_sync(st, all = TRUE)` to copy every dataset, or `store_sync(st,
+#>   datasets = )` to copy some.
 store_copy(st, "sales/daily",
   from = file.path(root, "primary"), to = file.path(root, "copy")
 )

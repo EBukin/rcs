@@ -25,7 +25,7 @@ store_open(), filter(), select() and collect() in one call."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -179,7 +179,8 @@ and drops the row identifier <code>.rcs_id</code> that the package adds to
 geospatial data; the columns <code>h3</code>, <code>bbox</code> and <code>h3_p&lt;r&gt;</code> are returned,
 the cells as <a href="rcs_h3.html">rcs_h3</a> vectors.</p></li>
 </ul><p>The query reads from the location chosen as for <code><a href="store_read.html">store_read()</a></code>, with the
-catalogs held by the connection.</p>
+catalogs held by the connection. Unlike <code><a href="store_read.html">store_read()</a></code>, it never copies
+the dataset to a secondary location.</p>
     </div>
     <div class="section level2">
     <h2 id="printing">Printing<a class="anchor" aria-label="anchor" href="#printing"></a></h2>
@@ -222,7 +223,7 @@ and reminds that <code>collect()</code> reads the rows into R. A table opened wi
 <span class="r-in"><span><span class="op">)</span></span></span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BBBB;">ℹ</span> Writing <span style="color: #0000BB;">"sales/daily"</span>: 500 rows in 2 files (partition year).</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary  /tmp/Rtmp/rcs-example-open  2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.1s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  38.3 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 1 location. Catalogs updated.</span>
 <span class="r-in"><span><span class="va">q</span> <span class="op">&lt;-</span> <span class="fu">store_open</span><span class="op">(</span><span class="va">st</span>, <span class="st">"daily"</span><span class="op">)</span></span></span>
 <span class="r-in"><span><span class="va">q</span></span></span>

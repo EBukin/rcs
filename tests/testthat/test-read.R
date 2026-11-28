@@ -167,6 +167,7 @@ test_that("a read served by a local secondary makes no call to the primary", {
   primary <- st$primary
   primary$backend$type <- "gcs"
   st$primary <- primary
+  st$copy_on_read <- FALSE
   withr::local_options(rcs.trace = TRUE)
   expect_snapshot(
     got <- store_read(st, "sales/daily", year == 2024),

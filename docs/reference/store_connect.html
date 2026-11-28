@@ -11,7 +11,7 @@ script, or the environment of the session, decides which locations it has."></he
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -75,7 +75,8 @@ script, or the environment of the session, decides which locations it has.</p>
 <span>  env <span class="op">=</span> <span class="st">"STORE"</span>,</span>
 <span>  history <span class="op">=</span> <span class="cn">NULL</span>,</span>
 <span>  create <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  auth <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  auth <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  copy_on_read <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -117,6 +118,16 @@ string is the path of a key file; a list named by address (as given in
 the call) gives each location any of these, and locations left out use
 the default.</p></dd>
 
+
+<dt id="arg-copy-on-read">copy_on_read<a class="anchor" aria-label="anchor" href="#arg-copy-on-read"></a></dt>
+<dd><p><code>TRUE</code> (the default) lets <code><a href="store_read.html">store_read()</a></code> copy the
+current version of a dataset from a primary that is not local (a
+bucket) to the local secondaries before reading it, when it is at or
+under the size limit (see "Copy to secondary locations" in
+<code><a href="store_read.html">store_read()</a></code>). <code>FALSE</code> turns this off for the connection: reads
+neither copy nor say how to copy, unless called with <code>copy = TRUE</code>.
+<code><a href="store_refresh.html">store_refresh()</a></code> keeps the setting.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
@@ -138,6 +149,10 @@ again.</p></li>
 <li><p>A location without catalogs aborts, unless <code>create = TRUE</code>, which
 initialises it with empty catalogs (as <code><a href="store_create.html">store_create()</a></code> does, with the
 store's history default off).</p></li>
+<li><p>An available secondary that holds no dataset while the primary holds
+some prints a notice that it is empty, with the <code><a href="store_sync.html">store_sync()</a></code> calls
+that fill it (<code>all = TRUE</code> for every dataset, <code>datasets = </code> for some).
+<code><a href="store_refresh.html">store_refresh()</a></code> does not repeat it.</p></li>
 </ul><p>The object has reference semantics: functions that change a location
 update it in place, so the same object serves several writes in a row.
 Read functions use the catalogs held by the object; call <code><a href="store_refresh.html">store_refresh()</a></code>
@@ -169,7 +184,7 @@ to see what other sessions wrote since.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 13:56</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 18:51</span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># The same, with the address in the environment</span></span></span>
 <span class="r-in"><span><span class="fu">withr</span><span class="fu">::</span><span class="fu"><a href="https://withr.r-lib.org/reference/with_envvar.html" class="external-link">with_envvar</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span>STORE_PRIMARY <span class="op">=</span> <span class="va">primary</span><span class="op">)</span>, <span class="fu">store_connect</span><span class="op">(</span><span class="op">)</span><span class="op">)</span></span></span>
@@ -180,7 +195,7 @@ to see what other sessions wrote since.</p>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Datasets: 1</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   name     kind   rows     size  files  updated</span>
 <span class="r-out co"><span class="r-pr">#&gt;</span>   sales/</span>
-<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 13:56</span>
+<span class="r-out co"><span class="r-pr">#&gt;</span>     daily  table   100  23.8 kB      2  2026-11-27 18:51</span>
 <span class="r-in"><span><span class="fu"><a href="https://rdrr.io/r/base/unlink.html" class="external-link">unlink</a></span><span class="op">(</span><span class="va">primary</span>, recursive <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span></span>
 </code></pre></div>
     </div>

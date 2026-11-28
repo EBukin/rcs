@@ -15,7 +15,7 @@ store_refresh() first to compare what is stored now."></head><body>
 
     <a class="navbar-brand me-2" href="../index.html">rcs</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9006</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Released version">0.0.0.9007</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -122,8 +122,10 @@ A hint only: the clocks of the machines that wrote may differ;</p></li>
 <li><p><code>primary_updated</code>, <code>location_updated</code>: the times of the last writes,
 <code>primary_updated</code> in the source.</p></li>
 </ul><p>The attribute <code>source</code> holds the address of the source. Zero rows when
-the connection has no other location. <code><a href="store_sync.html">store_sync()</a></code> brings missing
-and differing datasets up to date.</p>
+the connection has no other location. <code><a href="store_sync.html">store_sync()</a></code> brings differing
+datasets up to date in the secondaries that hold them;
+<code>store_sync(st, datasets = "&lt;name&gt;")</code> or <code>store_sync(st, all = TRUE)</code>
+also copies missing ones.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -153,7 +155,7 @@ of the column are the full addresses.</p>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> primary    /tmp/Rtmp/rcs-example-status/primary  2/2</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.8 kB  0.2s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> secondary  /tmp/Rtmp/rcs-example-status/copy     2/2</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.8 kB  0.2s</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span>   files sent  23.8 kB  0.1s</span>
 <span class="r-msg co"><span class="r-pr">#&gt;</span> <span style="color: #00BB00;">✔</span> MD5 identical for 2 files in 2 locations. Catalogs updated.</span>
 <span class="r-in"><span><span class="fu">store_status</span><span class="op">(</span><span class="va">st</span><span class="op">)</span></span></span>
 <span class="r-out co"><span class="r-pr">#&gt;</span> Source: /tmp/Rtmp/rcs-example-status/primary</span>

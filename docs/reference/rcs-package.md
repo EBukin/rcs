@@ -23,6 +23,7 @@ the defaults.
 | `rcs.duckdb_batch_rows` | `5e5` | Rows per batch when writing from DuckDB. |
 | `rcs.duckdb_stream` | `TRUE` | Write a partitioned lazy DuckDB table one partition at a time; `FALSE` copies the whole query first. |
 | `rcs.s2_rebuild_tol` | `1e-3` | Relative area change accepted for a geometry repaired on the sphere. |
+| `rcs.copy_on_read_max_bytes` | `2e9` | Largest download, in bytes, that [`store_read()`](https://ebukin.github.io/rcs/reference/store_read.md) copies to a local secondary location before reading; above it the read comes from the primary. |
 
 ## See also
 
